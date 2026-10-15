@@ -28,11 +28,15 @@ export default async function Overview(props: PageProps<"/o/[slug]">) {
         <ul className="card divide-y divide-line-soft">
           {alerts.map((a) => (
             <li key={a.id}>
-              <Link href={`/o/${slug}/devices/${a.device_id}`} className="flex items-center gap-3 px-5 py-3 hover:bg-steel/40">
-                <StatusDot status={a.level === "alarm" ? "alarm" : "warn"} pulse />
-                <span className="w-28 shrink-0 text-sm text-mist">{(a.devices as unknown as { name: string })?.name}</span>
-                <span className="flex-1 text-sm">{alertMessage(a.code, a.params, locale)}</span>
-                <span className="text-xs text-dim">{timeAgo(a.ts, locale, t)}</span>
+              <Link href={`/o/${slug}/devices/${a.device_id}`} className="flex items-start gap-3 px-5 py-3 hover:bg-steel/40 sm:items-center">
+                <span className="mt-1.5 sm:mt-0">
+                  <StatusDot status={a.level === "alarm" ? "alarm" : "warn"} pulse />
+                </span>
+                <span className="flex flex-1 flex-col gap-0.5 sm:flex-row sm:items-center sm:gap-3">
+                  <span className="text-sm text-mist sm:w-28 sm:shrink-0">{(a.devices as unknown as { name: string })?.name}</span>
+                  <span className="flex-1 text-sm">{alertMessage(a.code, a.params, locale)}</span>
+                  <span className="text-xs text-dim">{timeAgo(a.ts, locale, t)}</span>
+                </span>
               </Link>
             </li>
           ))}

@@ -50,10 +50,10 @@ export default async function Settings(props: PageProps<"/o/[slug]/settings">) {
                     return (
                       <tr key={d.id} className="hover:bg-steel/40">
                         <td className="px-4 py-3">
-                          <Link href={`/o/${slug}/devices/${d.id}#settings`} className="font-medium text-ice hover:underline">
+                          <Link href={`/o/${slug}/devices/${d.id}#settings`} className="whitespace-nowrap font-medium text-ice hover:underline">
                             {d.name}
                           </Link>
-                          <div className="text-xs text-dim">{(d.zones as unknown as { name: string } | null)?.name ?? t.unassigned}</div>
+                          <div className="whitespace-nowrap text-xs text-dim">{(d.zones as unknown as { name: string } | null)?.name ?? t.unassigned}</div>
                         </td>
                         {mod.settings.map((s) => (
                           <td key={s.key} className="num px-3 py-3 text-mist">

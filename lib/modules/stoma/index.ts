@@ -107,21 +107,22 @@ const SETTINGS: SettingDef[] = [
 ];
 
 const TEXTS: Record<string, Record<Locale, (p: Record<string, number | string>) => string>> = {
+  // near = 1: still inside the limits but within the early-warning margin
   temp_high: {
-    en: (p) => `Air temperature ${p.value} °C, above ${p.limit} °C`,
-    it: (p) => `Temperatura dell'aria ${p.value} °C, sopra ${p.limit} °C`,
+    en: (p) => `Air temperature ${p.value} °C, ${p.near ? "close to the maximum of" : "above"} ${p.limit} °C`,
+    it: (p) => `Temperatura dell'aria ${p.value} °C, ${p.near ? "vicina alla massima di" : "sopra"} ${p.limit} °C`,
   },
   temp_low: {
-    en: (p) => `Air temperature ${p.value} °C, below ${p.limit} °C`,
-    it: (p) => `Temperatura dell'aria ${p.value} °C, sotto ${p.limit} °C`,
+    en: (p) => `Air temperature ${p.value} °C, ${p.near ? "close to the minimum of" : "below"} ${p.limit} °C`,
+    it: (p) => `Temperatura dell'aria ${p.value} °C, ${p.near ? "vicina alla minima di" : "sotto"} ${p.limit} °C`,
   },
   rh_high: {
-    en: (p) => `Humidity ${p.value} %, above ${p.limit} %`,
-    it: (p) => `Umidità ${p.value} %, sopra ${p.limit} %`,
+    en: (p) => `Humidity ${p.value} %, ${p.near ? "close to the maximum of" : "above"} ${p.limit} %`,
+    it: (p) => `Umidità ${p.value} %, ${p.near ? "vicina alla massima di" : "sopra"} ${p.limit} %`,
   },
   rh_low: {
-    en: (p) => `Humidity ${p.value} %, below ${p.limit} %`,
-    it: (p) => `Umidità ${p.value} %, sotto ${p.limit} %`,
+    en: (p) => `Humidity ${p.value} %, ${p.near ? "close to the minimum of" : "below"} ${p.limit} %`,
+    it: (p) => `Umidità ${p.value} %, ${p.near ? "vicina alla minima di" : "sotto"} ${p.limit} %`,
   },
   condensation: {
     en: (p) => `Leaves ${p.margin} °C from the dew point: condensation, disease risk (botrytis, mildew)`,
@@ -206,7 +207,7 @@ export const stoma: ModuleDef<StomaConfig> = {
       alerts.push({
         level: tBand === 2 ? "alarm" : "warn",
         code: high ? "temp_high" : "temp_low",
-        params: { value: t.toFixed(1), limit: high ? cfg.tMax : cfg.tMin },
+        params: { value: t.toFixed(1), limit: high ? cfg.tMax : cfg.tMin, near: tBand === 1 ? 1 : 0 },
       });
     }
     if (!irrigating) {
@@ -216,7 +217,7 @@ export const stoma: ModuleDef<StomaConfig> = {
         alerts.push({
           level: rhBand === 2 ? "alarm" : "warn",
           code: high ? "rh_high" : "rh_low",
-          params: { value: rh.toFixed(0), limit: high ? cfg.rhMax : cfg.rhMin },
+          params: { value: rh.toFixed(0), limit: high ? cfg.rhMax : cfg.rhMin, near: rhBand === 1 ? 1 : 0 },
         });
       }
       if (margin !== null && margin <= cfg.leafDewWarn)
