@@ -28,7 +28,31 @@ export default async function Settings(props: PageProps<"/o/[slug]/settings">) {
             <SectionTitle>
               {mod.name} · {t.alarmSettings}
             </SectionTitle>
-            <div className="card overflow-x-auto">
+            {/* phones: one card per sensor */}
+            <div className="grid gap-3 md:hidden">
+              {list.map((d) => {
+                const cfg = { ...base, ...((d.config ?? {}) as Record<string, number>) };
+                return (
+                  <Link key={d.id} href={`/o/${slug}/devices/${d.id}#settings`} className="card block p-4 active:bg-steel/40">
+                    <div className="flex items-baseline justify-between gap-3">
+                      <span className="font-medium text-ice">{d.name}</span>
+                      <span className="text-xs text-dim">{(d.zones as unknown as { name: string } | null)?.name ?? t.unassigned}</span>
+                    </div>
+                    <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
+                      {mod.settings.map((s) => (
+                        <div key={s.key} className="flex flex-col">
+                          <dt className="truncate text-dim">{s.label[locale]}</dt>
+                          <dd className={`num ${cfg[s.key] !== base[s.key] || (d.config as Record<string, number> | null)?.[s.key] !== undefined ? "text-frost" : "text-mist"}`}>
+                            {Math.round((cfg[s.key] / (s.scale ?? 1)) * 100) / 100} {s.unit}
+                          </dd>
+                        </div>
+                      ))}
+                    </dl>
+                  </Link>
+                );
+              })}
+            </div>
+            <div className="card hidden overflow-x-auto md:block">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="text-left text-xs text-dim">

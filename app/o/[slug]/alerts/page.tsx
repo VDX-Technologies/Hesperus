@@ -25,16 +25,21 @@ export default async function Alerts(props: PageProps<"/o/[slug]/alerts">) {
   const open = (data ?? []).filter((a) => !a.resolved_at);
   const closed = (data ?? []).filter((a) => a.resolved_at);
   const Row = ({ a }: { a: (typeof open)[number] }) => (
-    <li className="flex flex-wrap items-center gap-3 px-5 py-3">
-      <StatusDot status={a.resolved_at ? "offline" : a.level === "alarm" ? "alarm" : "warn"} />
-      <span className="w-28 shrink-0 text-sm text-mist">{(a.devices as unknown as { name: string })?.name}</span>
-      <span className="min-w-60 flex-1 text-sm">{alertMessage(a.code, a.params, locale)}</span>
-      <span className="text-xs text-dim">
-        {new Date(a.ts).toLocaleString(locale, { dateStyle: "short", timeStyle: "short" })}
-        {a.resolved_at && ` → ${t.resolved} ${timeAgo(a.resolved_at, locale, t)}`}
+    <li className="flex items-start gap-3 px-4 py-3 sm:items-center sm:px-5">
+      <span className="mt-1.5 flex sm:mt-0">
+        <StatusDot status={a.resolved_at ? "offline" : a.level === "alarm" ? "alarm" : "warn"} />
       </span>
+      {/* stacked on phones, one line on wider screens */}
+      <div className="flex min-w-0 flex-1 flex-col gap-0.5 sm:flex-row sm:items-center sm:gap-3">
+        <span className="text-sm text-mist sm:w-28 sm:shrink-0">{(a.devices as unknown as { name: string })?.name}</span>
+        <span className="text-sm sm:flex-1">{alertMessage(a.code, a.params, locale)}</span>
+        <span className="text-xs text-dim">
+          {new Date(a.ts).toLocaleString(locale, { dateStyle: "short", timeStyle: "short" })}
+          {a.resolved_at && ` → ${t.resolved} ${timeAgo(a.resolved_at, locale, t)}`}
+        </span>
+      </div>
       {!a.resolved_at && role !== "viewer" && (
-        <form action={resolveAlert}>
+        <form action={resolveAlert} className="shrink-0">
           <input type="hidden" name="id" value={a.id} />
           <input type="hidden" name="slug" value={slug} />
           <button className="btn text-xs">{t.resolve}</button>

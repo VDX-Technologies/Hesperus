@@ -61,6 +61,8 @@ export interface ModuleDef<Config = Record<string, unknown>> {
   metrics: MetricDef[];
   defaultConfig: Config;
   settings: SettingDef[];
+  /** Typical settings for common crops, offered as one-click starting points in the settings form. */
+  presets?: { id: string; name: Text; config: Partial<Config> }[];
   /** Error message key if a combination of settings makes no sense, else null. */
   validate?(config: Config): string | null;
   /** Settings to push down to the device (e.g. so the status ring uses the same thresholds). */
