@@ -38,6 +38,10 @@
     background: #fff;
     color: var(--color-ink-950);
   }
+  a,
+  button {
+    transition: color 150ms, background-color 150ms, border-color 150ms, opacity 150ms;
+  }
   :focus-visible {
     outline: 2px solid var(--color-ice);
     outline-offset: 2px;
@@ -105,7 +109,67 @@
   border-radius: 8px;
   padding: 7px 12px;
   font-size: 14px;
+  transition: border-color 150ms, background-color 150ms, transform 100ms;
   &:hover {
     border-color: var(--color-mist);
   }
+  &:active {
+    transform: scale(0.97);
+  }
+}
+
+/* Top progress bar (components/nav-progress.tsx) */
+.nav-progress {
+  position: fixed;
+  inset: 0 0 auto 0;
+  z-index: 50;
+  height: 2px;
+  pointer-events: none;
+  background: linear-gradient(90deg, transparent, var(--color-ice), transparent);
+  background-size: 50% 100%;
+  background-repeat: no-repeat;
+  opacity: 0;
+  transition: opacity 200ms;
+}
+.nav-progress.is-active {
+  opacity: 1;
+  transition-delay: 80ms;
+  animation: nav-progress 1s ease-in-out infinite;
+}
+@keyframes nav-progress {
+  from { background-position: -50% 0; }
+  to { background-position: 150% 0; }
+}
+
+/* Button that submitted a form, until the action finishes */
+[data-busy] {
+  position: relative;
+  pointer-events: none;
+  color: transparent !important;
+}
+[data-busy]::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: 14px;
+  height: 14px;
+  border-radius: 9999px;
+  border: 2px solid var(--color-mist);
+  border-top-color: transparent;
+  animation: spin 0.7s linear infinite;
+}
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Pages fade in instead of popping */
+.page-in {
+  animation: page-in 220ms ease-out both;
+}
+@keyframes page-in {
+  from { opacity: 0; transform: translateY(4px); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .page-in, .nav-progress.is-active { animation: none; }
 }

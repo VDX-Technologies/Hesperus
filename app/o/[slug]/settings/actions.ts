@@ -5,12 +5,13 @@ import { requireOrg } from "@/lib/auth";
 import { getPool } from "@/lib/engine/db";
 import { upsertRules } from "@/lib/engine/rules";
 import { getPackageDef } from "@/lib/packages/ui";
+import { safePath } from "@/lib/safe-path";
 import { parseSettings } from "@/lib/settings";
 
 /** Company-wide thresholds of one module (owner or VDX), applied as the module's engine rules. */
 export async function saveOrgSettings(formData: FormData) {
   const slug = String(formData.get("slug"));
-  const back = String(formData.get("back"));
+  const back = safePath(formData.get("back"));
   const mod = getPackageDef(String(formData.get("module")));
   const { supabase, org, role } = await requireOrg(slug);
   if (!mod || role !== "owner") redirect(`${back}?error=readOnly`);
@@ -27,7 +28,7 @@ export async function saveOrgSettings(formData: FormData) {
 /** Thresholds of one object (each has its own complete set), applied as its rule overrides. */
 export async function saveDeviceSettings(formData: FormData) {
   const slug = String(formData.get("slug"));
-  const back = String(formData.get("back"));
+  const back = safePath(formData.get("back"));
   const id = String(formData.get("device"));
   const { org, role, modules } = await requireOrg(slug);
   if (role !== "owner") redirect(`${back}?error=readOnly`);

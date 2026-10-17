@@ -148,4 +148,15 @@ describe("metric partitions", () => {
     await db.query(`update engine_settings set value = '5' where key = 'metrics.partitions_ahead_days'`);
     expect((await db.query(`select ensure_metric_partitions()`)).rows[0].ensure_metric_partitions).toBe(2);
   });
+
+  it("locks every partition: RLS on, no grants to API roles", async () => {
+    const { rows } = await db.query(`
+      select c.relname, c.relrowsecurity,
+             has_table_privilege('anon', c.oid, 'select') anon,
+             has_table_privilege('authenticated', c.oid, 'select') auth
+      from pg_inherits i join pg_class c on c.oid = i.inhrelid
+      where i.inhparent = 'public.metrics'::regclass`);
+    expect(rows.length).toBeGreaterThan(1);
+    for (const r of rows) expect([r.relname, r.relrowsecurity, r.anon, r.auth]).toEqual([r.relname, true, false, false]);
+  });
 });

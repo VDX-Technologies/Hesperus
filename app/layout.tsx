@@ -1,6 +1,8 @@
 import type { Metadata, Viewport } from "next";
 import { Archivo, IBM_Plex_Mono } from "next/font/google";
+import { Suspense } from "react";
 import { getLocale } from "@/lib/i18n";
+import { NavProgress } from "@/components/nav-progress";
 import "./globals.css";
 
 const archivo = Archivo({ variable: "--font-archivo", subsets: ["latin"], display: "swap" });
@@ -17,7 +19,12 @@ export const viewport: Viewport = { themeColor: "#050608", viewportFit: "cover" 
 export default async function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang={await getLocale()} className={`${archivo.variable} ${plexMono.variable}`}>
-      <body className="min-h-screen">{children}</body>
+      <body className="min-h-screen">
+        <Suspense>
+          <NavProgress />
+        </Suspense>
+        {children}
+      </body>
     </html>
   );
 }

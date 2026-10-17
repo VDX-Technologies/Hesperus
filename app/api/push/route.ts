@@ -10,6 +10,8 @@ import { ValidationError } from "@/lib/engine/package";
 import { sourceByToken } from "@/lib/engine/sources";
 import { getPackage } from "@/lib/packages";
 
+const MAX_BODY = 4_000_000; // Vercel caps function bodies at 4.5 MB anyway
+
 export async function POST(request: Request) {
   const auth = request.headers.get("authorization");
   const token = auth?.startsWith("Bearer ") ? auth.slice(7) : null;
@@ -23,9 +25,12 @@ export async function POST(request: Request) {
   const pkg = getPackage(source.module);
   if (!pkg) return Response.json({ error: `module "${source.module}" is not installed` }, { status: 500 });
 
+  if (Number(request.headers.get("content-length") ?? 0) > MAX_BODY) return Response.json({ error: "body too large" }, { status: 413 });
   let body: unknown;
   try {
-    body = await request.json();
+    const text = await request.text();
+    if (text.length > MAX_BODY) return Response.json({ error: "body too large" }, { status: 413 });
+    body = JSON.parse(text);
   } catch {
     return Response.json({ error: "invalid JSON" }, { status: 400 });
   }
