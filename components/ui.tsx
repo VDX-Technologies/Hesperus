@@ -1,4 +1,4 @@
-import type { Status } from "@/lib/modules/types";
+import type { Status } from "@/lib/packages/types";
 import type { Dict } from "@/lib/i18n";
 
 const COLOR: Record<Status, string> = {

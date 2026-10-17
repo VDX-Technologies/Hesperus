@@ -2,7 +2,9 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { requireOrg } from "@/lib/auth";
 import { getT } from "@/lib/i18n";
-import { getModule } from "@/lib/modules";
+import { getPool } from "@/lib/engine/db";
+import { listObjects } from "@/lib/packages/console";
+import { getPackageDef } from "@/lib/packages/ui";
 import { hasUi, MODULE_UI } from "@/components/modules/registry";
 import { SettingsForm } from "@/components/settings-form";
 import { Flash } from "@/components/flash";
@@ -12,17 +14,20 @@ import { saveDeviceSettings } from "../../settings/actions";
 export default async function DevicePage(props: PageProps<"/o/[slug]/devices/[id]">) {
   const { slug, id } = await props.params;
   const { range, saved, error } = await props.searchParams;
-  const { supabase, org, modules, role } = await requireOrg(slug);
+  const { org, modules, role } = await requireOrg(slug);
   const { t, locale } = await getT();
-  const { data: device } = await supabase
-    .from("devices")
-    .select("id, name, serial, module, config, last_seen, last_status, last_values")
-    .eq("org_id", org.id)
-    .eq("id", id)
-    .maybeSingle();
-  if (!device || !hasUi(device.module)) notFound();
-  const { Device } = MODULE_UI[device.module];
-  const mod = getModule(device.module)!;
+  if (!/^[0-9a-f-]{36}$/i.test(id)) notFound();
+  const db = getPool();
+  const { rows } = await db.query<{ module: string }>(
+    `select t.module from objects o join object_types t on t.id = o.type_id where o.tenant_id = $1 and o.id = $2`,
+    [org.id, id],
+  );
+  const pkg = rows[0]?.module;
+  const mod = pkg ? getPackageDef(pkg) : undefined;
+  if (!pkg || !mod || !hasUi(pkg)) notFound();
+  const [device] = await listObjects(db, org.id, pkg, id);
+  if (!device) notFound();
+  const { Device } = MODULE_UI[pkg];
   const orgCfg = (modules.find((m) => m.module === mod.id)?.config ?? {}) as Record<string, number>;
   const back = `/o/${slug}/devices/${id}`;
   return (
@@ -32,7 +37,7 @@ export default async function DevicePage(props: PageProps<"/o/[slug]/devices/[id
       </Link>
       <div className="mt-4">
         <Device
-          supabase={supabase}
+          orgId={org.id}
           device={device}
           range={range === "7d" ? "7d" : "24h"}
           baseHref={`/o/${slug}/devices/${id}`}
@@ -49,8 +54,8 @@ export default async function DevicePage(props: PageProps<"/o/[slug]/devices/[id
             mod={mod}
             action={saveDeviceSettings}
             hidden={{ slug, device: id, back }}
-            values={(device.config ?? {}) as Record<string, number>}
-            inherited={{ ...(mod.defaultConfig as Record<string, number>), ...orgCfg }}
+            values={(device.properties.config ?? {}) as Record<string, number>}
+            inherited={{ ...(mod.defaults as Record<string, number>), ...orgCfg }}
             editable={role === "owner"}
             allowEmpty={false}
             t={t}

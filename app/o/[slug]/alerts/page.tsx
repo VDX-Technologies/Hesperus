@@ -1,45 +1,45 @@
 import { revalidatePath } from "next/cache";
 import { requireOrg } from "@/lib/auth";
 import { getT, timeAgo } from "@/lib/i18n";
-import { alertMessage } from "@/lib/modules";
+import { getPool } from "@/lib/engine/db";
+import { listAlerts, type ConsoleAlert } from "@/lib/packages/console";
 import { SectionTitle, StatusDot } from "@/components/ui";
 
-async function resolveAlert(formData: FormData) {
+/** Acknowledging only marks the alert as seen; the engine resolves it when the value recovers. */
+async function ackAlert(formData: FormData) {
   "use server";
   const slug = String(formData.get("slug"));
   const { supabase } = await requireOrg(slug);
-  await supabase.from("alerts").update({ resolved_at: new Date().toISOString() }).eq("id", Number(formData.get("id")));
-  revalidatePath(`/o/${slug}/alerts`);
+  await supabase.rpc("ack_alert", { alert_id: Number(formData.get("id")) });
+  revalidatePath(`/o/${slug}`, "layout");
 }
 
 export default async function Alerts(props: PageProps<"/o/[slug]/alerts">) {
   const { slug } = await props.params;
-  const { supabase, org, role } = await requireOrg(slug);
+  const { org, role } = await requireOrg(slug);
   const { t, locale } = await getT();
-  const { data } = await supabase
-    .from("alerts")
-    .select("id, ts, level, code, params, resolved_at, devices(name)")
-    .eq("org_id", org.id)
-    .order("ts", { ascending: false })
-    .limit(200);
-  const open = (data ?? []).filter((a) => !a.resolved_at);
-  const closed = (data ?? []).filter((a) => a.resolved_at);
-  const Row = ({ a }: { a: (typeof open)[number] }) => (
+  const db = getPool();
+  const [open, closed] = await Promise.all([
+    listAlerts(db, org.id, locale, { limit: 200 }),
+    listAlerts(db, org.id, locale, { history: true, limit: 200 }),
+  ]);
+  const Row = ({ a }: { a: ConsoleAlert }) => (
     <li className="flex items-start gap-3 px-4 py-3 sm:items-center sm:px-5">
       <span className="mt-1.5 flex sm:mt-0">
-        <StatusDot status={a.resolved_at ? "offline" : a.level === "alarm" ? "alarm" : "warn"} />
+        <StatusDot status={a.status === "resolved" ? "offline" : a.severity === "alarm" ? "alarm" : "warn"} pulse={a.status === "open"} />
       </span>
       {/* stacked on phones, one line on wider screens */}
       <div className="flex min-w-0 flex-1 flex-col gap-0.5 sm:flex-row sm:items-center sm:gap-3">
-        <span className="text-sm text-mist sm:w-28 sm:shrink-0">{(a.devices as unknown as { name: string })?.name}</span>
-        <span className="text-sm sm:flex-1">{alertMessage(a.code, a.params, locale)}</span>
+        <span className="text-sm text-mist sm:w-28 sm:shrink-0">{a.object}</span>
+        <span className="text-sm sm:flex-1">{a.text}</span>
         <span className="text-xs text-dim">
-          {new Date(a.ts).toLocaleString(locale, { dateStyle: "short", timeStyle: "short" })}
-          {a.resolved_at && ` → ${t.resolved} ${timeAgo(a.resolved_at, locale, t)}`}
+          {new Date(a.openedAt).toLocaleString(locale, { dateStyle: "short", timeStyle: "short" })}
+          {a.resolvedAt && ` → ${t.resolved} ${timeAgo(a.resolvedAt, locale, t)}`}
+          {a.status === "acknowledged" && ` · ${t.acknowledged}`}
         </span>
       </div>
-      {!a.resolved_at && role !== "viewer" && (
-        <form action={resolveAlert} className="shrink-0">
+      {a.status === "open" && role !== "viewer" && (
+        <form action={ackAlert} className="shrink-0">
           <input type="hidden" name="id" value={a.id} />
           <input type="hidden" name="slug" value={slug} />
           <button className="btn text-xs">{t.resolve}</button>

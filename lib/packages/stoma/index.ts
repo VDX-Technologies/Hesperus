@@ -1,14 +1,13 @@
 // Stoma as a module package: greenhouse climate nodes behind a LoRa gateway.
-// normalize() turns one gateway payload into node metrics (the physics is shared with the
-// legacy module); step() carries the counters that need hours of history (leaf wetness,
+// normalize() turns one gateway payload into node metrics (the physics lives in
+// model.ts); step() carries the counters that need hours of history (leaf wetness,
 // botrytis and mildew risk, irrigation pauses) in the node's package state. Alarms are plain
 // engine rules over these metrics, built from the customer's thresholds by rulesFromConfig().
 import { ValidationError, type ModulePackage } from "../../engine/package";
-import type { RuleSpec } from "../../engine/rules";
-import { dewPoint, irFrame, luxToPar, stoma as legacy, vpd, type StomaConfig } from "../../modules/stoma";
+import { DEFAULTS, dewPoint, irFrame, luxToPar, rulesFromConfig, stoma, vpd, type StomaConfig } from "./model";
 
+export { DEFAULTS, rulesFromConfig, stoma };
 export type { StomaConfig };
-export const DEFAULTS: StomaConfig = legacy.defaultConfig;
 
 const num = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
 const median = (a: number[]) => [...a].sort((x, y) => x - y)[Math.floor(a.length / 2)];
@@ -37,9 +36,9 @@ export const stomaPackage: ModulePackage = {
   objectTypes: [{
     key: "node",
     name: { en: "Stoma node", it: "Nodo Stoma" },
-    properties: { ir: { type: "object" }, zone_id: { type: "string" } },
+    properties: { ir: { type: "object" }, zone_id: { type: "string" }, config: { type: "object" } },
   }],
-  metrics: [...legacy.metrics.map((m) => ({ key: m.key, unit: m.unit, label: m.label })), ...HELPERS],
+  metrics: [...stoma.metrics.map((m) => ({ key: m.key, unit: m.unit, label: m.label })), ...HELPERS],
 
   normalize(p) {
     const id = p.node_id;
@@ -122,37 +121,3 @@ export const stomaPackage: ModulePackage = {
     });
   },
 };
-
-/**
- * The customer's thresholds as engine rules. Warning and alarm levels are separate families
- * (`<code>_warn` and `<code>`); the climate ones are also pushed to the node's status ring.
- */
-export function rulesFromConfig(c: Partial<StomaConfig>): RuleSpec[] {
-  const k = { ...DEFAULTS, ...c };
-  const r = (key: string, metric: string, op: RuleSpec["op"], threshold: number, severity: RuleSpec["severity"], push = false): RuleSpec =>
-    ({ key, name: key, metric, object_type: "node", op, threshold, severity, push_to_device: push });
-  return [
-    r("temp_high", "temp_c", ">", k.tMax, "alarm", true),
-    r("temp_high_warn", "temp_c", ">", k.tMax - k.tMargin, "warn", true),
-    r("temp_low", "temp_c", "<", k.tMin, "alarm", true),
-    r("temp_low_warn", "temp_c", "<", k.tMin + k.tMargin, "warn", true),
-    r("rh_high", "rh_ctl", ">", k.rhMax, "alarm", true),
-    r("rh_high_warn", "rh_ctl", ">", k.rhMax - k.rhMargin, "warn", true),
-    r("rh_low", "rh_ctl", "<", k.rhMin, "alarm", true),
-    r("rh_low_warn", "rh_ctl", "<", k.rhMin + k.rhMargin, "warn", true),
-    r("condensation", "cond_ctl", "<=", k.leafDewAlarm, "alarm", true),
-    r("condensation_warn", "cond_ctl", "<=", k.leafDewWarn, "warn", true),
-    r("co2_low", "co2", "<", k.co2LowWarn, "warn", true),
-    r("botrytis_warn", "humid_h", ">=", k.botrytisHours, "warn"),
-    r("botrytis", "humid_h", ">=", 2 * k.botrytisHours, "alarm"),
-    r("downy_mildew_warn", "downy_h", ">=", k.downyHours, "warn"),
-    r("downy_mildew", "downy_h", ">=", 2 * k.downyHours, "alarm"),
-    r("powdery_mildew_warn", "pm_index", ">=", 40, "warn"),
-    r("powdery_mildew", "pm_index", ">=", 60, "alarm"),
-    r("water_stress_warn", "stress_day", ">=", k.stressDelta, "warn"),
-    r("water_stress", "stress_day", ">=", 2 * k.stressDelta, "alarm"),
-    r("leaf_heat", "leaf_c", ">=", k.leafHeat, "alarm"),
-    r("ir_hotspot_warn", "hot_area", ">=", 3, "warn"),
-    r("ir_hotspot", "hot_area", ">=", 10, "alarm"),
-  ];
-}

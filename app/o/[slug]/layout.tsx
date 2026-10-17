@@ -1,13 +1,15 @@
 import { requireOrg } from "@/lib/auth";
 import { getT } from "@/lib/i18n";
+import { getPool } from "@/lib/engine/db";
+import { countOpenAlerts } from "@/lib/packages/console";
 import { Header } from "@/components/header";
 import { LiveRefresh } from "@/components/live-refresh";
 
 export default async function OrgLayout(props: LayoutProps<"/o/[slug]">) {
   const { slug } = await props.params;
-  const { supabase, org, isAdmin } = await requireOrg(slug);
+  const { org, isAdmin } = await requireOrg(slug);
   const { t, locale } = await getT();
-  const { count } = await supabase.from("alerts").select("id", { count: "exact", head: true }).eq("org_id", org.id).is("resolved_at", null);
+  const count = await countOpenAlerts(getPool(), org.id);
   return (
     <>
       <Header
@@ -18,7 +20,7 @@ export default async function OrgLayout(props: LayoutProps<"/o/[slug]">) {
         isAdmin={isAdmin}
         nav={[
           { href: `/o/${slug}`, label: t.overview },
-          { href: `/o/${slug}/alerts`, label: t.alerts, badge: count ?? 0 },
+          { href: `/o/${slug}/alerts`, label: t.alerts, badge: count },
           { href: `/o/${slug}/settings`, label: t.settings },
         ]}
       />

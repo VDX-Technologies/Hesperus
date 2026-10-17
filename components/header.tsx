@@ -2,7 +2,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { setLocale, signOut } from "@/app/actions";
 import type { Dict } from "@/lib/i18n";
-import type { Locale } from "@/lib/modules/types";
+import type { Locale } from "@/lib/packages/types";
 
 export function Header({
   title,

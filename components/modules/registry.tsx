@@ -1,6 +1,6 @@
 /**
  * UI side of the module registry: which widgets each product adds to the overview and which
- * component renders its device page. Pair of lib/modules/index.ts.
+ * component renders its object page. Pair of lib/packages/ui.ts.
  */
 import { StomaOverview } from "./stoma/overview";
 import { StomaDevice } from "./stoma/device";

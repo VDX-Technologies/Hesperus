@@ -1,28 +1,21 @@
 import Link from "next/link";
-import type { SupabaseClient } from "@supabase/supabase-js";
-import { stoma } from "@/lib/modules/stoma";
-import type { Locale } from "@/lib/modules/types";
+import { getPool } from "@/lib/engine/db";
+import { listObjects } from "@/lib/packages/console";
+import { stoma } from "@/lib/packages/stoma/model";
+import type { Locale } from "@/lib/packages/types";
 import { timeAgo, type Dict } from "@/lib/i18n";
-import { fmt, liveStatus, SectionTitle, StatusDot } from "@/components/ui";
+import { fmt, SectionTitle, StatusDot } from "@/components/ui";
 
 type Values = Record<string, number | null>;
 
 const KEY_METRICS = ["temp_c", "rh", "leaf_c", "cond_margin", "vpd_kpa", "co2"];
 
 /** Stoma widget on the organization overview: one card per sensor, grouped by zone. */
-export async function StomaOverview({ supabase, orgId, slug, t, locale }: { supabase: SupabaseClient; orgId: string; slug: string; t: Dict; locale: Locale }) {
-  const [{ data: devices }, { data: zones }] = await Promise.all([
-    supabase.from("devices").select("id, name, serial, zone_id, last_seen, last_status, last_values").eq("org_id", orgId).eq("module", "stoma").order("name"),
-    supabase.from("zones").select("id, name, sites(name)").eq("org_id", orgId).order("name"),
-  ]);
-  const zoneName = new Map((zones ?? []).map((z) => [z.id, z.name]));
+export async function StomaOverview({ orgId, slug, t, locale }: { orgId: string; slug: string; t: Dict; locale: Locale }) {
+  const cards = await listObjects(getPool(), orgId, "stoma");
   const metrics = new Map(stoma.metrics.map((m) => [m.key, m]));
   const counts = { ok: 0, warn: 0, alarm: 0, offline: 0 };
-  const cards = (devices ?? []).map((d) => {
-    const status = liveStatus(d.last_status, d.last_seen, stoma.offlineAfterS);
-    counts[status]++;
-    return { ...d, status };
-  });
+  for (const d of cards) counts[d.status]++;
   return (
     <section>
       <SectionTitle
@@ -42,12 +35,12 @@ export async function StomaOverview({ supabase, orgId, slug, t, locale }: { supa
       </SectionTitle>
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
         {cards.map((d) => {
-          const v = (d.last_values ?? {}) as Values;
+          const v: Values = d.values;
           return (
             <Link key={d.id} href={`/o/${slug}/devices/${d.id}`} className="card group block p-5 transition-colors hover:border-line">
               <div className="flex items-start justify-between gap-3">
                 <div>
-                  <div className="text-xs text-dim">{d.zone_id ? zoneName.get(d.zone_id) : t.unassigned}</div>
+                  <div className="text-xs text-dim">{d.zone ?? t.unassigned}</div>
                   <div className="text-lg font-medium">{d.name}</div>
                 </div>
                 <span className="inline-flex items-center gap-2 text-xs text-mist">
@@ -70,7 +63,7 @@ export async function StomaOverview({ supabase, orgId, slug, t, locale }: { supa
                 })}
               </div>
               <div className="mt-4 text-xs text-dim">
-                {t.lastSeen}: {timeAgo(d.last_seen, locale, t)}
+                {t.lastSeen}: {timeAgo(d.lastSeen, locale, t)}
               </div>
             </Link>
           );

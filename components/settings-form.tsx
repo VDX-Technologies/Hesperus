@@ -1,9 +1,9 @@
-import type { ModuleDef, Locale } from "@/lib/modules/types";
+import type { Locale, PackageDef } from "@/lib/packages/types";
 import type { Dict } from "@/lib/i18n";
 import { PresetPicker } from "@/components/preset-picker";
 
 /**
- * Generic settings form for any module: one card per group, as the module defines them.
+ * Generic settings form for any package: one card per group, as the package defines them.
  * values = this level's own values; inherited = what applies when a field is left empty.
  */
 export function SettingsForm({
@@ -18,7 +18,8 @@ export function SettingsForm({
   locale,
   extraButton,
 }: {
-  mod: ModuleDef;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  mod: PackageDef<any>;
   action: (formData: FormData) => Promise<void>;
   hidden: Record<string, string>;
   values: Record<string, number>;
@@ -32,7 +33,7 @@ export function SettingsForm({
   const groups = new Map<string, typeof mod.settings>();
   for (const s of mod.settings) groups.set(s.group[locale], [...(groups.get(s.group[locale]) ?? []), s]);
   const shown = (v: number | undefined, scale = 1) => (v === undefined ? "" : String(Math.round((v / scale) * 100) / 100));
-  const defaults = mod.defaultConfig as Record<string, number>;
+  const defaults = mod.defaults as Record<string, number>;
   const scaled = (cfg: Record<string, unknown>) =>
     Object.fromEntries(mod.settings.filter((s) => typeof cfg[s.key] === "number").map((s) => [s.key, shown(cfg[s.key] as number, s.scale)]));
   return (

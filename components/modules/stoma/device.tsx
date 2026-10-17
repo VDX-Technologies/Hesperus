@@ -1,12 +1,13 @@
 import Link from "next/link";
-import type { SupabaseClient } from "@supabase/supabase-js";
-import { stoma } from "@/lib/modules/stoma";
-import type { Locale } from "@/lib/modules/types";
+import { getPool } from "@/lib/engine/db";
+import { series } from "@/lib/engine/query";
+import type { ConsoleObject } from "@/lib/packages/console";
+import { stoma } from "@/lib/packages/stoma/model";
+import type { Locale } from "@/lib/packages/types";
 import { timeAgo, type Dict } from "@/lib/i18n";
-import { fmt, liveStatus, SectionTitle, StatusLabel } from "@/components/ui";
+import { fmt, SectionTitle, StatusLabel } from "@/components/ui";
 import { TimeChart } from "@/components/chart";
-import type { ThermalFrame } from "./thermal-map";
-import { ThermalPlayer, type ThermalShot } from "./thermal-player";
+import { ThermalMap, type ThermalFrame } from "./thermal-map";
 
 /** Progress towards a disease alert: 0..1 of the warning threshold, capped at 2 (alarm). */
 function RiskBar({ label, value, warn, detail }: { label: string; value: number; warn: number; detail: string }) {
@@ -25,100 +26,69 @@ function RiskBar({ label, value, warn, detail }: { label: string; value: number;
   );
 }
 
-type Values = Record<string, number | null>;
-interface Device {
-  id: string;
-  name: string;
-  serial: string;
-  last_seen: string | null;
-  last_status: string | null;
-  last_values: Values | null;
-}
+const CHART_KEYS = ["temp_c", "leaf_c", "dew_c", "rh", "vpd_kpa", "co2", "voc", "par", "uvi", "leaf_air", "ir_spread", "wet_h"];
 
-const MAX_POINTS = 400;
-
-/** Start of the chart range and of today (for the daily light integral). */
-function bounds(range: "24h" | "7d") {
-  const since = new Date(Date.now() - (range === "7d" ? 7 : 1) * 86400000);
-  const midnight = new Date();
-  midnight.setHours(0, 0, 0, 0);
-  return { since, midnight, from: since < midnight ? since : midnight, day: new Date(Date.now() - 86400000) };
-}
-
-/** Stoma device page: live values, today's light, history charts. */
+/** Stoma object page: live values, today's light, latest IR frame, history charts from the engine series. */
 export async function StomaDevice({
-  supabase,
   device,
   range,
   baseHref,
   t,
   locale,
 }: {
-  supabase: SupabaseClient;
-  device: Device & { config?: unknown };
+  orgId: string;
+  device: ConsoleObject;
   range: "24h" | "7d";
   baseHref: string;
   t: Dict;
   locale: Locale;
 }) {
-  const { since, midnight, from, day } = bounds(range);
-  // charts need only the values; the heavy meta (IR frames) is read for the last 24 h only
-  const [{ data }, { data: irRows }, { data: lastRow }] = await Promise.all([
-    supabase.from("readings").select("ts, values").eq("device_id", device.id).gte("ts", from.toISOString()).order("ts").limit(5000),
-    supabase.from("readings").select("ts, ir:meta->ir").eq("device_id", device.id).gte("ts", day.toISOString()).order("ts").limit(200),
-    supabase.from("readings").select("ts, meta").eq("device_id", device.id).order("ts", { ascending: false }).limit(1).maybeSingle(),
+  const db = getPool();
+  const now = new Date();
+  const midnight = new Date(now);
+  midnight.setHours(0, 0, 0, 0);
+  const [hist, light] = await Promise.all([
+    series(db, { objectId: device.id, module: "stoma", metrics: CHART_KEYS, from: new Date(now.getTime() - (range === "7d" ? 7 : 1) * 86400000), to: now }),
+    series(db, { objectId: device.id, module: "stoma", metrics: ["par"], from: midnight, to: now }),
   ]);
-  const all = (data ?? []).map((r) => ({ t: Date.parse(r.ts), v: r.values as Values }));
+
+  // one chart row per timestamp with every metric that has a point there
+  const byTs = new Map<number, Record<string, number>>();
+  for (const [k, pts] of Object.entries(hist.series))
+    for (const p of pts) {
+      const ts = p.ts.getTime();
+      const row = byTs.get(ts) ?? { t: ts };
+      row[k] = p.value;
+      byTs.set(ts, row);
+    }
+  const rows = [...byTs.values()].sort((a, b) => a.t - b.t);
 
   // Daily light integral: PAR (µmol/m²/s) integrated over today -> mol/m²/day
   let dli = 0;
-  const today = all.filter((r) => r.t >= midnight.getTime());
-  for (let i = 1; i < today.length; i++) {
-    const par = today[i - 1].v.par ?? 0;
-    dli += (par * (today[i].t - today[i - 1].t)) / 1000 / 1e6;
-  }
+  const par = light.series.par;
+  for (let i = 1; i < par.length; i++) dli += (par[i - 1].value * (par[i].ts.getTime() - par[i - 1].ts.getTime())) / 1000 / 1e6;
 
-  const inRange = all.filter((r) => r.t >= since.getTime());
-  const step = Math.max(1, Math.ceil(inRange.length / MAX_POINTS));
-  const rows = inRange.filter((_, i) => i % step === 0).map((r) => ({ t: r.t, ...r.v }));
-  const status = liveStatus(device.last_status, device.last_seen, stoma.offlineAfterS);
-  const v = device.last_values ?? {};
-  const lastMeta = (lastRow?.meta ?? {}) as Record<string, unknown>;
-  const ir = (lastMeta.ir ?? null) as ThermalFrame | null;
-  // one frame per hour over the last 24 h for the time-lapse, plus the latest
-  const byTs = new Map(all.map((r) => [r.t, r.v]));
-  const irHistory: ThermalShot[] = [];
-  let nextHour = 0;
-  for (const r of irRows ?? []) {
-    const ts = Date.parse(r.ts);
-    if (!r.ir || ts < nextHour) continue;
-    const rv = byTs.get(ts);
-    irHistory.push({ t: ts, frame: r.ir as unknown as ThermalFrame, air: rv?.temp_c ?? null, dew: rv?.dew_c ?? null });
-    nextHour = ts + 3600000;
-  }
-  if (ir && lastRow && irHistory.at(-1)?.t !== Date.parse(lastRow.ts)) irHistory.push({ t: Date.parse(lastRow.ts), frame: ir, air: v.temp_c ?? null, dew: v.dew_c ?? null });
-  const cfg = { ...stoma.defaultConfig, ...((device.config ?? {}) as object) };
-  const num = (x: unknown) => (typeof x === "number" ? x : 0);
+  const status = device.status;
+  const v = device.values;
+  const ir = (device.properties.ir ?? null) as ThermalFrame | null;
+  const pkgState = (device.state.pkg ?? {}) as Record<string, unknown>;
+  const irrigating = typeof pkgState.irrigation_until === "number" && pkgState.irrigation_until > now.getTime();
+  const cfg = { ...stoma.defaults, ...((device.properties.config ?? {}) as object) };
   const L = (k: string) => stoma.metrics.find((m) => m.key === k)!.label[locale];
 
   return (
     <div>
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <div className="text-xs text-dim">Stoma · #{device.serial}</div>
+          <div className="text-xs text-dim">Stoma{device.externalId && ` · #${device.externalId}`}</div>
           <h1 className="text-2xl font-semibold tracking-tight">{device.name}</h1>
           <div className="mt-2 flex flex-wrap items-center gap-4 text-sm text-mist">
             <StatusLabel status={status} t={t} />
             <span>
-              {t.lastSeen}: {timeAgo(device.last_seen, locale, t)}
+              {t.lastSeen}: {timeAgo(device.lastSeen, locale, t)}
             </span>
-            {typeof lastMeta.rssi === "number" && (
-              <span className="num text-xs">
-                {t.signal} {lastMeta.rssi} dBm
-              </span>
-            )}
           </div>
-          {lastMeta.irrigating === true && <p className="mt-2 text-sm text-ice">{t.irrigating}</p>}
+          {irrigating && <p className="mt-2 text-sm text-ice">{t.irrigating}</p>}
         </div>
         <div className="flex shrink-0 gap-2 text-sm">
           {(["24h", "7d"] as const).map((r) => (
@@ -151,9 +121,12 @@ export async function StomaDevice({
       <div className="mt-3 grid gap-3 lg:grid-cols-3">
         <div className="card p-4 lg:col-span-2">
           <div className="mb-3 text-[11px] uppercase tracking-[0.14em] text-dim">{t.thermalMap}</div>
-          <ThermalPlayer
-            history={irHistory}
-            labels={{
+          {ir ? (
+            <ThermalMap
+              frame={ir}
+              air={v.temp_c ?? null}
+              dew={v.dew_c ?? null}
+              labels={{
               temp: t.ir_temp,
               dew: t.ir_dew,
               min: t.ir_min,
@@ -164,25 +137,15 @@ export async function StomaDevice({
               hover: t.ir_fromDew,
               vsAir: t.ir_vsAir,
             }}
-            playerLabels={{
-              live: t.ir_live,
-              demo: t.ir_demo,
-              play: t.ir_play,
-              pause: t.ir_pause,
-              scenarios: {
-                normal: { name: t.sc_normal, desc: t.sc_normal_d },
-                stress: { name: t.sc_stress, desc: t.sc_stress_d },
-                dew: { name: t.sc_dew, desc: t.sc_dew_d },
-                hotspot: { name: t.sc_hotspot, desc: t.sc_hotspot_d },
-              },
-            }}
-          />
-          {!ir && <p className="mt-2 text-xs text-dim">{t.thermalNone}</p>}
+            />
+          ) : (
+            <p className="text-xs text-dim">{t.thermalNone}</p>
+          )}
         </div>
         <div className="card flex flex-col gap-5 p-4">
           <div className="text-[11px] uppercase tracking-[0.14em] text-dim">{t.diseaseRisk}</div>
-          <RiskBar label={t.risk_botrytis} value={num(lastMeta.humid_h)} warn={cfg.botrytisHours} detail={`${fmt(num(lastMeta.humid_h), 1, locale)} / ${cfg.botrytisHours} h`} />
-          <RiskBar label={t.risk_downy} value={num(lastMeta.wet_h)} warn={cfg.downyHours} detail={`${fmt(num(lastMeta.wet_h), 1, locale)} / ${cfg.downyHours} h`} />
+          <RiskBar label={t.risk_botrytis} value={v.humid_h ?? 0} warn={cfg.botrytisHours} detail={`${fmt(v.humid_h ?? 0, 1, locale)} / ${cfg.botrytisHours} h`} />
+          <RiskBar label={t.risk_downy} value={v.downy_h ?? 0} warn={cfg.downyHours} detail={`${fmt(v.downy_h ?? 0, 1, locale)} / ${cfg.downyHours} h`} />
           <RiskBar label={t.risk_powdery} value={v.pm_index ?? 0} warn={40} detail={`${fmt(v.pm_index, 0, locale)} / 100`} />
           <RiskBar
             label={t.risk_stress}
