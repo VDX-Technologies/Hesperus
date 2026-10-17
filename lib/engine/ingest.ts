@@ -7,12 +7,18 @@ import { ValidationError } from "./package";
 import type { RawMessage } from "./connectors";
 import type { Source } from "./sources";
 import { getSettings, num } from "./settings";
+import { applyDerived, type DerivedState } from "./derived";
+import { deviceConfig, evaluateRules, loadRules, type DeviceConfig, type Point } from "./rules";
+import { runAlertHooks, type AlertTransition } from "./hooks";
 
 export interface IngestResult {
   accepted: number;
   rejected: { index: number; error: string }[];
   metrics: number;
   events: number;
+  alerts: { opened: number; resolved: number };
+  /** Configs to forward to devices whose acknowledged version is out of date. */
+  configs: ({ type: string; externalId: string } & DeviceConfig)[];
 }
 
 type Registry = { types: Map<string, string>; metrics: Map<string, number> };
@@ -36,7 +42,7 @@ export async function registerPackage(db: Db, pkg: ModulePackage): Promise<Regis
     );
     reg.types.set(t.key, rows[0].id);
   }
-  for (const m of pkg.metrics) {
+  for (const m of [...pkg.metrics, ...(pkg.derived ?? [])]) {
     const { rows } = await db.query<{ id: number }>(
       `insert into metric_keys (module, key, unit, label) values ($1, $2, $3, $4)
        on conflict (module, key) do update set unit = excluded.unit, label = excluded.label
@@ -71,7 +77,9 @@ export async function ingestPush(
   );
 
   const reg = await registerPackage(db, pkg);
-  const result: IngestResult = { accepted: 0, rejected: [], metrics: 0, events: 0 };
+  const result: IngestResult = {
+    accepted: 0, rejected: [], metrics: 0, events: 0, alerts: { opened: 0, resolved: 0 }, configs: [],
+  };
   const items: Normalized[] = [];
 
   messages.forEach((m, index) => {
@@ -92,35 +100,56 @@ export async function ingestPush(
   });
 
   // 2. Objects, once per (type, externalId); later messages win on name and properties.
-  const objects = new Map<string, { typeId: string; externalId: string; name?: string; properties: object; ts: Date }>();
+  type Obj = {
+    type: string; typeId: string; externalId: string; name?: string; properties: object; ts: Date; configAck?: number;
+  };
+  const objects = new Map<string, Obj>();
   for (const n of items) {
     const k = `${n.object.type}\u0000${n.object.externalId}`;
     const prev = objects.get(k);
     objects.set(k, {
+      type: n.object.type,
       typeId: reg.types.get(n.object.type)!,
       externalId: n.object.externalId,
       name: n.object.name ?? prev?.name,
       properties: { ...prev?.properties, ...n.object.properties },
       ts: n.ts && prev && prev.ts > n.ts ? prev.ts : (n.ts ?? now),
+      configAck: n.configAck ?? prev?.configAck,
     });
   }
   const objectIds = new Map<string, string>();
+  const derivedState = new Map<string, DerivedState>();
   for (const [k, o] of objects) {
-    const { rows } = await db.query<{ id: string }>(
+    const { rows } = await db.query<{ id: string; state: { derived?: DerivedState } }>(
       `insert into objects (tenant_id, type_id, external_id, name, properties, last_seen)
        values ($1, $2, $3, $4, $5, $6)
        on conflict (tenant_id, type_id, external_id) do update set
          name = coalesce(excluded.name, objects.name),
          properties = objects.properties || excluded.properties,
          last_seen = greatest(objects.last_seen, excluded.last_seen)
-       returning id`,
+       returning id, state`,
       [source.tenant_id, o.typeId, o.externalId, o.name ?? null, o.properties, o.ts],
     );
     objectIds.set(k, rows[0].id);
+    derivedState.set(k, rows[0].state.derived ?? {});
+  }
+
+  // Derived metrics, in time order so delta and rate see the previous point.
+  if (pkg.derived?.length) {
+    const ordered = [...items].sort((a, b) => (a.ts ?? now).getTime() - (b.ts ?? now).getTime());
+    for (const n of ordered) {
+      n.metrics = { ...n.metrics };
+      applyDerived(pkg.derived, n.metrics, n.ts ?? now, derivedState.get(`${n.object.type}\u0000${n.object.externalId}`)!);
+    }
+    for (const [k, st] of derivedState) if (Object.keys(st).length) await db.query(
+      `update objects set state = state || jsonb_build_object('derived', $2::jsonb) where id = $1`,
+      [objectIds.get(k), st],
+    );
   }
 
   // 3. Metrics in one statement; replays of the same (object, metric, ts) are ignored.
   const mObj: string[] = [], mKey: number[] = [], mTs: Date[] = [], mVal: number[] = [];
+  const points: Point[] = [];
   for (const n of items) {
     const objectId = objectIds.get(`${n.object.type}\u0000${n.object.externalId}`)!;
     for (const [key, value] of Object.entries(n.metrics)) {
@@ -128,6 +157,7 @@ export async function ingestPush(
       const metricId = reg.metrics.get(key);
       if (metricId === undefined) continue; // undeclared metrics stay in the raw archive only
       mObj.push(objectId); mKey.push(metricId); mTs.push(n.ts ?? now); mVal.push(value);
+      points.push({ objectId, type: n.object.type, metric: key, ts: n.ts ?? now, value });
     }
   }
   if (mObj.length) {
@@ -153,6 +183,22 @@ export async function ingestPush(
       ]);
       result.events++;
     }
+  }
+
+  // 5. Rules and device configs. Replays rebuild data only: they never raise alerts.
+  if (!opts.replay) {
+    const rules = await loadRules(db, source.tenant_id, pkg.id);
+    let transitions: AlertTransition[] = [];
+    if (rules.length) {
+      transitions = await evaluateRules(db, source.tenant_id, rules, points);
+      for (const t of transitions) result.alerts[t.kind]++;
+      result.events += transitions.length;
+    }
+    for (const [k, o] of objects) {
+      const cfg = deviceConfig(rules, o.type, objectIds.get(k)!);
+      if (cfg && cfg.version !== o.configAck) result.configs.push({ type: o.type, externalId: o.externalId, ...cfg });
+    }
+    await runAlertHooks(transitions, db);
   }
 
   if (!opts.replay) await db.query(`update sources set last_seen = $2, last_error = $3 where id = $1`, [

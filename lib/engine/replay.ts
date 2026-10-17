@@ -22,7 +22,9 @@ export async function replaySource(
   o: ReplayOptions = {},
 ): Promise<{ objects: number; total: IngestResult }> {
   const keys = await store.list(`raw/${source.tenant_id}/${source.id}/${o.from ?? ""}`);
-  const total: IngestResult = { accepted: 0, rejected: [], metrics: 0, events: 0 };
+  const total: IngestResult = {
+    accepted: 0, rejected: [], metrics: 0, events: 0, alerts: { opened: 0, resolved: 0 }, configs: [],
+  };
   for (const key of keys) {
     const gz = await store.get(key);
     if (!gz) continue;

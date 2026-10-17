@@ -33,6 +33,19 @@ export interface Normalized {
   ts?: Date;
   metrics: Record<string, number | null | undefined>;
   events?: { type: string; severity: Severity; payload?: Record<string, unknown> }[];
+  /** Config version the device reports as applied (see rules pushed to devices). */
+  configAck?: number;
+}
+
+/**
+ * A metric computed by the engine from other metrics of the same message.
+ * avg/sum/min/max take any number of inputs, diff and ratio take two (a - b, a / b);
+ * delta and rate take one and compare it with the previous value of the same object
+ * (rate is per second).
+ */
+export interface DerivedDef extends MetricDef {
+  fn: "avg" | "sum" | "min" | "max" | "diff" | "ratio" | "delta" | "rate";
+  inputs: string[];
 }
 
 export class ValidationError extends Error {}
@@ -41,6 +54,7 @@ export interface ModulePackage {
   id: string;
   objectTypes: ObjectTypeDef[];
   metrics: MetricDef[];
+  derived?: DerivedDef[];
   /** Validates and maps one message. Throws ValidationError for bad input. */
   normalize(message: Record<string, unknown>): Normalized | Normalized[];
 }
