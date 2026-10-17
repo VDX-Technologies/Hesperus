@@ -4,7 +4,7 @@
 // botrytis and mildew risk, irrigation pauses) in the node's package state. Alarms are plain
 // engine rules over these metrics, built from the customer's thresholds by rulesFromConfig().
 import { ValidationError, type ModulePackage } from "../../engine/package";
-import type { DeviceConfig, RuleSpec } from "../../engine/rules";
+import type { RuleSpec } from "../../engine/rules";
 import { dewPoint, irFrame, luxToPar, stoma as legacy, vpd, type StomaConfig } from "../../modules/stoma";
 
 export type { StomaConfig };
@@ -37,7 +37,7 @@ export const stomaPackage: ModulePackage = {
   objectTypes: [{
     key: "node",
     name: { en: "Stoma node", it: "Nodo Stoma" },
-    properties: { ir: { type: "object" }, legacy_device_id: { type: "string" }, zone_id: { type: "string" } },
+    properties: { ir: { type: "object" }, zone_id: { type: "string" } },
   }],
   metrics: [...legacy.metrics.map((m) => ({ key: m.key, unit: m.unit, label: m.label })), ...HELPERS],
 
@@ -155,29 +155,4 @@ export function rulesFromConfig(c: Partial<StomaConfig>): RuleSpec[] {
     r("ir_hotspot_warn", "hot_area", ">=", 3, "warn"),
     r("ir_hotspot", "hot_area", ">=", 10, "alarm"),
   ];
-}
-
-/** Rule family for a legacy alert row (code without the module prefix, level). */
-export const legacyRuleKey = (code: string, level: string) => {
-  const alarmOnly = code === "leaf_heat";
-  const warnOnly = code === "co2_low";
-  return level === "alarm" || alarmOnly || warnOnly ? code : `${code}_warn`;
-};
-
-/** Pushed thresholds in the shape current node firmware expects from /api/ingest. */
-export function legacyDeviceConfig(cfg: DeviceConfig): Record<string, number> {
-  const th = (k: string, fallback: number) => cfg.thresholds[k]?.threshold ?? fallback;
-  const tMax = th("temp_high", DEFAULTS.tMax), rhMax = th("rh_high", DEFAULTS.rhMax);
-  return {
-    tMin: th("temp_low", DEFAULTS.tMin),
-    tMax,
-    tMargin: tMax - th("temp_high_warn", tMax - DEFAULTS.tMargin),
-    rhMin: th("rh_low", DEFAULTS.rhMin),
-    rhMax,
-    rhMargin: rhMax - th("rh_high_warn", rhMax - DEFAULTS.rhMargin),
-    leafDewWarn: th("condensation_warn", DEFAULTS.leafDewWarn),
-    leafDewAlarm: th("condensation", DEFAULTS.leafDewAlarm),
-    co2LowWarn: th("co2_low", DEFAULTS.co2LowWarn),
-    irrigationHoldS: DEFAULTS.irrigationHoldS,
-  };
 }
