@@ -25,7 +25,8 @@ async function createOrg(formData: FormData) {
 export default async function AdminHome() {
   const { supabase } = await requireAdmin();
   const { t } = await getT();
-  const { data: orgs } = await supabase.from("organizations").select("id, name, slug, org_modules(module, enabled), devices(count)").order("name");
+  const { data: orgs, error } = await supabase.from("organizations").select("id, name, slug, org_modules(module, enabled), objects(count)").order("name");
+  if (error) throw new Error(error.message);
   return (
     <div>
       <h1 className="text-2xl font-semibold tracking-tight">{t.customers}</h1>
@@ -44,7 +45,7 @@ export default async function AdminHome() {
                 ))}
             </div>
             <div className="mt-3 text-xs text-dim">
-              {t.devices}: <span className="num">{(o.devices as unknown as { count: number }[])?.[0]?.count ?? 0}</span>
+              {t.devices}: <span className="num">{(o.objects as unknown as { count: number }[])?.[0]?.count ?? 0}</span>
             </div>
           </Link>
         ))}
