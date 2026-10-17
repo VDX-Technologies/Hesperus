@@ -42,7 +42,7 @@ function bounds(range: "24h" | "7d") {
   const since = new Date(Date.now() - (range === "7d" ? 7 : 1) * 86400000);
   const midnight = new Date();
   midnight.setHours(0, 0, 0, 0);
-  return { since, midnight, from: since < midnight ? since : midnight };
+  return { since, midnight, from: since < midnight ? since : midnight, day: new Date(Date.now() - 86400000) };
 }
 
 /** Stoma device page: live values, today's light, history charts. */
@@ -61,15 +61,14 @@ export async function StomaDevice({
   t: Dict;
   locale: Locale;
 }) {
-  const { since, midnight, from } = bounds(range);
-  const { data } = await supabase
-    .from("readings")
-    .select("ts, values, meta")
-    .eq("device_id", device.id)
-    .gte("ts", from.toISOString())
-    .order("ts")
-    .limit(5000);
-  const all = (data ?? []).map((r) => ({ t: Date.parse(r.ts), v: r.values as Values, meta: r.meta as Record<string, unknown> }));
+  const { since, midnight, from, day } = bounds(range);
+  // charts need only the values; the heavy meta (IR frames) is read for the last 24 h only
+  const [{ data }, { data: irRows }, { data: lastRow }] = await Promise.all([
+    supabase.from("readings").select("ts, values").eq("device_id", device.id).gte("ts", from.toISOString()).order("ts").limit(5000),
+    supabase.from("readings").select("ts, ir:meta->ir").eq("device_id", device.id).gte("ts", day.toISOString()).order("ts").limit(200),
+    supabase.from("readings").select("ts, meta").eq("device_id", device.id).order("ts", { ascending: false }).limit(1).maybeSingle(),
+  ]);
+  const all = (data ?? []).map((r) => ({ t: Date.parse(r.ts), v: r.values as Values }));
 
   // Daily light integral: PAR (µmol/m²/s) integrated over today -> mol/m²/day
   let dli = 0;
@@ -84,17 +83,20 @@ export async function StomaDevice({
   const rows = inRange.filter((_, i) => i % step === 0).map((r) => ({ t: r.t, ...r.v }));
   const status = liveStatus(device.last_status, device.last_seen, stoma.offlineAfterS);
   const v = device.last_values ?? {};
-  const lastMeta = all.at(-1)?.meta ?? {};
+  const lastMeta = (lastRow?.meta ?? {}) as Record<string, unknown>;
   const ir = (lastMeta.ir ?? null) as ThermalFrame | null;
   // one frame per hour over the last 24 h for the time-lapse, plus the latest
+  const byTs = new Map(all.map((r) => [r.t, r.v]));
   const irHistory: ThermalShot[] = [];
   let nextHour = 0;
-  for (const r of all.filter((r) => r.t >= Date.now() - 86400000 && r.meta.ir)) {
-    if (r.t < nextHour && r !== all.at(-1)) continue;
-    irHistory.push({ t: r.t, frame: r.meta.ir as ThermalFrame, air: r.v.temp_c ?? null, dew: r.v.dew_c ?? null });
-    nextHour = r.t + 3600000;
+  for (const r of irRows ?? []) {
+    const ts = Date.parse(r.ts);
+    if (!r.ir || ts < nextHour) continue;
+    const rv = byTs.get(ts);
+    irHistory.push({ t: ts, frame: r.ir as unknown as ThermalFrame, air: rv?.temp_c ?? null, dew: rv?.dew_c ?? null });
+    nextHour = ts + 3600000;
   }
-  if (ir && irHistory.at(-1)?.frame !== ir) irHistory.push({ t: all.at(-1)!.t, frame: ir, air: v.temp_c ?? null, dew: v.dew_c ?? null });
+  if (ir && lastRow && irHistory.at(-1)?.t !== Date.parse(lastRow.ts)) irHistory.push({ t: Date.parse(lastRow.ts), frame: ir, air: v.temp_c ?? null, dew: v.dew_c ?? null });
   const cfg = { ...stoma.defaultConfig, ...((device.config ?? {}) as object) };
   const num = (x: unknown) => (typeof x === "number" ? x : 0);
   const L = (k: string) => stoma.metrics.find((m) => m.key === k)!.label[locale];

@@ -19,9 +19,9 @@ export async function proxy(request: NextRequest) {
       },
     },
   });
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  // getClaims refreshes the session when needed and verifies the JWT without calling the auth server
+  const { data } = await supabase.auth.getClaims();
+  const user = data?.claims.sub;
   const path = request.nextUrl.pathname;
   if (!user && !path.startsWith("/login")) {
     const url = request.nextUrl.clone();
