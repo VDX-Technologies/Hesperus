@@ -11,9 +11,17 @@ if (!slug || !module || !name.length) {
   console.error("usage: create-source.ts <org-slug> <module> <name>");
   process.exit(1);
 }
-const pool = getPool();
-const { rows } = await pool.query<{ id: string }>(`select id from organizations where slug = $1`, [slug]);
-if (!rows[0]) throw new Error(`no organization "${slug}"`);
-const { source, token } = await createSource(pool, { tenantId: rows[0].id, module, name: name.join(" ") });
-console.log(`source ${source.id}\ntoken  ${token}`);
-await pool.end();
+
+async function main() {
+  const pool = getPool();
+  const { rows } = await pool.query<{ id: string }>(`select id from organizations where slug = $1`, [slug]);
+  if (!rows[0]) throw new Error(`no organization "${slug}"`);
+  const { source, token } = await createSource(pool, { tenantId: rows[0].id, module, name: name.join(" ") });
+  console.log(`source ${source.id}\ntoken  ${token}`);
+  await pool.end();
+}
+
+main().catch((e) => {
+  console.error(e);
+  process.exit(1);
+});

@@ -7,8 +7,15 @@ import { getPool } from "../lib/engine/db";
 import { flushRawInbox } from "../lib/engine/archive";
 import { storeFromEnv } from "../lib/engine/store";
 
-const pool = getPool();
-const out = await flushRawInbox(pool, storeFromEnv());
-console.log(`flushed ${out.rows} rows into ${out.objects.length} objects`);
-for (const k of out.objects) console.log(`  ${k}`);
-await pool.end();
+async function main() {
+  const pool = getPool();
+  const out = await flushRawInbox(pool, storeFromEnv());
+  console.log(`flushed ${out.rows} rows into ${out.objects.length} objects`);
+  for (const k of out.objects) console.log(`  ${k}`);
+  await pool.end();
+}
+
+main().catch((e) => {
+  console.error(e);
+  process.exit(1);
+});
