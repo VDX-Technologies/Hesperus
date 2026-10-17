@@ -5,3 +5,4 @@ import { stomaPackage } from "./stoma";
 const packages: ModulePackage[] = [stomaPackage];
 
 export const getPackage = (id: string) => packages.find((p) => p.id === id);
+export const packageIds = () => packages.map((p) => p.id);

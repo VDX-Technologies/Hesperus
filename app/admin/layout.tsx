@@ -7,7 +7,7 @@ export default async function AdminLayout({ children }: LayoutProps<"/admin">) {
   const { t, locale } = await getT();
   return (
     <>
-      <Header title={t.vendor} t={t} locale={locale} path="/admin" isAdmin={false} nav={[{ href: "/admin", label: t.customers }]} />
+      <Header title={t.vendor} t={t} locale={locale} path="/admin" isAdmin={false} nav={[{ href: "/admin", label: t.customers }, { href: "/admin/engine", label: t.engine }]} />
       <main className="mx-auto max-w-7xl px-4 pb-16 pt-6 sm:px-6">{children}</main>
     </>
   );

@@ -5,7 +5,8 @@
 import "./env";
 import { getPool } from "../lib/engine/db";
 import { replaySource } from "../lib/engine/replay";
-import { storeFromEnv } from "../lib/engine/store";
+import { recordUsage } from "../lib/engine/health";
+import { MeteredStore, storeFromEnv } from "../lib/engine/store";
 import type { Source } from "../lib/engine/sources";
 import { getPackage } from "../lib/packages";
 
@@ -26,9 +27,11 @@ async function main() {
   const pkg = getPackage(rows[0].module);
   if (!pkg) throw new Error(`module "${rows[0].module}" is not installed`);
 
-  const { objects, total } = await replaySource(pool, storeFromEnv(), rows[0], pkg, {
+  const store = new MeteredStore(storeFromEnv());
+  const { objects, total } = await replaySource(pool, store, rows[0], pkg, {
     from, events: args.includes("--events"), dryRun: args.includes("--dry-run"),
   });
+  await recordUsage(pool, store.ops);
   console.log(`${objects} archive objects, ${total.accepted} messages, ${total.metrics} new metrics, ${total.events} events`);
   for (const r of total.rejected.slice(0, 20)) console.log(`  rejected: ${r.error}`);
   await pool.end();

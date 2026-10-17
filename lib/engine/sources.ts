@@ -16,11 +16,13 @@ export interface Source {
 
 export const hashToken = (token: string) => createHash("sha256").update(token).digest("hex");
 
+const newToken = () => `vdx_${randomBytes(24).toString("base64url")}`;
+
 export async function createSource(
   db: Db,
   s: { tenantId: string; name: string; module: string; connector?: ConnectorKind; config?: Record<string, unknown> },
 ): Promise<{ source: Source; token: string }> {
-  const token = `vdx_${randomBytes(24).toString("base64url")}`;
+  const token = newToken();
   const { rows } = await db.query<Source>(
     `insert into sources (tenant_id, name, connector, module, config, token_hash, token_hint)
      values ($1, $2, $3, $4, $5, $6, $7)
@@ -36,4 +38,14 @@ export async function sourceByToken(db: Db, token: string): Promise<Source | nul
     [hashToken(token)],
   );
   return rows[0] ?? null;
+}
+
+/** Replaces a source's token; the old one stops working at once. Returns the new token. */
+export async function rotateToken(db: Db, sourceId: string): Promise<string> {
+  const token = newToken();
+  const { rowCount } = await db.query(`update sources set token_hash = $2, token_hint = $3 where id = $1`, [
+    sourceId, hashToken(token), token.slice(-4),
+  ]);
+  if (!rowCount) throw new Error(`no source ${sourceId}`);
+  return token;
 }

@@ -7,6 +7,35 @@ export interface ObjectStore {
   putNew(key: string, body: Uint8Array, contentType: string): Promise<boolean>;
   get(key: string): Promise<Uint8Array | null>;
   list(prefix: string): Promise<string[]>;
+  /** Total objects and bytes under prefix. */
+  usage(prefix: string): Promise<{ objects: number; bytes: number }>;
+}
+
+export interface StoreOps {
+  writes: number; // class A: put, list
+  reads: number; // class B: get
+}
+
+/** Counts the operations made through a store, for the monthly quota (engine_usage). */
+export class MeteredStore implements ObjectStore {
+  ops: StoreOps = { writes: 0, reads: 0 };
+  constructor(private inner: ObjectStore) {}
+  putNew(key: string, body: Uint8Array, contentType: string) {
+    this.ops.writes++;
+    return this.inner.putNew(key, body, contentType);
+  }
+  get(key: string) {
+    this.ops.reads++;
+    return this.inner.get(key);
+  }
+  list(prefix: string) {
+    this.ops.writes++;
+    return this.inner.list(prefix);
+  }
+  usage(prefix: string) {
+    this.ops.writes++;
+    return this.inner.usage(prefix);
+  }
 }
 
 export class MemoryStore implements ObjectStore {
@@ -21,6 +50,10 @@ export class MemoryStore implements ObjectStore {
   }
   async list(prefix: string) {
     return [...this.objects.keys()].filter((k) => k.startsWith(prefix)).sort();
+  }
+  async usage(prefix: string) {
+    const keys = await this.list(prefix);
+    return { objects: keys.length, bytes: keys.reduce((n, k) => n + this.objects.get(k)!.length, 0) };
   }
 }
 
@@ -64,6 +97,22 @@ export class S3Store implements ObjectStore {
       token = out.NextContinuationToken;
     } while (token);
     return keys.sort();
+  }
+
+  async usage(prefix: string) {
+    let objects = 0, bytes = 0;
+    let token: string | undefined;
+    do {
+      const out = await this.s3.send(
+        new ListObjectsV2Command({ Bucket: this.bucket, Prefix: prefix, ContinuationToken: token }),
+      );
+      for (const o of out.Contents ?? []) {
+        objects++;
+        bytes += o.Size ?? 0;
+      }
+      token = out.NextContinuationToken;
+    } while (token);
+    return { objects, bytes };
   }
 }
 

@@ -5,11 +5,14 @@
 import "./env";
 import { getPool } from "../lib/engine/db";
 import { flushRawInbox } from "../lib/engine/archive";
-import { storeFromEnv } from "../lib/engine/store";
+import { recordUsage } from "../lib/engine/health";
+import { MeteredStore, storeFromEnv } from "../lib/engine/store";
 
 async function main() {
   const pool = getPool();
-  const out = await flushRawInbox(pool, storeFromEnv());
+  const store = new MeteredStore(storeFromEnv());
+  const out = await flushRawInbox(pool, store);
+  await recordUsage(pool, store.ops);
   console.log(`flushed ${out.rows} rows into ${out.objects.length} objects`);
   for (const k of out.objects) console.log(`  ${k}`);
   await pool.end();
