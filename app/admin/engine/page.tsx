@@ -46,7 +46,7 @@ async function setStatus(formData: FormData) {
 const fmtBytes = (n: number) => {
   const u = ["B", "KB", "MB", "GB", "TB"];
   let i = 0;
-  while (n >= 1024 && i < u.length - 1) (n /= 1024), i++;
+  for (; n >= 1024 && i < u.length - 1; i++) n /= 1024;
   return `${n.toFixed(i ? 1 : 0)} ${u[i]}`;
 };
 

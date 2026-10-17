@@ -8,7 +8,7 @@
 
 insert into public.engine_settings (key, value, description) values
   ('alerts.email_to',   '[]',   'Health alert recipients (array of emails; empty = platform admins)'),
-  ('alerts.email_from', '"VDX Core <onboarding@resend.dev>"', 'Sender of health alerts (a domain verified on the mail provider)'),
+  ('alerts.email_from', '"VDX Core <alerts@vdxtechnologies.com>"', 'Sender of health alerts (a domain verified on the mail provider)'),
   ('alerts.repeat_h',   '24',   'Mail an open health problem again after this many hours')
 on conflict (key) do nothing;
 
