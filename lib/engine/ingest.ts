@@ -119,8 +119,9 @@ export async function ingestPush(
   }
   const objectIds = new Map<string, string>();
   const derivedState = new Map<string, DerivedState>();
+  const pkgState = new Map<string, Record<string, unknown>>();
   for (const [k, o] of objects) {
-    const { rows } = await db.query<{ id: string; state: { derived?: DerivedState } }>(
+    const { rows } = await db.query<{ id: string; state: { derived?: DerivedState; pkg?: Record<string, unknown> } }>(
       `insert into objects (tenant_id, type_id, external_id, name, properties, last_seen)
        values ($1, $2, $3, $4, $5, $6)
        on conflict (tenant_id, type_id, external_id) do update set
@@ -132,19 +133,24 @@ export async function ingestPush(
     );
     objectIds.set(k, rows[0].id);
     derivedState.set(k, rows[0].state.derived ?? {});
+    pkgState.set(k, rows[0].state.pkg ?? {});
   }
 
-  // Derived metrics, in time order so delta and rate see the previous point.
-  if (pkg.derived?.length) {
+  // Derived metrics and the package step, in time order so they see the previous point.
+  if (pkg.derived?.length || pkg.step) {
     const ordered = [...items].sort((a, b) => (a.ts ?? now).getTime() - (b.ts ?? now).getTime());
     for (const n of ordered) {
+      const k = `${n.object.type}\u0000${n.object.externalId}`;
       n.metrics = { ...n.metrics };
-      applyDerived(pkg.derived, n.metrics, n.ts ?? now, derivedState.get(`${n.object.type}\u0000${n.object.externalId}`)!);
+      if (pkg.derived?.length) applyDerived(pkg.derived, n.metrics, n.ts ?? now, derivedState.get(k)!);
+      pkg.step?.(n.metrics, n.ts ?? now, pkgState.get(k)!);
     }
-    for (const [k, st] of derivedState) if (Object.keys(st).length) await db.query(
-      `update objects set state = state || jsonb_build_object('derived', $2::jsonb) where id = $1`,
-      [objectIds.get(k), st],
-    );
+    for (const k of objects.keys()) {
+      const st = { derived: derivedState.get(k)!, pkg: pkgState.get(k)! };
+      if (Object.keys(st.derived).length || Object.keys(st.pkg).length) await db.query(
+        `update objects set state = state || $2::jsonb where id = $1`, [objectIds.get(k), st],
+      );
+    }
   }
 
   // 3. Metrics in one statement; replays of the same (object, metric, ts) are ignored.

@@ -57,4 +57,10 @@ export interface ModulePackage {
   derived?: DerivedDef[];
   /** Validates and maps one message. Throws ValidationError for bad input. */
   normalize(message: Record<string, unknown>): Normalized | Normalized[];
+  /**
+   * Optional stateful step per object, run in time order after derived metrics: it may add
+   * metrics that need history (counters, accumulated hours, ...). `state` is the package's own
+   * state for the object (objects.state.pkg), updated in place.
+   */
+  step?(metrics: Record<string, number | null | undefined>, ts: Date, state: Record<string, unknown>): void;
 }

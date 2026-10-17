@@ -169,3 +169,24 @@ function fnv1a(s: string): number {
   for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 0x01000193);
   return h >>> 0;
 }
+
+export type RuleSpec = Pick<Rule, "key" | "metric" | "op" | "threshold" | "severity"> &
+  Partial<Pick<Rule, "name" | "object_type" | "hysteresis" | "for_s" | "push_to_device">>;
+
+/** Creates or updates rules by family; with objectId they become that object's overrides. */
+export async function upsertRules(
+  db: Db, tenantId: string, module: string, specs: RuleSpec[], objectId: string | null = null,
+): Promise<number> {
+  for (const r of specs) await db.query(
+    `insert into rules (tenant_id, key, name, module, metric, object_type, object_id, op, threshold, hysteresis,
+                        for_s, severity, push_to_device)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+     on conflict (tenant_id, key, coalesce(object_id, '00000000-0000-0000-0000-000000000000'::uuid))
+     do update set name = excluded.name, metric = excluded.metric, object_type = excluded.object_type,
+       op = excluded.op, threshold = excluded.threshold, hysteresis = excluded.hysteresis,
+       for_s = excluded.for_s, severity = excluded.severity, push_to_device = excluded.push_to_device`,
+    [tenantId, r.key, r.name ?? null, module, r.metric, r.object_type ?? null, objectId, r.op, r.threshold,
+      r.hysteresis ?? 0, r.for_s ?? 0, r.severity, r.push_to_device ?? false],
+  );
+  return specs.length;
+}
