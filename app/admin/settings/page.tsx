@@ -2,7 +2,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { requireAdmin } from "@/lib/auth";
 import { getT } from "@/lib/i18n";
-import { getPool } from "@/lib/engine/db";
+import { crossTenantDb } from "@/lib/engine/db";
 import { alertRecipients } from "@/lib/engine/health";
 import { mailerFromEnv } from "@/lib/engine/mail";
 import { getSettings, num } from "@/lib/engine/settings";
@@ -17,7 +17,7 @@ async function flash(msg: string) {
 }
 
 const put = (key: string, value: unknown) =>
-  getPool().query(`update engine_settings set value = $2 where key = $1`, [key, JSON.stringify(value)]);
+  crossTenantDb("settings").query(`update engine_settings set value = $2 where key = $1`, [key, JSON.stringify(value)]);
 
 async function saveAlerts(formData: FormData) {
   "use server";
@@ -35,7 +35,7 @@ async function sendTest() {
   await requireAdmin();
   const mailer = mailerFromEnv();
   if (!mailer) return flash("error: RESEND_API_KEY");
-  const db = getPool();
+  const db = crossTenantDb("settings");
   const to = await alertRecipients(db);
   try {
     await mailer.send({
@@ -77,7 +77,7 @@ async function saveSetting(formData: FormData) {
 export default async function SettingsPage() {
   await requireAdmin();
   const { t, locale } = await getT();
-  const db = getPool();
+  const db = crossTenantDb("settings");
   const s = await getSettings(db, true);
   const { rows } = await db.query<{ key: string; value: unknown; description: string | null }>(
     `select key, value, description from engine_settings order by key`,

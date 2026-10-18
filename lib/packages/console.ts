@@ -1,7 +1,7 @@
 // Reads for the customer console: objects of a package with their latest values and status,
 // and open alerts with their text. Pool queries bypass RLS, so every one filters on the tenant.
 import "server-only";
-import type { Db } from "../engine/db";
+import type { TenantDb } from "../engine/db";
 import { getPackageDef } from "./ui";
 import type { Locale, Status } from "./types";
 
@@ -33,7 +33,7 @@ export interface ConsoleAlert {
 const iso = (d: Date | null) => d?.toISOString() ?? null;
 
 /** Objects of one module, optionally one by id, with values of the last day and live status. */
-export async function listObjects(db: Db, tenantId: string, module: string, objectId?: string): Promise<ConsoleObject[]> {
+export async function listObjects(db: TenantDb, module: string, objectId?: string): Promise<ConsoleObject[]> {
   const pkg = getPackageDef(module);
   const { rows } = await db.query<{
     id: string; external_id: string | null; name: string | null; type: string; properties: Record<string, unknown>;
@@ -46,7 +46,7 @@ export async function listObjects(db: Db, tenantId: string, module: string, obje
      left join zones z on z.org_id = o.tenant_id and z.id::text = o.properties->>'zone_id'
      where o.tenant_id = $1 and t.module = $2 and ($3::uuid is null or o.id = $3)
      order by coalesce(o.name, o.external_id)`,
-    [tenantId, module, objectId ?? null],
+    [db.tenantId, module, objectId ?? null],
   );
   if (!rows.length) return [];
   const vals = await db.query<{ object_id: string; key: string; value: number }>(
@@ -54,7 +54,7 @@ export async function listObjects(db: Db, tenantId: string, module: string, obje
      from metrics m join metric_keys k on k.id = m.metric_id
      where m.tenant_id = $1 and m.object_id = any($2) and m.ts > now() - interval '1 day'
      order by m.object_id, m.metric_id, m.ts desc`,
-    [tenantId, rows.map((r) => r.id)],
+    [db.tenantId, rows.map((r) => r.id)],
   );
   const offlineMs = (pkg?.offlineAfterS ?? 300) * 1000;
   return rows.map((r) => {
@@ -80,7 +80,7 @@ export async function listObjects(db: Db, tenantId: string, module: string, obje
 
 /** Alerts with the package's text; open and acknowledged ones unless `history` is set. */
 export async function listAlerts(
-  db: Db, tenantId: string, locale: Locale, q: { objectId?: string; history?: boolean; limit?: number } = {},
+  db: TenantDb, locale: Locale, q: { objectId?: string; history?: boolean; limit?: number } = {},
 ): Promise<ConsoleAlert[]> {
   const { rows } = await db.query<{
     id: string; object_id: string; object: string | null; severity: ConsoleAlert["severity"]; status: ConsoleAlert["status"];
@@ -89,12 +89,12 @@ export async function listAlerts(
   }>(
     `select a.id, a.object_id, coalesce(o.name, o.external_id) object, a.severity, a.status, a.opened_at, a.resolved_at,
             a.value, a.peak, a.title, r.key, r.threshold, r.module
-     from object_alerts a join objects o on o.id = a.object_id left join rules r on r.id = a.rule_id
+     from object_alerts a join objects o on o.tenant_id = a.tenant_id and o.id = a.object_id left join rules r on r.id = a.rule_id
      where a.tenant_id = $1 and ($2::uuid is null or a.object_id = $2)
        and (a.status <> 'resolved') = not $3
      order by case a.severity when 'alarm' then 0 when 'warn' then 1 else 2 end, a.opened_at desc
      limit $4`,
-    [tenantId, q.objectId ?? null, !!q.history, q.limit ?? 200],
+    [db.tenantId, q.objectId ?? null, !!q.history, q.limit ?? 200],
   );
   return rows.map((r) => {
     const pkg = r.module ? getPackageDef(r.module) : null;
@@ -112,9 +112,9 @@ export async function listAlerts(
   });
 }
 
-export async function countOpenAlerts(db: Db, tenantId: string) {
+export async function countOpenAlerts(db: TenantDb) {
   const { rows } = await db.query<{ n: number }>(
-    `select count(*)::int n from object_alerts where tenant_id = $1 and status = 'open'`, [tenantId],
+    `select count(*)::int n from object_alerts where tenant_id = $1 and status = 'open'`, [db.tenantId],
   );
   return rows[0].n;
 }

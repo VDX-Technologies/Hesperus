@@ -1,7 +1,7 @@
 // Push ingestion: archive every message as received, then normalize it through the source's
 // module package into objects, metrics and events. A bad message is kept in the raw archive
 // and reported; it never blocks the rest of the batch.
-import type { Db } from "./db";
+import { forTenant, type Db } from "./db";
 import type { ModulePackage, Normalized } from "./package";
 import { ValidationError } from "./package";
 import type { RawMessage } from "./connectors";
@@ -53,6 +53,12 @@ export async function registerPackage(db: Db, pkg: ModulePackage): Promise<Regis
   }
   byPkg.set(pkg.id, reg);
   return reg;
+}
+
+/** Per-source token bucket (ingest.rate_per_min, ingest.burst). 0 = go on, else seconds to wait. */
+export async function takeIngestToken(db: Db, sourceId: string, now = new Date()): Promise<number> {
+  const { rows } = await db.query<{ wait: number }>(`select ingest_take($1, $2) wait`, [sourceId, now]);
+  return Number(rows[0].wait);
 }
 
 export async function ingestPush(
@@ -148,7 +154,7 @@ export async function ingestPush(
     for (const k of objects.keys()) {
       const st = { derived: derivedState.get(k)!, pkg: pkgState.get(k)! };
       if (Object.keys(st.derived).length || Object.keys(st.pkg).length) await db.query(
-        `update objects set state = state || $2::jsonb where id = $1`, [objectIds.get(k), st],
+        `update objects set state = state || $2::jsonb where id = $1 and tenant_id = $3`, [objectIds.get(k), st, source.tenant_id],
       );
     }
   }
@@ -193,7 +199,7 @@ export async function ingestPush(
 
   // 5. Rules and device configs. Replays rebuild data only: they never raise alerts.
   if (!opts.replay) {
-    const rules = await loadRules(db, source.tenant_id, pkg.id);
+    const rules = await loadRules(forTenant(db, source.tenant_id), pkg.id);
     let transitions: AlertTransition[] = [];
     if (rules.length) {
       transitions = await evaluateRules(db, source.tenant_id, rules, points);
@@ -207,8 +213,8 @@ export async function ingestPush(
     await runAlertHooks(transitions, db);
   }
 
-  if (!opts.replay) await db.query(`update sources set last_seen = $2, last_error = $3 where id = $1`, [
-    source.id, now, result.rejected.length ? `${result.rejected.length} rejected: ${result.rejected[0].error}` : null,
+  if (!opts.replay) await db.query(`update sources set last_seen = $2, last_error = $3 where id = $1 and tenant_id = $4`, [
+    source.id, now, result.rejected.length ? `${result.rejected.length} rejected: ${result.rejected[0].error}` : null, source.tenant_id,
   ]);
   return result;
 }

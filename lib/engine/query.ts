@@ -1,6 +1,6 @@
 // Time series reads. The span picks the level: up to query.raw_max_hours from raw metrics,
 // up to query.rollup_5m_max_days from 5 min rollups, longer from hourly rollups.
-import type { Db } from "./db";
+import type { Db, TenantDb } from "./db";
 import { getSettings, num } from "./settings";
 
 export type Level = "raw" | "5m" | "1h";
@@ -22,21 +22,21 @@ export async function pickLevel(db: Db, from: Date, to: Date): Promise<Level> {
 
 /** Series per metric key for one object, at the level the span calls for (or a forced one). */
 export async function series(
-  db: Db,
+  db: TenantDb,
   q: { objectId: string; module: string; metrics: string[]; from: Date; to: Date; level?: Level },
 ): Promise<{ level: Level; series: Record<string, Point[]> }> {
-  const level = q.level ?? (await pickLevel(db, q.from, q.to));
+  const level = q.level ?? (await pickLevel(db.shared, q.from, q.to));
   const sql =
     level === "raw"
       ? `select k.key, m.ts, m.value from metrics m join metric_keys k on k.id = m.metric_id
-         where m.object_id = $1 and k.module = $2 and k.key = any($3) and m.ts >= $4 and m.ts < $5
+         where m.tenant_id = $1 and m.object_id = $2 and k.module = $3 and k.key = any($4) and m.ts >= $5 and m.ts < $6
          order by m.ts`
       : `select k.key, r.bucket as ts, r.avg as value, r.min, r.max
          from metric_rollups r join metric_keys k on k.id = r.metric_id
-         where r.object_id = $1 and k.module = $2 and k.key = any($3) and r.res = $6
-           and r.bucket >= $4 and r.bucket < $5
+         where r.tenant_id = $1 and r.object_id = $2 and k.module = $3 and k.key = any($4) and r.res = $7
+           and r.bucket >= $5 and r.bucket < $6
          order by r.bucket`;
-  const params: unknown[] = [q.objectId, q.module, q.metrics, q.from, q.to];
+  const params: unknown[] = [db.tenantId, q.objectId, q.module, q.metrics, q.from, q.to];
   if (level !== "raw") params.push(level === "5m" ? 300 : 3600);
   const { rows } = await db.query<Point & { key: string }>(sql, params);
   const out: Record<string, Point[]> = Object.fromEntries(q.metrics.map((k) => [k, []]));

@@ -4,7 +4,7 @@ import { notFound } from "next/navigation";
 import { requireAdmin } from "@/lib/auth";
 import { getT, timeAgo, type Dict } from "@/lib/i18n";
 import type { Locale } from "@/lib/packages/types";
-import { getPool } from "@/lib/engine/db";
+import { tenantDb } from "@/lib/engine/db";
 import { upsertRules } from "@/lib/engine/rules";
 import { listObjects } from "@/lib/packages/console";
 import { getPackageDef, PACKAGES, UPCOMING } from "@/lib/packages/ui";
@@ -36,7 +36,7 @@ async function saveThresholds(formData: FormData) {
   const config = parseSettings(mod.settings, formData);
   if (!mod.validate?.({ ...mod.defaults, ...config })) {
     await createAdminClient().from("org_modules").update({ config }).eq("org_id", org).eq("module", mod.id);
-    await upsertRules(getPool(), org, mod.id, mod.rules(config), null);
+    await upsertRules(tenantDb(org), mod.id, mod.rules(config), null);
   }
   revalidatePath(path(org));
 }
@@ -62,7 +62,7 @@ async function updateDevice(formData: FormData) {
   await requireAdmin();
   const org = String(formData.get("org"));
   const zone = String(formData.get("zone"));
-  await getPool().query(
+  await tenantDb(org).query(
     `update objects set name = $3,
        properties = case when $4::text is null then properties - 'zone_id' else properties || jsonb_build_object('zone_id', $4::text) end
      where tenant_id = $1 and id = $2`,
@@ -118,7 +118,7 @@ async function removeZone(formData: FormData) {
 /** Engine objects keep zone_id in their properties: no FK, so clear it by hand. */
 async function unassignZones(org: string, zones: string[]) {
   if (!zones.length) return;
-  await getPool().query(
+  await tenantDb(org).query(
     `update objects set properties = properties - 'zone_id' where tenant_id = $1 and properties->>'zone_id' = any($2)`,
     [org, zones],
   );
@@ -262,7 +262,7 @@ async function Sites({ id, t, locale }: Ctx & { locale: Locale }) {
   const [sites, zones, devices] = await Promise.all([
     supabase.from("sites").select("id, name").eq("org_id", id).order("name"),
     supabase.from("zones").select("id, name, site_id").eq("org_id", id).order("name"),
-    Promise.all(Object.keys(PACKAGES).map((m) => listObjects(getPool(), id, m))).then((l) => l.flat()),
+    Promise.all(Object.keys(PACKAGES).map((m) => listObjects(tenantDb(id), m))).then((l) => l.flat()),
   ]);
   const siteName = new Map((sites.data ?? []).map((s) => [s.id, s.name]));
 

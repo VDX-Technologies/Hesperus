@@ -2,7 +2,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requireOrg } from "@/lib/auth";
-import { getPool } from "@/lib/engine/db";
+import { tenantDb } from "@/lib/engine/db";
 import { upsertRules } from "@/lib/engine/rules";
 import { getPackageDef } from "@/lib/packages/ui";
 import { safePath } from "@/lib/safe-path";
@@ -20,7 +20,7 @@ export async function saveOrgSettings(formData: FormData) {
   if (err) redirect(`${back}?error=${err}`);
   const { error } = await supabase.from("org_modules").update({ config }).eq("org_id", org.id).eq("module", mod.id);
   if (error) redirect(`${back}?error=readOnly`);
-  await upsertRules(getPool(), org.id, mod.id, mod.rules(config), null);
+  await upsertRules(tenantDb(org.id), mod.id, mod.rules(config), null);
   revalidatePath(`/o/${slug}`, "layout");
   redirect(`${back}?saved=1`);
 }
@@ -32,7 +32,7 @@ export async function saveDeviceSettings(formData: FormData) {
   const id = String(formData.get("device"));
   const { org, role, modules } = await requireOrg(slug);
   if (role !== "owner") redirect(`${back}?error=readOnly`);
-  const db = getPool();
+  const db = tenantDb(org.id);
   const { rows } = await db.query<{ module: string }>(
     `select t.module from objects o join object_types t on t.id = o.type_id where o.tenant_id = $1 and o.id = $2`,
     [org.id, id],
@@ -48,7 +48,7 @@ export async function saveDeviceSettings(formData: FormData) {
     `update objects set properties = properties || jsonb_build_object('config', $3::jsonb) where tenant_id = $1 and id = $2`,
     [org.id, id, JSON.stringify(config)],
   );
-  await upsertRules(db, org.id, mod.id, mod.rules(merged), id);
+  await upsertRules(db, mod.id, mod.rules(merged), id);
   revalidatePath(back);
   redirect(`${back}?saved=1`);
 }

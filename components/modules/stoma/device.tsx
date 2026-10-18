@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { getPool } from "@/lib/engine/db";
+import { tenantDb } from "@/lib/engine/db";
 import { series } from "@/lib/engine/query";
 import type { ConsoleObject } from "@/lib/packages/console";
 import { stoma } from "@/lib/packages/stoma/model";
@@ -30,6 +30,7 @@ const CHART_KEYS = ["temp_c", "leaf_c", "dew_c", "rh", "vpd_kpa", "co2", "voc", 
 
 /** Stoma object page: live values, today's light, latest IR frame, history charts from the engine series. */
 export async function StomaDevice({
+  orgId,
   device,
   range,
   baseHref,
@@ -43,7 +44,7 @@ export async function StomaDevice({
   t: Dict;
   locale: Locale;
 }) {
-  const db = getPool();
+  const db = tenantDb(orgId);
   const now = new Date();
   const midnight = new Date(now);
   midnight.setHours(0, 0, 0, 0);

@@ -1,6 +1,6 @@
 import { requireOrg } from "@/lib/auth";
 import { getT } from "@/lib/i18n";
-import { getPool } from "@/lib/engine/db";
+import { tenantDb } from "@/lib/engine/db";
 import { countOpenAlerts } from "@/lib/packages/console";
 import { Header } from "@/components/header";
 import { LiveRefresh } from "@/components/live-refresh";
@@ -9,7 +9,7 @@ export default async function OrgLayout(props: LayoutProps<"/o/[slug]">) {
   const { slug } = await props.params;
   const { org, isAdmin } = await requireOrg(slug);
   const { t, locale } = await getT();
-  const count = await countOpenAlerts(getPool(), org.id);
+  const count = await countOpenAlerts(tenantDb(org.id));
   return (
     <>
       <Header

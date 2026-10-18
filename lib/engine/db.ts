@@ -1,12 +1,39 @@
 // Plain Postgres access for the engine (no provider SDK): DATABASE_URL is any Postgres,
 // on Supabase the transaction pooler (port 6543) for serverless, direct for jobs.
+// The pool bypasses RLS, so it is only handed out two ways:
+//   tenantDb(id)          every query must name tenant_id and bind that tenant as $1
+//   crossTenantDb(reason) a named, deliberate query across tenants (admin, jobs, auth by token)
 import { Pool, type PoolClient } from "pg";
 
 export type Db = { query: Pool["query"] };
 
+/** A Db bound to one tenant. `shared` reads tenant-less tables (settings, type catalog) only. */
+export interface TenantDb extends Db {
+  readonly tenantId: string;
+  readonly shared: Db;
+}
+
+export class TenantScopeError extends Error {}
+
+const TENANT_COLUMN = /\btenant_id\b/;
+
+/** Wraps any Db (pool, client, test connection) so it refuses queries not scoped to tenantId. */
+export function forTenant(db: Db, tenantId: string): TenantDb {
+  if (!tenantId) throw new TenantScopeError("tenant id is required");
+  const query = ((sql: unknown, params?: unknown[]) => {
+    const text = typeof sql === "string" ? sql : (sql as { text: string }).text;
+    const values = params ?? (sql as { values?: unknown[] }).values;
+    // rejected like a failed query, so callers see one error path
+    if (!TENANT_COLUMN.test(text)) return Promise.reject(new TenantScopeError(`query does not name tenant_id: ${text.slice(0, 80)}`));
+    if (values?.[0] !== tenantId) return Promise.reject(new TenantScopeError("$1 must be the bound tenant id"));
+    return db.query(text, values);
+  }) as Db["query"];
+  return { tenantId, query, shared: db };
+}
+
 let pool: Pool | undefined;
 
-export function getPool(): Pool {
+function getPool(): Pool {
   if (!pool) {
     const url = process.env.DATABASE_URL;
     if (!url) throw new Error("DATABASE_URL is not set");
@@ -14,6 +41,20 @@ export function getPool(): Pool {
   }
   return pool;
 }
+
+export const tenantDb = (tenantId: string): TenantDb => forTenant(getPool(), tenantId);
+
+/** Why a query may span tenants. Keep the list short: each reason is a reviewed exception. */
+export type CrossTenantReason =
+  | "admin"        // platform staff pages, behind requireAdmin
+  | "ingest"       // source lookup by token, then writes for that source's tenant
+  | "maintenance"  // archive, rollups, health, scripts
+  | "settings";    // engine_settings
+
+export const crossTenantDb = (reason: CrossTenantReason): Pool => {
+  void reason;
+  return getPool();
+};
 
 /** Runs fn in a transaction on one connection. */
 export async function tx<T>(pool: Pool, fn: (c: PoolClient) => Promise<T>): Promise<T> {

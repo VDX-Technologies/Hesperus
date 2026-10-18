@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { requireOrg } from "@/lib/auth";
 import { getT } from "@/lib/i18n";
-import { getPool } from "@/lib/engine/db";
+import { tenantDb } from "@/lib/engine/db";
 import { listObjects } from "@/lib/packages/console";
 import { getPackageDef } from "@/lib/packages/ui";
 import { SectionTitle } from "@/components/ui";
@@ -11,7 +11,7 @@ export default async function Settings(props: PageProps<"/o/[slug]/settings">) {
   const { slug } = await props.params;
   const { org, modules } = await requireOrg(slug);
   const { t, locale } = await getT();
-  const lists = await Promise.all(modules.map((m) => listObjects(getPool(), org.id, m.module)));
+  const lists = await Promise.all(modules.map((m) => listObjects(tenantDb(org.id), m.module)));
   return (
     <div>
       <h1 className="text-2xl font-semibold tracking-tight">{t.settings}</h1>

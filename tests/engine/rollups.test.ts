@@ -4,6 +4,7 @@ import { freshDb } from "../db/setup";
 import { createSource } from "../../lib/engine/sources";
 import { registerPackage } from "../../lib/engine/ingest";
 import { pickLevel, series } from "../../lib/engine/query";
+import { forTenant } from "../../lib/engine/db";
 import { testPkg } from "./fixture";
 
 let db: Client;
@@ -121,11 +122,11 @@ describe("query level", () => {
 
   it("returns series at the chosen level", async () => {
     const q = { objectId: obj, module: "testmod", metrics: ["temp", "hum"], from: t(0), to: t(60) };
-    const raw = await series(db, q);
+    const raw = await series(forTenant(db, ORG), q);
     expect(raw.level).toBe("raw");
     expect(raw.series.temp.length).toBe(61);
     expect(raw.series.hum).toEqual([]);
-    const h = await series(db, { ...q, level: "1h" });
+    const h = await series(forTenant(db, ORG), { ...q, level: "1h" });
     expect(h.series.temp).toEqual([{ ts: t(0), value: 29.5, min: 0, max: 59 }]);
   });
 });

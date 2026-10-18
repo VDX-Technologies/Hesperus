@@ -3,7 +3,7 @@
  *   npx tsx scripts/replay.ts <source-id> [--from 2026/10/17] [--events] [--dry-run]
  */
 import "./env";
-import { getPool } from "../lib/engine/db";
+import { crossTenantDb } from "../lib/engine/db";
 import { replaySource } from "../lib/engine/replay";
 import { recordUsage } from "../lib/engine/health";
 import { MeteredStore, storeFromEnv } from "../lib/engine/store";
@@ -19,7 +19,7 @@ if (!sourceId) {
 }
 
 async function main() {
-  const pool = getPool();
+  const pool = crossTenantDb("maintenance");
   const { rows } = await pool.query<Source>(
     `select id, tenant_id, name, connector, module, config, status from sources where id = $1`, [sourceId],
   );

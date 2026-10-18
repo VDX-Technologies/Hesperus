@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { requireOrg } from "@/lib/auth";
 import { getT, timeAgo } from "@/lib/i18n";
-import { getPool } from "@/lib/engine/db";
+import { tenantDb } from "@/lib/engine/db";
 import { listAlerts } from "@/lib/packages/console";
 import { hasUi, MODULE_UI } from "@/components/modules/registry";
 import { SectionTitle, StatusDot } from "@/components/ui";
@@ -10,7 +10,7 @@ export default async function Overview(props: PageProps<"/o/[slug]">) {
   const { slug } = await props.params;
   const { org, modules } = await requireOrg(slug);
   const { t, locale } = await getT();
-  const alerts = await listAlerts(getPool(), org.id, locale, { limit: 6 });
+  const alerts = await listAlerts(tenantDb(org.id), locale, { limit: 6 });
 
   return (
     <div>

@@ -82,6 +82,9 @@ export const GROUPS: Group[] = [
     fields: [
       { key: "ingest.max_batch", label: { en: "Max messages per request", it: "Messaggi max per richiesta" }, units: COUNT },
       { key: "ingest.max_future_s", label: { en: "Reject readings ahead by", it: "Scarta letture nel futuro oltre" }, units: SEC },
+      { key: "ingest.rate_per_min", label: { en: "Requests per minute per source", it: "Richieste al minuto per fonte" }, units: COUNT },
+      { key: "ingest.burst", label: { en: "Burst of requests allowed", it: "Raffica di richieste consentita" }, units: COUNT },
+      { key: "health.rate_limited_per_h", label: { en: "Rate-limited source alert after", it: "Avviso fonte limitata dopo" }, units: [{ label: "/h", factor: 1 }] },
       { key: "health.source_silent_min", label: { en: "Source silent alert after", it: "Avviso fonte muta dopo" }, units: MIN },
       { key: "raw.inbox_stale_min", label: { en: "Unarchived raw alert after", it: "Avviso dati non archiviati dopo" }, units: MIN },
     ],

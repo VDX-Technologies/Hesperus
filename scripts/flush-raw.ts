@@ -3,13 +3,13 @@
  *   npx tsx scripts/flush-raw.ts
  */
 import "./env";
-import { getPool } from "../lib/engine/db";
+import { crossTenantDb } from "../lib/engine/db";
 import { flushRawInbox } from "../lib/engine/archive";
 import { recordUsage } from "../lib/engine/health";
 import { MeteredStore, storeFromEnv } from "../lib/engine/store";
 
 async function main() {
-  const pool = getPool();
+  const pool = crossTenantDb("maintenance");
   const store = new MeteredStore(storeFromEnv());
   const out = await flushRawInbox(pool, store);
   await recordUsage(pool, store.ops);

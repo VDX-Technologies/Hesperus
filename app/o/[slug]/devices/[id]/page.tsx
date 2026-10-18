@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { requireOrg } from "@/lib/auth";
 import { getT } from "@/lib/i18n";
-import { getPool } from "@/lib/engine/db";
+import { tenantDb } from "@/lib/engine/db";
 import { listObjects } from "@/lib/packages/console";
 import { getPackageDef } from "@/lib/packages/ui";
 import { hasUi, MODULE_UI } from "@/components/modules/registry";
@@ -17,7 +17,7 @@ export default async function DevicePage(props: PageProps<"/o/[slug]/devices/[id
   const { org, modules, role } = await requireOrg(slug);
   const { t, locale } = await getT();
   if (!/^[0-9a-f-]{36}$/i.test(id)) notFound();
-  const db = getPool();
+  const db = tenantDb(org.id);
   const { rows } = await db.query<{ module: string }>(
     `select t.module from objects o join object_types t on t.id = o.type_id where o.tenant_id = $1 and o.id = $2`,
     [org.id, id],
@@ -25,7 +25,7 @@ export default async function DevicePage(props: PageProps<"/o/[slug]/devices/[id
   const pkg = rows[0]?.module;
   const mod = pkg ? getPackageDef(pkg) : undefined;
   if (!pkg || !mod || !hasUi(pkg)) notFound();
-  const [device] = await listObjects(db, org.id, pkg, id);
+  const [device] = await listObjects(db, pkg, id);
   if (!device) notFound();
   const { Device } = MODULE_UI[pkg];
   const orgCfg = (modules.find((m) => m.module === mod.id)?.config ?? {}) as Record<string, number>;

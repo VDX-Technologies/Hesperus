@@ -2,7 +2,7 @@
 // Rules with the same key form a family; for a given object the rule targeting that object
 // wins over the type-wide one, which is how per-device thresholds are expressed. Rules marked
 // push_to_device also make up the config sent back to the device.
-import type { Db } from "./db";
+import type { Db, TenantDb } from "./db";
 import type { AlertTransition } from "./hooks";
 
 export type Op = ">" | ">=" | "<" | "<=";
@@ -30,11 +30,11 @@ export interface Point {
   value: number;
 }
 
-export async function loadRules(db: Db, tenantId: string, module: string): Promise<Rule[]> {
+export async function loadRules(db: TenantDb, module: string): Promise<Rule[]> {
   const { rows } = await db.query<Rule>(
     `select id, key, name, metric, object_type, object_id, op, threshold, hysteresis, for_s, severity, push_to_device
      from rules where tenant_id = $1 and module = $2 and enabled`,
-    [tenantId, module],
+    [db.tenantId, module],
   );
   return rows;
 }
@@ -84,8 +84,8 @@ export async function evaluateRules(
   const { rows: active } = await db.query<{ id: string; rule_id: string; object_id: string; peak: number }>(
     `select a.id, a.rule_id, a.object_id, a.peak from object_alerts a
      join unnest($1::uuid[], $2::uuid[]) u(r, o) on a.rule_id = u.r and a.object_id = u.o
-     where a.status <> 'resolved'`,
-    [ruleIds, objIds],
+     where a.tenant_id = $3 and a.status <> 'resolved'`,
+    [ruleIds, objIds, tenantId],
   );
   const key = (r: string, o: string) => `${r}\u0000${o}`;
   const stateOf = new Map(states.map((s) => [key(s.rule_id, s.object_id), s]));
@@ -106,8 +106,8 @@ export async function evaluateRules(
           alert.peak = worse(rule, alert.peak, p.value);
           continue;
         }
-        await db.query(`update object_alerts set status = 'resolved', resolved_at = $2, peak = $3 where id = $1`, [
-          alert.id, p.ts, alert.peak,
+        await db.query(`update object_alerts set status = 'resolved', resolved_at = $2, peak = $3 where id = $1 and tenant_id = $4`, [
+          alert.id, p.ts, alert.peak, tenantId,
         ]);
         out.push(await transition(db, "resolved", tenantId, alert.id, objectId, rule, p));
         alert = undefined; since = null;
@@ -126,7 +126,7 @@ export async function evaluateRules(
       }
     }
     if (lastValue === null) continue;
-    if (alert) await db.query(`update object_alerts set peak = $2 where id = $1`, [alert.id, alert.peak]);
+    if (alert) await db.query(`update object_alerts set peak = $2 where id = $1 and tenant_id = $3`, [alert.id, alert.peak, tenantId]);
     await db.query(
       `insert into rule_state (rule_id, object_id, breach_since, last_ts, last_value) values ($1, $2, $3, $4, $5)
        on conflict (rule_id, object_id) do update set
@@ -175,7 +175,7 @@ export type RuleSpec = Pick<Rule, "key" | "metric" | "op" | "threshold" | "sever
 
 /** Creates or updates rules by family; with objectId they become that object's overrides. */
 export async function upsertRules(
-  db: Db, tenantId: string, module: string, specs: RuleSpec[], objectId: string | null = null,
+  db: TenantDb, module: string, specs: RuleSpec[], objectId: string | null = null,
 ): Promise<number> {
   for (const r of specs) await db.query(
     `insert into rules (tenant_id, key, name, module, metric, object_type, object_id, op, threshold, hysteresis,
@@ -185,7 +185,7 @@ export async function upsertRules(
      do update set name = excluded.name, metric = excluded.metric, object_type = excluded.object_type,
        op = excluded.op, threshold = excluded.threshold, hysteresis = excluded.hysteresis,
        for_s = excluded.for_s, severity = excluded.severity, push_to_device = excluded.push_to_device`,
-    [tenantId, r.key, r.name ?? null, module, r.metric, r.object_type ?? null, objectId, r.op, r.threshold,
+    [db.tenantId, r.key, r.name ?? null, module, r.metric, r.object_type ?? null, objectId, r.op, r.threshold,
       r.hysteresis ?? 0, r.for_s ?? 0, r.severity, r.push_to_device ?? false],
   );
   return specs.length;

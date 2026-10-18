@@ -3,9 +3,9 @@
  * Auth: "Authorization: Bearer <source token>". Body: one message or an array of messages,
  * interpreted by the source's module package.
  */
-import { getPool } from "@/lib/engine/db";
+import { crossTenantDb } from "@/lib/engine/db";
 import { ConnectorError, pushConnector } from "@/lib/engine/connectors";
-import { ingestPush } from "@/lib/engine/ingest";
+import { ingestPush, takeIngestToken } from "@/lib/engine/ingest";
 import { ValidationError } from "@/lib/engine/package";
 import { sourceByToken } from "@/lib/engine/sources";
 import { getPackage } from "@/lib/packages";
@@ -17,13 +17,17 @@ export async function POST(request: Request) {
   const token = auth?.startsWith("Bearer ") ? auth.slice(7) : null;
   if (!token) return Response.json({ error: "missing source token" }, { status: 401 });
 
-  const db = getPool();
+  const db = crossTenantDb("ingest");
   const source = await sourceByToken(db, token);
   if (!source) return Response.json({ error: "invalid source token" }, { status: 401 });
   if (source.connector !== "push") return Response.json({ error: "source does not accept push" }, { status: 403 });
   if (source.status === "paused") return Response.json({ error: "source is paused" }, { status: 403 });
   const pkg = getPackage(source.module);
   if (!pkg) return Response.json({ error: `module "${source.module}" is not installed` }, { status: 500 });
+
+  const wait = await takeIngestToken(db, source.id);
+  if (wait > 0)
+    return Response.json({ error: "rate limited" }, { status: 429, headers: { "Retry-After": String(Math.ceil(wait)) } });
 
   if (Number(request.headers.get("content-length") ?? 0) > MAX_BODY) return Response.json({ error: "body too large" }, { status: 413 });
   let body: unknown;

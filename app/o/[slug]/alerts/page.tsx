@@ -1,7 +1,7 @@
 import { revalidatePath } from "next/cache";
 import { requireOrg } from "@/lib/auth";
 import { getT, timeAgo } from "@/lib/i18n";
-import { getPool } from "@/lib/engine/db";
+import { tenantDb } from "@/lib/engine/db";
 import { listAlerts, type ConsoleAlert } from "@/lib/packages/console";
 import { SectionTitle, StatusDot } from "@/components/ui";
 
@@ -18,10 +18,10 @@ export default async function Alerts(props: PageProps<"/o/[slug]/alerts">) {
   const { slug } = await props.params;
   const { org, role } = await requireOrg(slug);
   const { t, locale } = await getT();
-  const db = getPool();
+  const db = tenantDb(org.id);
   const [open, closed] = await Promise.all([
-    listAlerts(db, org.id, locale, { limit: 200 }),
-    listAlerts(db, org.id, locale, { history: true, limit: 200 }),
+    listAlerts(db, locale, { limit: 200 }),
+    listAlerts(db, locale, { history: true, limit: 200 }),
   ]);
   const Row = ({ a }: { a: ConsoleAlert }) => (
     <li className="flex items-start gap-3 px-4 py-3 sm:items-center sm:px-5">

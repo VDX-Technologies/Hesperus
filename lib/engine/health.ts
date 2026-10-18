@@ -94,6 +94,23 @@ export async function collectHealth(db: Db, store?: ObjectStore, now = new Date(
     message: `source "${r.name}" (${r.org}) ${r.silent ? `silent since ${r.last_seen!.toISOString()}` : "is sending"}`,
   });
 
+  // Sources hitting the push rate limit over and over this hour.
+  const limitedMax = num(s, "health.rate_limited_per_h", 20);
+  const { rows: limited } = await db.query<{ id: string; name: string; org: string; n: number }>(
+    `select s.id, s.name, o.name org,
+            case when r.limited_hour = date_trunc('hour', $1::timestamptz) then r.limited_count else 0 end n
+     from source_rate r join sources s on s.id = r.source_id join organizations o on o.id = s.tenant_id
+     where s.status = 'active'`,
+    [now],
+  );
+  for (const r of limited) checks.push({
+    key: `ratelimit.${r.id}`,
+    ok: r.n <= limitedMax,
+    message: `source "${r.name}" (${r.org}) ${r.n > limitedMax ? `rate limited ${r.n} times this hour` : "within its rate limit"}`,
+    value: r.n,
+    limit: limitedMax,
+  });
+
   // Raw rows that should have been flushed to the archive long ago.
   const staleMin = num(s, "raw.inbox_stale_min", 120);
   const { rows: inbox } = await db.query<{ oldest: Date | null }>(`select min(received_at) oldest from raw_inbox`);

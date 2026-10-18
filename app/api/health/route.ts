@@ -3,13 +3,13 @@
  * hourly health run (scripts/health.ts) found no problem, 503 otherwise. Public, so it only
  * says how many problems there are; the details are in /admin/engine.
  */
-import { getPool } from "@/lib/engine/db";
+import { crossTenantDb } from "@/lib/engine/db";
 
 const STALE_MS = 2 * 3600_000; // the health job runs hourly
 
 export async function GET() {
   try {
-    const { rows } = await getPool().query<{ last_ok: Date | null; last_error: string | null; failing: number | null }>(
+    const { rows } = await crossTenantDb("maintenance").query<{ last_ok: Date | null; last_error: string | null; failing: number | null }>(
       `select last_ok, last_error,
               (select count(*) from jsonb_array_elements(last_result->'checks') c where c->>'ok' = 'false')::int failing
        from engine_jobs where name = 'health'`,
