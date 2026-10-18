@@ -26,7 +26,7 @@ export interface IngestResult {
 type Registry = { types: Map<string, string>; metrics: Map<string, number> };
 const registries = new WeakMap<Db, Map<string, Registry>>();
 
-/** Upserts the package's object types and metric keys once per process and database. */
+/** Upserts the package's object types, event types and metric keys once per process and database. */
 export async function registerPackage(db: Db, pkg: ModulePackage): Promise<Registry> {
   let byPkg = registries.get(db);
   if (!byPkg) registries.set(db, (byPkg = new Map()));
@@ -43,6 +43,14 @@ export async function registerPackage(db: Db, pkg: ModulePackage): Promise<Regis
       [pkg.id, t.key, t.name, t.properties],
     );
     reg.types.set(t.key, rows[0].id);
+  }
+  for (const t of pkg.eventTypes ?? []) {
+    await db.query(
+      `insert into event_types (module, key, name, fields) values ($1, $2, $3, $4)
+       on conflict (module, key) where tenant_id is null
+       do update set name = excluded.name, fields = excluded.fields`,
+      [pkg.id, t.key, t.name, t.fields],
+    );
   }
   for (const m of [...pkg.metrics, ...(pkg.derived ?? [])]) {
     const { rows } = await db.query<{ id: number }>(

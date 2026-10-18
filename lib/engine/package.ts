@@ -2,20 +2,31 @@
 // greenhouse or a drone is. Packages declare their object types and metric keys; the
 // engine registers them and turns normalized messages into objects, metrics and events.
 
-export type PropertyType = "string" | "number" | "integer" | "boolean" | "object" | "array" | "timestamp";
+export type PropertyType = "string" | "number" | "integer" | "boolean" | "object" | "array" | "timestamp" | "quantity";
 
+/** One field of an object or event schema. A "quantity" is {value, unit}, unit one of `units`. */
 export interface PropertySpec {
   type: PropertyType;
   required?: boolean;
   enum?: unknown[];
+  units?: string[];
   min?: number;
   max?: number;
+  /** Form label, {"en": "...", "it": "..."}; ignored by validation. */
+  label?: Record<string, string>;
 }
 
 export interface ObjectTypeDef {
   key: string;
   name: Record<string, string>;
   properties: Record<string, PropertySpec>;
+}
+
+/** An event type with a payload schema; stored as `${package}.${key}`. */
+export interface EventTypeDef {
+  key: string;
+  name: Record<string, string>;
+  fields: Record<string, PropertySpec>;
 }
 
 export interface MetricDef {
@@ -53,6 +64,8 @@ export class ValidationError extends Error {}
 export interface ModulePackage {
   id: string;
   objectTypes: ObjectTypeDef[];
+  /** Event types whose payload the engine validates (push, upload, manual, replay). */
+  eventTypes?: EventTypeDef[];
   metrics: MetricDef[];
   derived?: DerivedDef[];
   /** Validates and maps one message. Throws ValidationError for bad input. */

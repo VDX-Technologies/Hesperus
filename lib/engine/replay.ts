@@ -21,6 +21,8 @@ export async function replaySource(
   pkg: ModulePackage,
   o: ReplayOptions = {},
 ): Promise<{ objects: number; total: IngestResult }> {
+  // What people recorded is already final in events (versions included); nothing to rebuild.
+  if (source.connector === "manual") throw new Error("manual sources are not replayed");
   const keys = await store.list(`raw/${source.tenant_id}/${source.id}/${o.from ?? ""}`);
   const total: IngestResult = {
     accepted: 0, rejected: [], metrics: 0, events: 0, alerts: { opened: 0, resolved: 0 }, configs: [], objectIds: [],

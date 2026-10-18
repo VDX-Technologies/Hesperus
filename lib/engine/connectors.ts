@@ -6,7 +6,7 @@
 import { parseCsv } from "./csv";
 import type { Source } from "./sources";
 
-export type ConnectorKind = "push" | "pull" | "upload";
+export type ConnectorKind = "push" | "pull" | "upload" | "manual";
 
 export type RawMessage = Record<string, unknown>;
 
