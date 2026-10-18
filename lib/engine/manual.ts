@@ -139,3 +139,60 @@ export async function correctManualEvent(
   });
   return id;
 }
+
+async function checkObject(db: TenantDb, pkg: ModulePackage, author: Author, type: string, properties: Record<string, unknown>) {
+  if (!canRecord(author.role)) throw new ManualEventError(403, "viewers cannot create objects");
+  const def = pkg.objectTypes.find((t) => t.key === type);
+  if (!def) throw new ManualEventError(400, `unknown object type "${type}"`);
+  const err = validateProperties(def.properties, properties);
+  if (err) throw new ManualEventError(400, err);
+  return (await registerPackage(db.shared, pkg)).types.get(type)!;
+}
+
+/** Creates an object entered by hand (a crop, ...), optionally located in a place. Returns its id. */
+export async function createManualObject(
+  db: TenantDb,
+  pkg: ModulePackage,
+  author: Author,
+  input: { type: string; name: string; properties: Record<string, unknown>; placeId?: string | null },
+): Promise<string> {
+  const typeId = await checkObject(db, pkg, author, input.type, input.properties);
+  const name = input.name.trim();
+  if (!name) throw new ManualEventError(400, "a name is required");
+  const settings = await getSettings(db.shared);
+  const { rows: n } = await db.query<{ n: number }>(
+    `select count(*)::int n from objects o where o.tenant_id = $1 and o.external_id is null
+       and o.type_id in (select id from object_types where module = $2)`,
+    [db.tenantId, pkg.id],
+  );
+  if (n[0].n >= num(settings, "manual.objects_max", 500)) throw new ManualEventError(429, "object limit reached");
+  if (input.placeId) {
+    const p = await db.query(
+      `select 1 from objects o join object_types t on t.id = o.type_id
+        where o.tenant_id = $1 and o.id = $2 and t.module = 'core' and t.key in ('site', 'area')`,
+      [db.tenantId, input.placeId],
+    );
+    if (!p.rowCount) throw new ManualEventError(404, "place not found");
+  }
+  const { rows } = await db.query<{ id: string }>(
+    `insert into objects (tenant_id, type_id, name, properties) values ($1, $2, $3, $4) returning id`,
+    [db.tenantId, typeId, name, input.properties],
+  );
+  const id = rows[0].id;
+  if (input.placeId)
+    await db.query(`insert into links (tenant_id, type, src_id, dst_id) values ($1, 'located_in', $2, $3)`, [db.tenantId, id, input.placeId]);
+  await record(db, author, "object.create", { objectId: id, subject: name, data: { type: `${pkg.id}.${input.type}`, properties: input.properties, place: input.placeId ?? null } });
+  return id;
+}
+
+/** Replaces the properties of an object of the package (validated against its type). */
+export async function updateManualObject(db: TenantDb, pkg: ModulePackage, author: Author, id: string, properties: Record<string, unknown>): Promise<void> {
+  const { rows } = await db.query<{ key: string; name: string | null }>(
+    `select t.key, o.name from objects o join object_types t on t.id = o.type_id where o.tenant_id = $1 and o.id = $2 and t.module = $3`,
+    [db.tenantId, id, pkg.id],
+  );
+  if (!rows[0]) throw new ManualEventError(404, "object not found");
+  await checkObject(db, pkg, author, rows[0].key, properties);
+  await db.query(`update objects set properties = $3 where tenant_id = $1 and id = $2`, [db.tenantId, id, properties]);
+  await record(db, author, "object.update", { objectId: id, subject: rows[0].name, data: { properties } });
+}

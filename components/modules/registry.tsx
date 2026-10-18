@@ -6,10 +6,13 @@ import { StomaOverview } from "./stoma/overview";
 import { StomaDevice } from "./stoma/device";
 import { RecordsOverview } from "./records/overview";
 import { RecordsDevice } from "./records/device";
+import { AgronomyOverview } from "./agronomy/overview";
+import { AgronomyDevice } from "./agronomy/device";
 
 export const MODULE_UI = {
   stoma: { Overview: StomaOverview, Device: StomaDevice },
   records: { Overview: RecordsOverview, Device: RecordsDevice },
+  agronomy: { Overview: AgronomyOverview, Device: AgronomyDevice },
 } as const;
 
 export type ModuleUiId = keyof typeof MODULE_UI;

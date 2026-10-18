@@ -7,7 +7,7 @@ import { LiveRefresh } from "@/components/live-refresh";
 
 export default async function OrgLayout(props: LayoutProps<"/o/[slug]">) {
   const { slug } = await props.params;
-  const { org, isAdmin } = await requireOrg(slug);
+  const { org, isAdmin, modules } = await requireOrg(slug);
   const { t, locale } = await getT();
   const db = tenantDb(org.id);
   const [count, uploads] = await Promise.all([
@@ -26,6 +26,7 @@ export default async function OrgLayout(props: LayoutProps<"/o/[slug]">) {
         nav={[
           { href: `/o/${slug}`, label: t.overview },
           { href: `/o/${slug}/alerts`, label: t.alerts, badge: count },
+          ...(modules.some((m) => m.module === "agronomy") ? [{ href: `/o/${slug}/treatments`, label: t.treatments }] : []),
           ...(hasUpload ? [{ href: `/o/${slug}/upload`, label: t.upload }] : []),
           { href: `/o/${slug}/activity`, label: t.activity },
           { href: `/o/${slug}/settings`, label: t.settings },

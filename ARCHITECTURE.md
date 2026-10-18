@@ -377,6 +377,23 @@ Il modulo `records` (`lib/packages/records/`) è generico: ogni riga di un regis
 
 Ogni soggetto diventa un oggetto, ogni voce un evento `records.entry`; `quantity`, `dose` e `area` sono anche metriche, quindi si possono graficare. La console mostra le voci recenti per soggetto (`console.ts`, `listEntries`).
 
+### 11.4 Agronomia: registro dei trattamenti
+
+Il modulo `agronomy` (`lib/packages/agronomy/`) tiene tutta la conoscenza agronomica; il motore fornisce solo oggetti ed eventi manuali (`lib/engine/manual.ts`). Nessun calcolo automatico né AI: i dati li scrive l'utente.
+
+- **Coltura** (`crop`): oggetto manuale con specie, varietà, ettari e fase fenologica (`CROP_PROPERTIES`), collegato facoltativamente a un luogo (`located_in`). Il numero di oggetti è limitato da `objects_max` (oltre il limite: 429).
+- **Eventi** `treatment`, `sowing`, `transplant`, `harvest`, ognuno con il proprio schema. Una correzione è una nuova versione dell'evento (`supersedes`); correggere una versione già superata dà 409. Owner e member scrivono, viewer no; ogni scrittura finisce in `audit_log`.
+- **Registro** (`/o/[slug]/treatments`): pensato per il telefono. Prevede:
+  - la scelta della coltura, che compila superficie e fase;
+  - "Ripeti ultimo", che copia l'ultimo trattamento dell'utente con la data di oggi;
+  - l'autocompletamento di prodotti e avversità già usati;
+  - i filtri per coltura, prodotto, avversità e periodo.
+- **Export** (`treatments/export?format=pdf|csv|json`), con gli stessi filtri e solo le versioni correnti (`register.ts`, `pdf.ts`):
+  - PDF A4 orizzontale come il registro cartaceo, prodotto con pdf-lib;
+  - CSV con `;`, decimali con virgola e BOM;
+  - JSON con i campi del registro ufficiale.
+- **Pagina coltura** (`/o/[slug]/devices/[id]`): dati, timeline degli eventi e, se nell'area della coltura c'è un sensore Stoma, grafici di `rh` e `wet_h` sugli ultimi 30 giorni.
+
 ---
 
 ## 12. La console web
@@ -390,6 +407,7 @@ Ogni soggetto diventa un oggetto, ogni voce un evento `records.entry`; `quantity
 | `/o/[slug]` | membri dell'org | panoramica dei dispositivi del cliente |
 | `/o/[slug]/alerts` | membri | allarmi aperti e storici |
 | `/o/[slug]/devices/[id]` | membri | dettaglio e grafici di un dispositivo |
+| `/o/[slug]/treatments` | membri (viewer in sola lettura) | registro trattamenti, colture, export PDF/CSV/JSON |
 | `/o/[slug]/upload` | owner (gli altri vedono solo l'elenco) | caricamento di file CSV nelle source upload, ultimi file caricati |
 | `/o/[slug]/settings` | owner (gli altri in sola lettura) | soglie aziendali e per dispositivo |
 | `/admin` | staff VDX | elenco clienti, creazione di nuove org |
@@ -450,6 +468,7 @@ Si eseguono con `npm test` (vitest).
 
 - `tests/engine/`: ingest, regole, archivio, health, rollup e upload CSV.
 - `tests/packages/stoma/`: i calcoli di Stoma.
+- `tests/packages/agronomy.test.ts`: colture, permessi, registro, correzioni, isolamento tra tenant, export e limiti.
 - `tests/db/`: l'harness che crea un **database usa-e-getta** per ogni file di test, applicando tutte le migrazioni. Richiede un Postgres locale (`npx supabase start`) oppure `TEST_DATABASE_URL`.
 
 I test dell'archivio usano `MemoryStore`, quindi non toccano R2.
