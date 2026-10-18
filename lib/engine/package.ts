@@ -14,6 +14,8 @@ export interface PropertySpec {
   max?: number;
   /** Form label, {"en": "...", "it": "..."}; ignored by validation. */
   label?: Record<string, string>;
+  /** Text for enum values, {value: {"en": ..., "it": ...}}; ignored by validation. */
+  options?: Record<string, Record<string, string>>;
 }
 
 export interface ObjectTypeDef {
@@ -27,6 +29,10 @@ export interface EventTypeDef {
   key: string;
   name: Record<string, string>;
   fields: Record<string, PropertySpec>;
+  /** Object type the events are about ("agronomy.crop"); the entry form offers only those. */
+  subject?: string;
+  /** Fields filled in from the chosen object: {field: property}. */
+  fromSubject?: Record<string, string>;
 }
 
 export interface MetricDef {

@@ -304,6 +304,8 @@ Tutti i valori sono modificabili da `/admin/settings` senza toccare il codice.
 | `upload.max_bytes` | 5 MB | Dimensione massima di un file caricato |
 | `upload.max_rows` | 5000 | Righe massime di un file caricato |
 | `upload.files_per_day` | 50 | File caricabili in 24 ore per ogni source upload |
+| `registers.types_max` | 50 | Tipi di evento che un cliente può creare nell'editor |
+| `registers.export_chunk` | 500 | Righe lette per query durante un export |
 
 ---
 
@@ -381,18 +383,28 @@ Ogni soggetto diventa un oggetto, ogni voce un evento `records.entry`; `quantity
 
 Il modulo `agronomy` (`lib/packages/agronomy/`) tiene tutta la conoscenza agronomica; il motore fornisce solo oggetti ed eventi manuali (`lib/engine/manual.ts`). Nessun calcolo automatico né AI: i dati li scrive l'utente.
 
-- **Coltura** (`crop`): oggetto manuale con specie, varietà, ettari e fase fenologica (`CROP_PROPERTIES`), collegato facoltativamente a un luogo (`located_in`). Il numero di oggetti è limitato da `objects_max` (oltre il limite: 429).
-- **Eventi** `treatment`, `sowing`, `transplant`, `harvest`, ognuno con il proprio schema. Una correzione è una nuova versione dell'evento (`supersedes`); correggere una versione già superata dà 409. Owner e member scrivono, viewer no; ogni scrittura finisce in `audit_log`.
-- **Registro** (`/o/[slug]/treatments`): pensato per il telefono. Prevede:
-  - la scelta della coltura, che compila superficie e fase;
-  - "Ripeti ultimo", che copia l'ultimo trattamento dell'utente con la data di oggi;
-  - l'autocompletamento di prodotti e avversità già usati;
-  - i filtri per coltura, prodotto, avversità e periodo.
-- **Export** (`treatments/export?format=pdf|csv|json`), con gli stessi filtri e solo le versioni correnti (`register.ts`, `pdf.ts`):
-  - PDF A4 orizzontale come il registro cartaceo, prodotto con pdf-lib;
-  - CSV con `;`, decimali con virgola e BOM;
-  - JSON con i campi del registro ufficiale.
+- **Coltura** (`crop`): oggetto manuale con specie, varietà, ettari, fase fenologica, inizio/fine e `status` (`CROP_PROPERTIES`; il form usa `CROP_FORM`, senza status), collegato facoltativamente a un luogo (`located_in`). Il numero di oggetti è limitato da `objects_max` (oltre il limite: 429).
+- **Pagina colture** (`/o/[slug]/crops`): elenco delle attive e delle archiviate, nuova coltura, modifica con lo stesso form (`?edit=`).
+  - **Modifica** (`updateManualObject`): sostituisce le proprietà ma non lo status; nell'audit `object.update` con prima e dopo.
+  - **Archiviazione** (`archiveManualObject`): data di fine (quella scelta, o quella che ha, o oggi) e `status = archived`; audit `object.archive`. La coltura esce dagli elenchi attivi e dai menu di inserimento, nuovi eventi su di essa danno 409; resta leggibile nella sua pagina e nei registri.
+  - **Eliminazione** (`deleteManualObject`): solo se nessun evento la cita (altrimenti 409: va archiviata); audit `object.delete`.
+  - I trattamenti già registrati non cambiano mai: né modifica né archiviazione li toccano.
+- **Eventi** `treatment`, `sowing`, `transplant`, `harvest`, ognuno con il proprio schema e `subject = agronomy.crop`. Il registro è quello generico (§11.5); il modulo aggiunge:
+  - `fromSubject`: la scelta della coltura compila superficie e fase;
+  - l'export JSON con i campi del registro ufficiale (`exports.ts`, registrato in `lib/packages/exports.ts`).
+- `/o/[slug]/treatments` reindirizza a `/o/[slug]/registers/agronomy.treatment` (anche `?crop=` → `?obj=`).
 - **Pagina coltura** (`/o/[slug]/devices/[id]`): dati, timeline degli eventi e, se nell'area della coltura c'è un sensore Stoma, grafici di `rh` e `wet_h` sugli ultimi 30 giorni.
+
+### 11.5 Registri generici (`lib/engine/registers.ts`)
+
+Ogni tipo di evento con uno schema ha un registro, senza codice dedicato:
+
+- **Tipi**: quelli dei pacchetti (`eventTypes`) più quelli del cliente in `event_types` con `module = 'custom'` (`listEventTypes`). Un tipo ha `fields` (schema), `subject` (tipo di oggetto: il form offre solo oggetti di quel tipo, non archiviati), `fromSubject` (campi copiati dall'oggetto scelto) e `field_order` (l'ordine dell'editor, perché jsonb non conserva l'ordine delle chiavi).
+- **Editor** (`/o/[slug]/registers/types`, solo owner): `saveEventType` valida la definizione (`checkEventType`), rispetta `registers.types_max` e scrive `event_type.create|update` nell'audit. Gli eventi già registrati restano come sono.
+- **Registro** (`/o/[slug]/registers/[type]`): form d'inserimento (`formSchema`, decimali con virgola), "ripeti ultimo", correzioni come nuove versioni, filtri `from`, `to`, `obj`, `f.<campo>` applicati dal database (`registerQuery`, contenimento jsonb).
+- **Paginazione keyset**: mai offset. Il cursore è `(ts, id)` (`cursorOf`/`parseCursor`, parametro `after`), quindi le pagine non saltano né ripetono righe anche con date uguali.
+- **Export** (`registers/[type]/export?format=csv|pdf|<extra>`): `allEvents` legge a blocchi di `registers.export_chunk` in ordine cronologico; il CSV è in streaming (chiavi come intestazioni, `;`, decimali con virgola, quantità in due colonne, BOM), il PDF passa da `tablePdf` (`lib/engine/pdf.ts`, pdf-lib, A4 orizzontale su più pagine). Gli export extra li dichiarano i pacchetti (`exportsOf`).
+- Owner e member registrano, viewer legge; ogni scrittura va in `audit_log`.
 
 ---
 
@@ -407,7 +419,11 @@ Il modulo `agronomy` (`lib/packages/agronomy/`) tiene tutta la conoscenza agrono
 | `/o/[slug]` | membri dell'org | panoramica dei dispositivi del cliente |
 | `/o/[slug]/alerts` | membri | allarmi aperti e storici |
 | `/o/[slug]/devices/[id]` | membri | dettaglio e grafici di un dispositivo |
-| `/o/[slug]/treatments` | membri (viewer in sola lettura) | registro trattamenti, colture, export PDF/CSV/JSON |
+| `/o/[slug]/registers` | membri | indice dei registri con il numero di voci |
+| `/o/[slug]/registers/[type]` | membri (viewer in sola lettura) | registro generico: inserimento, correzioni, filtri, pagine, export |
+| `/o/[slug]/registers/types` | owner | editor dei tipi di evento del cliente |
+| `/o/[slug]/crops` | membri (viewer in sola lettura) | colture: nuove, modifica, archiviazione, eliminazione |
+| `/o/[slug]/treatments` | — | reindirizza al registro `agronomy.treatment` |
 | `/o/[slug]/upload` | owner (gli altri vedono solo l'elenco) | caricamento di file CSV nelle source upload, ultimi file caricati |
 | `/o/[slug]/settings` | owner (gli altri in sola lettura) | soglie aziendali e per dispositivo |
 | `/admin` | staff VDX | elenco clienti, creazione di nuove org |

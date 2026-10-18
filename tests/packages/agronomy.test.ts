@@ -8,7 +8,7 @@ import { forTenant, type TenantDb } from "../../lib/engine/db";
 import { registerPackage } from "../../lib/engine/ingest";
 import { createPlace } from "../../lib/engine/places";
 import { getSettings } from "../../lib/engine/settings";
-import { correctManualEvent, createManualEvent, createManualObject, ManualEventError, type Author } from "../../lib/engine/manual";
+import { archiveManualObject, correctManualEvent, createManualEvent, createManualObject, deleteManualObject, ManualEventError, updateManualObject, type Author } from "../../lib/engine/manual";
 import { lastEventBy } from "../../lib/engine/events";
 import { listAudit } from "../../lib/engine/audit";
 import { payloadFromForm } from "../../lib/engine/schema";
@@ -155,5 +155,36 @@ describe("sensors and limits", () => {
     await createManualObject(B, agronomyPackage, owner, { type: "crop", name: "Prima di B", properties: crop });
     await db.query(`update engine_settings set value = to_jsonb(500) where key = 'manual.objects_max'`);
     await getSettings(db, true);
+  });
+});
+
+describe("crop lifecycle", () => {
+  it("updates the properties keeping status; viewers refused; audited", async () => {
+    await expect(updateManualObject(A, agronomyPackage, viewer, lettuce, { species: "Lattuga", hectares: 0.5 })).rejects.toMatchObject({ status: 403 });
+    await updateManualObject(A, agronomyPackage, member, lettuce, { species: "Lattuga", hectares: 0.5, phase: "raccolta", status: "archived" });
+    const l = (await listCrops(A)).find((c) => c.id === lettuce)!;
+    expect(l).toMatchObject({ hectares: 0.5, phase: "raccolta", archived: false });
+    const a = (await listAudit(A, { limit: 20 })).find((e) => e.action === "object.update" && e.objectId === lettuce)!;
+    expect(a.data).toMatchObject({ before: { hectares: 0.4 }, properties: { hectares: 0.5 } });
+  });
+
+  it("archives with an end day; the treatments stay, new ones are refused", async () => {
+    const before = await listTreatments(A, { cropId: lettuce });
+    await archiveManualObject(A, agronomyPackage, owner, lettuce, day("2026-10-15"));
+    await expect(archiveManualObject(A, agronomyPackage, owner, lettuce)).rejects.toMatchObject({ status: 409 });
+    expect((await listCrops(A)).find((c) => c.id === lettuce)).toMatchObject({ archived: true, end: "2026-10-15T00:00:00.000Z" });
+    expect(await listTreatments(A, { cropId: lettuce })).toEqual(before);
+    await expect(createManualEvent(A, agronomyPackage, owner, { type: "treatment", ts: day("2026-10-16"), payload: treatment(), objectIds: [lettuce] })).rejects.toMatchObject({ status: 409 });
+    expect((await listAudit(A, { limit: 20 })).some((e) => e.action === "object.archive" && e.objectId === lettuce)).toBe(true);
+  });
+
+  it("deletes only crops without events", async () => {
+    await expect(deleteManualObject(A, agronomyPackage, owner, tomato)).rejects.toMatchObject({ status: 409 });
+    const empty = await createManualObject(A, agronomyPackage, owner, { type: "crop", name: "Vuota", properties: crop, placeId: area });
+    await expect(deleteManualObject(A, agronomyPackage, viewer, empty)).rejects.toMatchObject({ status: 403 });
+    await expect(deleteManualObject(B, agronomyPackage, owner, empty)).rejects.toMatchObject({ status: 404 });
+    await deleteManualObject(A, agronomyPackage, owner, empty);
+    expect((await listCrops(A)).some((c) => c.id === empty)).toBe(false);
+    expect((await listAudit(A, { limit: 20 })).some((e) => e.action === "object.delete" && e.objectId === empty)).toBe(true);
   });
 });

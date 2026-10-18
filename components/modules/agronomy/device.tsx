@@ -57,7 +57,7 @@ export async function AgronomyDevice({ orgId, device, baseHref, t, locale }: {
           </div>
         ))}
       </div>
-      <SectionTitle right={<Link href={`/o/${slug}/treatments?crop=${device.id}`} className="text-xs text-frost hover:underline">{t.treatmentsRegister} →</Link>}>
+      <SectionTitle right={<Link href={`/o/${slug}/registers/agronomy.treatment?obj=${device.id}`} className="text-xs text-frost hover:underline">{t.treatmentsRegister} →</Link>}>
         {t.cropTimeline}
       </SectionTitle>
       <TreatmentRows rows={rows} locale={locale} t={t} />

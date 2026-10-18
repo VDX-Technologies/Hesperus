@@ -1,11 +1,14 @@
 "use client";
-// New crop: name and place above the crop's own properties (species, area, phase, dates).
-import { EventForm, type EventFormLabels } from "@/components/event-form";
-import { CROP_PROPERTIES } from "@/lib/packages/agronomy";
-import { createCrop } from "@/app/o/[slug]/treatments/actions";
+// Crop form: name and place above the crop's own properties (species, area, phase, dates).
+// With `id` it edits an existing crop: name and place are fixed, the properties change.
+import { EventForm, type EventFormLabels, type EventFormValues } from "@/components/event-form";
+import { CROP_FORM } from "@/lib/packages/agronomy";
+import { saveCrop } from "@/app/o/[slug]/crops/actions";
 
-export function CropForm({ slug, places, fieldLabels, optionLabels, labels, text }: {
+export function CropForm({ slug, id, initial, places, fieldLabels, optionLabels, labels, text }: {
   slug: string;
+  id?: string;
+  initial?: EventFormValues;
   places: { id: string; label: string }[];
   fieldLabels: Record<string, string>;
   optionLabels: Record<string, Record<string, string>>;
@@ -14,26 +17,29 @@ export function CropForm({ slug, places, fieldLabels, optionLabels, labels, text
 }) {
   return (
     <EventForm
-      schema={CROP_PROPERTIES}
-      action={createCrop}
+      schema={CROP_FORM}
+      action={saveCrop}
+      initial={initial}
       fieldLabels={fieldLabels}
       optionLabels={optionLabels}
       labels={labels}
-      hidden={{ slug }}
+      hidden={{ slug, ...(id ? { id } : {}) }}
       before={
-        <div className="grid gap-4 sm:grid-cols-2">
-          <label className="block text-sm">
-            <span className="text-dim">{text.name} *</span>
-            <input name="name" required className="mt-1 w-full" />
-          </label>
-          <label className="block text-sm">
-            <span className="text-dim">{text.place}</span>
-            <select name="place" className="mt-1 w-full" defaultValue="">
-              <option value="">{text.noPlace}</option>
-              {places.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
-            </select>
-          </label>
-        </div>
+        !id && (
+          <div className="grid gap-4 sm:grid-cols-2">
+            <label className="block text-sm">
+              <span className="text-dim">{text.name} *</span>
+              <input name="name" required className="mt-1 w-full" />
+            </label>
+            <label className="block text-sm">
+              <span className="text-dim">{text.place}</span>
+              <select name="place" className="mt-1 w-full" defaultValue="">
+                <option value="">{text.noPlace}</option>
+                {places.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
+              </select>
+            </label>
+          </div>
+        )
       }
     />
   );

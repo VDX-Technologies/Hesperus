@@ -14,6 +14,10 @@ export interface CropInfo {
   phase: Phase | null;
   placeId: string | null;
   placePath: string[];
+  start: string | null;
+  end: string | null;
+  /** Archived crops stay readable (their rows, their page) but leave active lists and menus. */
+  archived: boolean;
 }
 
 export interface RegisterRow {

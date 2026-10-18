@@ -130,12 +130,12 @@ describe("manual events", () => {
     const id = await createManualEvent(A, pkg, member, { type: "dose", ts, payload: dose(2.5), objectIds: things }, now);
     const e = (await getEvent(A, id))!;
     expect(e).toMatchObject({ type: "evmod.dose", author: member.id, authorLabel: "m@x.it", ts, recordedAt: now, version: 1, rootId: id });
-    expect(e.objectIds.sort()).toEqual([...things].sort());
+    expect([...e.objectIds].sort()).toEqual([...things].sort());
     const src = await db.query(`select connector from sources where id = $1`, [e.sourceId]);
     expect(src.rows[0].connector).toBe("manual");
     const raw = await db.query(`select count(*)::int n from raw_inbox where source_id = $1`, [e.sourceId]);
     expect(raw.rows[0].n).toBe(1);
-    const [a] = await listAudit(A, { objectId: e.objectIds[0] });
+    const [a] = await listAudit(A, { objectId: things[0] });
     expect(a).toMatchObject({ action: "event.create", actor: member.id, subject: "evmod.dose" });
   });
 

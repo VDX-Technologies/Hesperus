@@ -21,6 +21,9 @@ export async function listCrops(db: TenantDb, id?: string): Promise<CropInfo[]> 
       phase: (o.properties.phase as Phase | undefined) ?? null,
       placeId: o.placeId,
       placePath: o.placePath,
+      start: typeof o.properties.start === "string" ? o.properties.start : null,
+      end: typeof o.properties.end === "string" ? o.properties.end : null,
+      archived: o.properties.status === "archived",
     }));
 }
 

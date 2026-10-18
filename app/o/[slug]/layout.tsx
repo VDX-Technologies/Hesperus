@@ -26,7 +26,8 @@ export default async function OrgLayout(props: LayoutProps<"/o/[slug]">) {
         nav={[
           { href: `/o/${slug}`, label: t.overview },
           { href: `/o/${slug}/alerts`, label: t.alerts, badge: count },
-          ...(modules.some((m) => m.module === "agronomy") ? [{ href: `/o/${slug}/treatments`, label: t.treatments }] : []),
+          { href: `/o/${slug}/registers`, label: t.registers },
+          ...(modules.some((m) => m.module === "agronomy") ? [{ href: `/o/${slug}/crops`, label: t.crops }] : []),
           ...(hasUpload ? [{ href: `/o/${slug}/upload`, label: t.upload }] : []),
           { href: `/o/${slug}/activity`, label: t.activity },
           { href: `/o/${slug}/settings`, label: t.settings },

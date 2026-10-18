@@ -46,10 +46,10 @@ export async function registerPackage(db: Db, pkg: ModulePackage): Promise<Regis
   }
   for (const t of pkg.eventTypes ?? []) {
     await db.query(
-      `insert into event_types (module, key, name, fields) values ($1, $2, $3, $4)
+      `insert into event_types (module, key, name, fields, subject, from_subject) values ($1, $2, $3, $4, $5, $6)
        on conflict (module, key) where tenant_id is null
-       do update set name = excluded.name, fields = excluded.fields`,
-      [pkg.id, t.key, t.name, t.fields],
+       do update set name = excluded.name, fields = excluded.fields, subject = excluded.subject, from_subject = excluded.from_subject`,
+      [pkg.id, t.key, t.name, t.fields, t.subject ?? null, t.fromSubject ?? {}],
     );
   }
   for (const m of [...pkg.metrics, ...(pkg.derived ?? [])]) {

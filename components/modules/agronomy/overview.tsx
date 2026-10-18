@@ -10,11 +10,12 @@ import { TreatmentRows } from "./rows";
 export async function AgronomyOverview({ orgId, slug, t, locale }: { orgId: string; slug: string; t: Dict; locale: Locale }) {
   const db = tenantDb(orgId);
   const crops = await listCrops(db);
+  const active = crops.filter((c) => !c.archived);
   const rows = await listTreatments(db, {}, crops, 5);
   return (
     <section>
-      <SectionTitle right={<Link href={`/o/${slug}/treatments`} className="text-xs text-frost hover:underline">{t.treatmentsRegister} →</Link>}>
-        {t.treatments} <span className="num text-dim">· {crops.length} {t.crops.toLowerCase()}</span>
+      <SectionTitle right={<Link href={`/o/${slug}/registers/agronomy.treatment`} className="text-xs text-frost hover:underline">{t.treatmentsRegister} →</Link>}>
+        {t.treatments} <span className="num text-dim">· {active.length} {t.crops.toLowerCase()}</span>
       </SectionTitle>
       {crops.length ? <TreatmentRows rows={rows} locale={locale} t={t} /> : <p className="text-sm text-dim">{t.noCrops}</p>}
     </section>

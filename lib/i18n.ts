@@ -227,6 +227,15 @@ const en = {
   manualErr_404: "Not found.",
   manualErr_409: "This version was already corrected: reload the register.",
   manualErr_429: "Limit reached.",
+  registers: "Registers", newType: "New type", editType: "Edit type", customType: "custom", entries: "Entries",
+  noRegisters: "No registers: enable a module or create a type.", date: "Date", object: "Object", allPeriod: "whole period",
+  noEntries: "No entries.", correctEntry: "Correct entry", newEntry: "New entry", decimalHintGeneric: "Decimals with a comma: 2,5",
+  noObjects: "No active objects to record on.", allObjects: "All", archived: "archived", yes: "Yes", no: "No",
+  firstPage: "First page", nextPage: "Next page", objectRequired: "Choose the object.",
+  typeKey: "Key", typeNameIt: "Name (Italian)", typeNameEn: "Name (English)", typeSubject: "Recorded on", typeFields: "Fields",
+  addField: "Add field", fieldLabel: "Label", fieldType: "Type", fieldUnits: "Units", fieldOptions: "Options, comma separated",
+  fromSubject: "Fill from object property",
+  edit: "Edit", archive: "Archive", archiveEnd: "End date", activeCrops: "Active crops", archivedCrops: "Archived crops",
 };
 export type Dict = typeof en;
 
@@ -454,6 +463,15 @@ const it: Dict = {
   manualErr_404: "Non trovato.",
   manualErr_409: "Questa versione è già stata corretta: ricarica il registro.",
   manualErr_429: "Limite raggiunto.",
+  registers: "Registri", newType: "Nuovo tipo", editType: "Modifica tipo", customType: "personalizzato", entries: "Voci",
+  noRegisters: "Nessun registro: abilita un modulo o crea un tipo.", date: "Data", object: "Oggetto", allPeriod: "tutto il periodo",
+  noEntries: "Nessuna voce.", correctEntry: "Correggi voce", newEntry: "Nuova voce", decimalHintGeneric: "Decimali con la virgola: 2,5",
+  noObjects: "Nessun oggetto attivo su cui registrare.", allObjects: "Tutti", archived: "archiviato", yes: "Sì", no: "No",
+  firstPage: "Prima pagina", nextPage: "Pagina successiva", objectRequired: "Scegli l'oggetto.",
+  typeKey: "Chiave", typeNameIt: "Nome (italiano)", typeNameEn: "Nome (inglese)", typeSubject: "Si registra su", typeFields: "Campi",
+  addField: "Aggiungi campo", fieldLabel: "Etichetta", fieldType: "Tipo", fieldUnits: "Unità", fieldOptions: "Opzioni, separate da virgola",
+  fromSubject: "Compila dalla proprietà dell'oggetto",
+  edit: "Modifica", archive: "Archivia", archiveEnd: "Data di fine", activeCrops: "Colture attive", archivedCrops: "Colture archiviate",
 };
 
 const DICTS: Record<Locale, Dict> = { en, it };

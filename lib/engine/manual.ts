@@ -8,7 +8,7 @@ import type { Source } from "./sources";
 import { record } from "./audit";
 import { registerPackage } from "./ingest";
 import { getSettings, num } from "./settings";
-import { validateProperties } from "./schema";
+import { validateProperties, type Schema } from "./schema";
 
 export type Role = "owner" | "member" | "viewer";
 export type Author = { id: string; email?: string | null; role: Role };
@@ -42,20 +42,47 @@ export async function manualSource(db: TenantDb, module: string): Promise<Source
   return rows[0];
 }
 
-async function check(db: TenantDb, pkg: ModulePackage, author: Author, input: Omit<ManualInput, "severity">, now: Date) {
+/** What the connector needs to know about an event type, wherever it is defined. */
+export interface EventSpec {
+  /** Full type, "agronomy.treatment" or "custom.pruning". */
+  type: string;
+  module: string;
+  fields: Schema;
+  /** Object type ("agronomy.crop") every object of the event must have. */
+  subject?: string | null;
+  /** Registered before the first event, when the type comes from a package. */
+  pkg?: ModulePackage;
+}
+
+const specOf = (pkg: ModulePackage, key: string): EventSpec => {
+  const def = pkg.eventTypes?.find((t) => t.key === key);
+  if (!def) throw new ManualEventError(400, `unknown event type "${key}"`);
+  return { type: `${pkg.id}.${key}`, module: pkg.id, fields: def.fields, subject: def.subject, pkg };
+};
+
+type EventInput = { ts: Date; payload: Record<string, unknown>; objectIds: string[] };
+
+async function check(db: TenantDb, spec: EventSpec, author: Author, input: EventInput, now: Date) {
   if (!canRecord(author.role)) throw new ManualEventError(403, "viewers cannot record events");
-  const def = pkg.eventTypes?.find((t) => t.key === input.type);
-  if (!def) throw new ManualEventError(400, `unknown event type "${input.type}"`);
   if (Number.isNaN(input.ts.getTime())) throw new ManualEventError(400, "invalid event time");
-  const err = validateProperties(def.fields, input.payload);
+  const err = validateProperties(spec.fields, input.payload);
   if (err) throw new ManualEventError(400, err);
 
   const settings = await getSettings(db.shared);
   const ids = [...new Set(input.objectIds)];
   if (!ids.length) throw new ManualEventError(400, "an event needs at least one object");
   if (ids.length > num(settings, "manual.max_objects", 20)) throw new ManualEventError(400, "too many objects");
-  const { rows } = await db.query<{ n: number }>(`select count(*)::int n from objects where tenant_id = $1 and id = any($2::uuid[])`, [db.tenantId, ids]);
+  if (ids.some((id) => !/^[0-9a-f-]{36}$/i.test(id))) throw new ManualEventError(404, "object not found");
+  const { rows } = await db.query<{ n: number; ok: number; archived: number }>(
+    `select count(*)::int n,
+            count(*) filter (where $3::text is null or t.module || '.' || t.key = $3)::int ok,
+            count(*) filter (where o.properties->>'status' = 'archived')::int archived
+       from objects o join object_types t on t.id = o.type_id where o.tenant_id = $1 and o.id = any($2::uuid[])`,
+    [db.tenantId, ids, spec.subject ?? null],
+  );
   if (rows[0].n !== ids.length) throw new ManualEventError(404, "object not found");
+  if (rows[0].ok !== ids.length) throw new ManualEventError(400, `objects must be of type "${spec.subject}"`);
+  if (rows[0].archived) throw new ManualEventError(409, "object is archived");
 
   const day = await db.query<{ n: number }>(
     `select count(*)::int n from events where tenant_id = $1 and author is not null and recorded_at > $2::timestamptz - interval '1 day'`,
@@ -63,7 +90,7 @@ async function check(db: TenantDb, pkg: ModulePackage, author: Author, input: Om
   );
   if (day.rows[0].n >= num(settings, "manual.events_per_day", 500)) throw new ManualEventError(429, "daily limit reached");
 
-  await registerPackage(db.shared, pkg);
+  if (spec.pkg) await registerPackage(db.shared, spec.pkg);
   return ids;
 }
 
@@ -97,23 +124,22 @@ async function insert(
   }
 }
 
-/** Records an event entered by a person, linked to one or more objects. Returns its id. */
-export async function createManualEvent(db: TenantDb, pkg: ModulePackage, author: Author, input: ManualInput, now = new Date()): Promise<number> {
-  const objectIds = await check(db, pkg, author, input, now);
-  const source = await manualSource(db, pkg.id);
-  const type = `${pkg.id}.${input.type}`;
-  const id = await insert(db, source, author, { type, ts: input.ts, severity: input.severity ?? "info", payload: input.payload, objectIds, supersedes: null }, now);
-  await record(db, author, "event.create", { objectId: objectIds[0], subject: type, data: { event: id, ts: input.ts.toISOString(), payload: input.payload, objects: objectIds } });
+/** Records an event of any type entered by a person, linked to one or more objects. Returns its id. */
+export async function recordEvent(db: TenantDb, spec: EventSpec, author: Author, input: EventInput & { severity?: Severity }, now = new Date()): Promise<number> {
+  const objectIds = await check(db, spec, author, input, now);
+  const source = await manualSource(db, spec.module);
+  const id = await insert(db, source, author, { type: spec.type, ts: input.ts, severity: input.severity ?? "info", payload: input.payload, objectIds, supersedes: null }, now);
+  await record(db, author, "event.create", { objectId: objectIds[0], subject: spec.type, data: { event: id, ts: input.ts.toISOString(), payload: input.payload, objects: objectIds } });
   return id;
 }
 
 /**
- * Records a new version of a manual event. Only the latest version can be corrected; the
- * objects stay the same unless given. Returns the new version's id.
+ * Records a new version of a manual event of the spec's type. Only the latest version can be
+ * corrected; the objects stay the same unless given. Returns the new version's id.
  */
-export async function correctManualEvent(
+export async function correctEvent(
   db: TenantDb,
-  pkg: ModulePackage,
+  spec: EventSpec,
   author: Author,
   eventId: number,
   input: { ts: Date; payload: Record<string, unknown>; objectIds?: string[] },
@@ -127,17 +153,36 @@ export async function correctManualEvent(
     [db.tenantId, eventId],
   );
   const prev = rows[0];
-  if (!prev || !prev.author || !prev.type.startsWith(`${pkg.id}.`)) throw new ManualEventError(404, "event not found");
+  if (!prev || !prev.author || prev.type !== spec.type) throw new ManualEventError(404, "event not found");
   if (!prev.latest) throw new ManualEventError(409, "this version was already corrected");
 
-  const type = prev.type.slice(pkg.id.length + 1);
-  const objectIds = await check(db, pkg, author, { type, ts: input.ts, payload: input.payload, objectIds: input.objectIds ?? prev.objects }, now);
-  const source = await manualSource(db, pkg.id);
+  const objectIds = await check(db, spec, author, { ts: input.ts, payload: input.payload, objectIds: input.objectIds ?? prev.objects }, now);
+  const source = await manualSource(db, spec.module);
   const id = await insert(db, source, author, { type: prev.type, ts: input.ts, severity: prev.severity, payload: input.payload, objectIds, supersedes: eventId }, now);
   await record(db, author, "event.correct", {
     objectId: objectIds[0], subject: prev.type, data: { event: id, supersedes: eventId, ts: input.ts.toISOString(), payload: input.payload, objects: objectIds },
   });
   return id;
+}
+
+/** Records an event of a package type (`input.type` is the key inside the package). */
+export async function createManualEvent(db: TenantDb, pkg: ModulePackage, author: Author, input: ManualInput, now = new Date()): Promise<number> {
+  if (!canRecord(author.role)) throw new ManualEventError(403, "viewers cannot record events");
+  return recordEvent(db, specOf(pkg, input.type), author, input, now);
+}
+
+/** Corrects an event of a package type. */
+export async function correctManualEvent(
+  db: TenantDb,
+  pkg: ModulePackage,
+  author: Author,
+  eventId: number,
+  input: { ts: Date; payload: Record<string, unknown>; objectIds?: string[] },
+  now = new Date(),
+): Promise<number> {
+  const { rows } = await db.query<{ type: string }>(`select type from events where tenant_id = $1 and id = $2`, [db.tenantId, eventId]);
+  if (!rows[0]?.type.startsWith(`${pkg.id}.`)) throw new ManualEventError(404, "event not found");
+  return correctEvent(db, specOf(pkg, rows[0].type.slice(pkg.id.length + 1)), author, eventId, input, now);
 }
 
 async function checkObject(db: TenantDb, pkg: ModulePackage, author: Author, type: string, properties: Record<string, unknown>) {
@@ -185,14 +230,48 @@ export async function createManualObject(
   return id;
 }
 
-/** Replaces the properties of an object of the package (validated against its type). */
-export async function updateManualObject(db: TenantDb, pkg: ModulePackage, author: Author, id: string, properties: Record<string, unknown>): Promise<void> {
-  const { rows } = await db.query<{ key: string; name: string | null }>(
-    `select t.key, o.name from objects o join object_types t on t.id = o.type_id where o.tenant_id = $1 and o.id = $2 and t.module = $3`,
+async function manualObject(db: TenantDb, pkg: ModulePackage, id: string) {
+  if (!/^[0-9a-f-]{36}$/i.test(id)) throw new ManualEventError(404, "object not found");
+  const { rows } = await db.query<{ key: string; name: string | null; properties: Record<string, unknown> }>(
+    `select t.key, o.name, o.properties from objects o join object_types t on t.id = o.type_id
+      where o.tenant_id = $1 and o.id = $2 and t.module = $3 and o.external_id is null`,
     [db.tenantId, id, pkg.id],
   );
   if (!rows[0]) throw new ManualEventError(404, "object not found");
-  await checkObject(db, pkg, author, rows[0].key, properties);
-  await db.query(`update objects set properties = $3 where tenant_id = $1 and id = $2`, [db.tenantId, id, properties]);
-  await record(db, author, "object.update", { objectId: id, subject: rows[0].name, data: { properties } });
+  return rows[0];
+}
+
+/** Replaces the properties of an object of the package (validated against its type); `status` stays as it is. */
+export async function updateManualObject(db: TenantDb, pkg: ModulePackage, author: Author, id: string, properties: Record<string, unknown>): Promise<void> {
+  const o = await manualObject(db, pkg, id);
+  const { status: _, ...rest } = properties;
+  const next = { ...rest, ...(o.properties.status !== undefined ? { status: o.properties.status } : {}) };
+  await checkObject(db, pkg, author, o.key, next);
+  await db.query(`update objects set properties = $3 where tenant_id = $1 and id = $2`, [db.tenantId, id, next]);
+  await record(db, author, "object.update", { objectId: id, subject: o.name, data: { before: o.properties, properties: next } });
+}
+
+/**
+ * Archives an object: an end (the given day, else the one it has, else today) and status
+ * "archived". It leaves the active lists and the entry menus; its events stay as they are.
+ */
+export async function archiveManualObject(db: TenantDb, pkg: ModulePackage, author: Author, id: string, end?: Date, now = new Date()): Promise<void> {
+  const o = await manualObject(db, pkg, id);
+  if (o.properties.status === "archived") throw new ManualEventError(409, "object is archived");
+  const day = end && !Number.isNaN(end.getTime()) ? end : o.properties.end ? new Date(String(o.properties.end)) : now;
+  const next = { ...o.properties, end: day.toISOString(), status: "archived" };
+  await checkObject(db, pkg, author, o.key, next);
+  await db.query(`update objects set properties = $3 where tenant_id = $1 and id = $2`, [db.tenantId, id, next]);
+  await record(db, author, "object.archive", { objectId: id, subject: o.name, data: { end: next.end } });
+}
+
+/** Deletes an object entered by hand, only when no event points at it: those are archived instead. */
+export async function deleteManualObject(db: TenantDb, pkg: ModulePackage, author: Author, id: string): Promise<void> {
+  const o = await manualObject(db, pkg, id);
+  if (!canRecord(author.role)) throw new ManualEventError(403, "viewers cannot delete objects");
+  const ev = await db.query(`select 1 from event_objects where tenant_id = $1 and object_id = $2 limit 1`, [db.tenantId, id]);
+  if (ev.rowCount) throw new ManualEventError(409, "object has events: archive it");
+  await db.query(`delete from links where tenant_id = $1 and (src_id = $2 or dst_id = $2)`, [db.tenantId, id]);
+  await db.query(`delete from objects where tenant_id = $1 and id = $2`, [db.tenantId, id]);
+  await record(db, author, "object.delete", { objectId: id, subject: o.name, data: { properties: o.properties } });
 }

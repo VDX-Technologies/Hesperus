@@ -36,6 +36,21 @@ export interface EventQuery {
   limit?: number;
   /** Paging: events older than this id. */
   before?: number;
+  /** Keyset paging: events after this one in the chosen order (never an offset). */
+  after?: Cursor;
+  /** Oldest first instead of newest first. */
+  asc?: boolean;
+}
+
+/** Position of an event in (ts, id) order. */
+export type Cursor = { ts: Date; id: number };
+
+export const cursorOf = (e: { ts: Date; id: number }): string => `${e.ts.toISOString()}_${e.id}`;
+export function parseCursor(s: string | null | undefined): Cursor | undefined {
+  const m = /^(\d{4}-\d{2}-\d{2}T[\d:.]+Z)_(\d+)$/.exec(s ?? "");
+  if (!m) return undefined;
+  const ts = new Date(m[1]);
+  return Number.isNaN(ts.getTime()) ? undefined : { ts, id: Number(m[2]) };
 }
 
 const COLS = `e.id, e.ts, e.recorded_at, e.type, e.severity, e.payload, e.source_id, e.author, e.author_label, e.supersedes,
@@ -54,7 +69,7 @@ const toRow = (r: Raw): EventRow => ({
   version: r.version, objectIds: r.object_ids,
 });
 
-/** Newest event time first (then newest id). */
+/** Newest event time first (then newest id), or oldest first with `asc`. */
 export async function listEvents(db: TenantDb, q: EventQuery = {}): Promise<EventRow[]> {
   const table = q.current === false ? "events" : "events_current";
   const { rows } = await db.query<Raw>(
@@ -73,10 +88,12 @@ export async function listEvents(db: TenantDb, q: EventQuery = {}): Promise<Even
         and ($7::jsonb is null or e.payload @> $7)
         and ($8::uuid is null or e.author = $8)
         and ($9::bigint is null or e.id < $9)
-      order by e.ts desc, e.id desc limit $10`,
+        and ($11::timestamptz is null or ${q.asc ? "(e.ts, e.id) > ($11, $12::bigint)" : "(e.ts, e.id) < ($11, $12::bigint)"})
+      order by e.ts ${q.asc ? "asc" : "desc"}, e.id ${q.asc ? "asc" : "desc"} limit $10`,
     [
       db.tenantId, q.objectId ?? null, q.recursive ?? true, q.types ?? null, q.from ?? null, q.to ?? null,
       q.payload ? JSON.stringify(q.payload) : null, q.author ?? null, q.before ?? null, Math.min(q.limit ?? 100, 1000),
+      q.after?.ts ?? null, q.after?.id ?? null,
     ],
   );
   return rows.map(toRow);
@@ -107,4 +124,15 @@ export async function eventHistory(db: TenantDb, id: number): Promise<EventRow[]
     [db.tenantId, id],
   );
   return rows.map(toRow);
+}
+
+/** Every matching event, read `chunk` rows at a time with the keyset (for exports). */
+export async function* allEvents(db: TenantDb, q: Omit<EventQuery, "limit" | "after">, chunk = 500): AsyncGenerator<EventRow> {
+  let after: Cursor | undefined;
+  for (;;) {
+    const rows = await listEvents(db, { ...q, after, limit: chunk });
+    yield* rows;
+    if (rows.length < chunk) return;
+    after = rows[rows.length - 1];
+  }
 }
