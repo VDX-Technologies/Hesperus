@@ -79,9 +79,10 @@ Tecnologie:
 organizations ──< memberships >── utenti (Supabase auth)
       │
       ├──< org_modules   (quali prodotti ha, con quale config)
-      ├──< sites ──< zones (luoghi fisici)
       └──< sources, objects, metrics, events, alerts…  (tutto ha tenant_id)
 ```
+
+I luoghi fisici sono oggetti `core.site` / `core.area` collegati con `part_of` e `located_in`. Le vecchie tabelle `sites` e `zones` sono state eliminate (`20261023000000_drop_sites_zones.sql`) dopo averle spostate negli oggetti.
 
 `platform_admins` elenca lo staff VDX.
 
@@ -392,7 +393,7 @@ Ogni soggetto diventa un oggetto, ogni voce un evento `records.entry`; `quantity
 | `/o/[slug]/upload` | owner (gli altri vedono solo l'elenco) | caricamento di file CSV nelle source upload, ultimi file caricati |
 | `/o/[slug]/settings` | owner (gli altri in sola lettura) | soglie aziendali e per dispositivo |
 | `/admin` | staff VDX | elenco clienti, creazione di nuove org |
-| `/admin/orgs/[id]` | staff | gestione di un cliente (moduli, soglie, membri, siti, zone, dispositivi) |
+| `/admin/orgs/[id]` | staff | gestione di un cliente (moduli, soglie, luoghi, membri, attività) |
 | `/admin/engine` | staff | stato dell'engine (job, quote, salute) e gestione delle source (nuova source, nuovo token, pausa) |
 | `/admin/settings` | staff | `engine_settings` e destinatari delle email di salute |
 | `/api/push` | gateway | ingresso dati |

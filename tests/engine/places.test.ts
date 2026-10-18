@@ -85,6 +85,9 @@ describe("place tree", () => {
 
 describe("sites and zones migration", () => {
   it("keeps ids, links zones to sites and objects to zones, drops zone_id", async () => {
+    // the old tables are gone after 20261023000000_drop_sites_zones: rebuild them as they were
+    await db.query(`create table sites (id uuid primary key default gen_random_uuid(), org_id uuid not null, name text not null, created_at timestamptz not null default now())`);
+    await db.query(`create table zones (id uuid primary key default gen_random_uuid(), org_id uuid not null, site_id uuid not null references sites (id), name text not null, created_at timestamptz not null default now())`);
     const site = (await db.query(`insert into sites (org_id, name) values ($1, 'Old site') returning id`, [ORG])).rows[0].id;
     const zone = (await db.query(`insert into zones (org_id, site_id, name) values ($1, $2, 'Old zone') returning id`, [ORG, site])).rows[0].id;
     // objects written before the migration carried zone_id in their properties
@@ -100,5 +103,13 @@ describe("sites and zones migration", () => {
     expect(s2.placeId).toBe(zone);
     expect(s2.placePath).toEqual(["Old site", "Old zone"]);
     expect(s2.properties.zone_id).toBeUndefined();
+
+    // with everything moved the drop goes through; a row left behind stops it
+    const drop = readFileSync(join(__dirname, "../../supabase/migrations/20261023000000_drop_sites_zones.sql"), "utf8");
+    await db.query(`insert into sites (org_id, name) values ($1, 'Never moved')`, [ORG]);
+    await expect(db.query(drop)).rejects.toThrow(/1 rows not moved/);
+    await db.query(`delete from sites where name = 'Never moved'`);
+    await db.query(drop);
+    expect((await db.query(`select to_regclass('public.sites') t`)).rows[0].t).toBeNull();
   });
 });
