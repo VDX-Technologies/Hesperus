@@ -82,14 +82,6 @@
   padding-bottom: env(safe-area-inset-bottom);
 }
 
-@utility login-grid {
-  background-image:
-    linear-gradient(var(--color-line-soft) 1px, transparent 1px),
-    linear-gradient(90deg, var(--color-line-soft) 1px, transparent 1px);
-  background-size: 40px 40px;
-  mask-image: radial-gradient(ellipse at 30% 20%, #000 20%, transparent 75%);
-}
-
 @utility num {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
@@ -173,3 +165,179 @@
 @media (prefers-reduced-motion: reduce) {
   .page-in, .nav-progress.is-active { animation: none; }
 }
+
+/* VDX Core faces (login background), from the public website hero. */
+@layer components {
+  .core-num {
+    font-family: var(--font-plex-mono), ui-monospace, monospace;
+    font-variant-numeric: tabular-nums;
+  }
+  /* Faces change like the app navigating: the next one wipes in over the last, which sinks back. */
+  .core-face {
+    opacity: 0;
+    z-index: 0;
+    transition: opacity 0.4s ease 0.9s;
+  }
+  .core-face[data-prev] {
+    opacity: 1;
+    z-index: 1;
+    transform: scale(0.985);
+    filter: brightness(0.45);
+    transition:
+      transform 1.1s cubic-bezier(0.65, 0, 0.35, 1),
+      filter 1.1s cubic-bezier(0.65, 0, 0.35, 1);
+  }
+  .core-face[data-active] {
+    opacity: 1;
+    z-index: 2;
+    transition: none;
+    animation: core-wipe 1.1s cubic-bezier(0.65, 0, 0.35, 1) both;
+  }
+  .core-face[data-still] {
+    animation: none;
+  }
+  .core-scan {
+    position: absolute;
+    z-index: 3;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    width: 1px;
+    background: var(--color-ice);
+    box-shadow: 0 0 24px 4px rgb(159 216 255 / 0.35);
+    opacity: 0;
+    animation: core-scan 1.1s cubic-bezier(0.65, 0, 0.35, 1) both;
+  }
+  .core-hatch {
+    background: repeating-linear-gradient(-45deg, rgb(242 184 75 / 0.22) 0 3px, rgb(242 184 75 / 0.06) 3px 7px);
+  }
+  .core-face .core-draw {
+    stroke-dasharray: 1;
+    stroke-dashoffset: 1;
+  }
+  .core-face[data-active] .core-draw,
+  .core-static .core-draw {
+    animation: core-draw 2.2s cubic-bezier(0.45, 0, 0.2, 1) 0.3s both;
+  }
+  .core-face .core-fade,
+  .core-face .core-rise {
+    opacity: 0;
+  }
+  .core-face[data-active] .core-fade {
+    animation: core-fade 1s ease 1.2s both;
+  }
+  .core-face[data-active] .core-rise {
+    animation: core-rise 0.7s cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+  .core-ping {
+    animation: core-ping 2s cubic-bezier(0, 0, 0.2, 1) infinite;
+  }
+  .core-ping-svg {
+    transform-box: fill-box;
+    transform-origin: center;
+    animation: core-ping 2s cubic-bezier(0, 0, 0.2, 1) infinite;
+  }
+  .core-move {
+    offset-rotate: 0deg;
+    animation: core-move linear infinite;
+  }
+  .core-flow {
+    animation: core-flow 1.4s linear infinite;
+  }
+  [data-paused] *,
+  [data-paused] *::before {
+    animation-play-state: paused !important;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .core-ping,
+    .core-ping-svg,
+    .core-move,
+    .core-flow,
+    .core-face[data-active] .core-draw,
+    .core-static .core-draw,
+    .core-face[data-active] .core-rise,
+    .core-face[data-active] .core-fade {
+      animation: none;
+    }
+    .core-face .core-draw {
+      stroke-dashoffset: 0;
+    }
+    .core-face .core-fade,
+    .core-face .core-rise {
+      opacity: 1;
+    }
+    .core-face,
+    .core-face[data-active] {
+      transition: none;
+      animation: none;
+    }
+    .core-scan {
+      display: none;
+    }
+  }
+}
+
+@keyframes core-wipe {
+  from {
+    clip-path: inset(0 100% 0 0);
+  }
+  to {
+    clip-path: inset(0 0 0 0);
+  }
+}
+@keyframes core-scan {
+  0% {
+    left: 0;
+    opacity: 0;
+  }
+  10%,
+  85% {
+    opacity: 1;
+  }
+  100% {
+    left: 100%;
+    opacity: 0;
+  }
+}
+@keyframes core-draw {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+@keyframes core-fade {
+  to {
+    opacity: 1;
+  }
+}
+@keyframes core-rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes core-ping {
+  75%,
+  100% {
+    transform: scale(2.4);
+    opacity: 0;
+  }
+}
+@keyframes core-move {
+  from {
+    offset-distance: 0%;
+  }
+  to {
+    offset-distance: 100%;
+  }
+}
+@keyframes core-flow {
+  to {
+    stroke-dashoffset: -17;
+  }
+}
+

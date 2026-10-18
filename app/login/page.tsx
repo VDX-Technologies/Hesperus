@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { getT } from "@/lib/i18n";
 import { setLocale } from "@/app/actions";
 import { SubmitButton } from "@/components/submit-button";
+import { HeroFaces } from "@/components/core-faces/HeroFaces";
 
 async function signIn(formData: FormData) {
   "use server";
@@ -22,8 +23,12 @@ export default async function Login(props: PageProps<"/login">) {
     <main className="safe-y relative flex min-h-dvh flex-col lg:flex-row">
       {/* Brand panel: full height on desktop, compact header on phones */}
       <section className="relative overflow-hidden border-b border-line-soft bg-ink-950 px-6 pb-8 pt-8 lg:flex lg:w-1/2 lg:flex-col lg:justify-between lg:border-b-0 lg:border-r lg:p-12">
-        <div className="login-grid pointer-events-none absolute inset-0" aria-hidden />
-        <div className="pointer-events-none absolute -left-32 -top-32 h-96 w-96 rounded-full bg-ice/10 blur-3xl" aria-hidden />
+        {/* Live VDX Core faces, dimmed under ink gradients so the logo stays readable */}
+        <div className="pointer-events-none absolute inset-0 hidden brightness-[.6] saturate-[.85] lg:block" aria-hidden>
+          <HeroFaces framed />
+          <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_20%_10%,var(--color-ink-950)_0%,transparent_55%)]" />
+          <div className="absolute inset-0 bg-gradient-to-t from-ink-950 via-ink-950/40 to-ink-950/70" />
+        </div>
         <div className="relative flex items-center gap-3">
           <Image src="/vdx-symbol.png" alt="" width={36} height={36} priority />
           <div>
@@ -32,22 +37,6 @@ export default async function Login(props: PageProps<"/login">) {
             </div>
             <div className="text-xs text-dim">VDX Technologies</div>
           </div>
-        </div>
-        <div className="relative mt-8 hidden max-w-md lg:block">
-          <h2 className="text-4xl font-semibold leading-tight tracking-tight">{t.loginTagline}</h2>
-          <p className="mt-4 text-mist">{t.loginLead}</p>
-          <ul className="mt-8 space-y-3 text-sm text-mist">
-            {[t.loginF1, t.loginF2, t.loginF3].map((f) => (
-              <li key={f} className="flex items-center gap-3">
-                <span className="flex h-6 w-6 items-center justify-center rounded-full border border-line text-ice">
-                  <svg viewBox="0 0 16 16" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth="2.2">
-                    <path d="M3 8.5l3 3 7-7" strokeLinecap="round" strokeLinejoin="round" />
-                  </svg>
-                </span>
-                {f}
-              </li>
-            ))}
-          </ul>
         </div>
         <p className="relative mt-8 hidden text-xs text-dim lg:block">© {new Date().getFullYear()} VDX Technologies</p>
       </section>
