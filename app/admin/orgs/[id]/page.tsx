@@ -2,7 +2,8 @@ import Link from "next/link";
 import { revalidatePath } from "next/cache";
 import { notFound } from "next/navigation";
 import { requireAdmin } from "@/lib/auth";
-import { getT, timeAgo } from "@/lib/i18n";
+import { getT, timeAgo, type Dict } from "@/lib/i18n";
+import type { Locale } from "@/lib/packages/types";
 import { getPool } from "@/lib/engine/db";
 import { upsertRules } from "@/lib/engine/rules";
 import { listObjects } from "@/lib/packages/console";
@@ -11,6 +12,7 @@ import { parseSettings } from "@/lib/settings";
 import { SettingsForm } from "@/components/settings-form";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { SectionTitle } from "@/components/ui";
+import { ConfirmButton } from "@/components/confirm-button";
 
 const path = (id: string) => `/admin/orgs/${id}`;
 
@@ -90,23 +92,64 @@ async function addMember(formData: FormData) {
   revalidatePath(path(org));
 }
 
+async function removeSite(formData: FormData) {
+  "use server";
+  await requireAdmin();
+  const org = String(formData.get("org"));
+  const site = String(formData.get("id"));
+  const admin = createAdminClient();
+  const { data: zones } = await admin.from("zones").select("id").eq("org_id", org).eq("site_id", site);
+  await unassignZones(org, (zones ?? []).map((z) => z.id));
+  // zones go with the site (on delete cascade)
+  await admin.from("sites").delete().eq("org_id", org).eq("id", site);
+  revalidatePath(path(org));
+}
+
+async function removeZone(formData: FormData) {
+  "use server";
+  await requireAdmin();
+  const org = String(formData.get("org"));
+  const zone = String(formData.get("id"));
+  await unassignZones(org, [zone]);
+  await createAdminClient().from("zones").delete().eq("org_id", org).eq("id", zone);
+  revalidatePath(path(org));
+}
+
+/** Engine objects keep zone_id in their properties: no FK, so clear it by hand. */
+async function unassignZones(org: string, zones: string[]) {
+  if (!zones.length) return;
+  await getPool().query(
+    `update objects set properties = properties - 'zone_id' where tenant_id = $1 and properties->>'zone_id' = any($2)`,
+    [org, zones],
+  );
+}
+
+async function removeMember(formData: FormData) {
+  "use server";
+  await requireAdmin();
+  const org = String(formData.get("org"));
+  // only the membership: the login may belong to other organizations too
+  await createAdminClient().from("memberships").delete().eq("org_id", org).eq("user_id", String(formData.get("user")));
+  revalidatePath(path(org));
+}
+
+const TABS = ["overview", "thresholds", "sites", "members"] as const;
+type Tab = (typeof TABS)[number];
+
 export default async function OrgAdmin(props: PageProps<"/admin/orgs/[id]">) {
-  const { id } = await props.params;
+  const [{ id }, sp] = await Promise.all([props.params, props.searchParams]);
+  const tab: Tab = TABS.includes(sp.tab as Tab) ? (sp.tab as Tab) : "overview";
   const { supabase } = await requireAdmin();
   const { t, locale } = await getT();
-  const { data: org } = await supabase.from("organizations").select("*").eq("id", id).maybeSingle();
-  if (!org) notFound();
-  const [mods, sites, zones, members] = await Promise.all([
+  // only what the open tab shows: the org and its products are cheap, the rest is loaded on demand
+  const [{ data: org }, mods] = await Promise.all([
+    supabase.from("organizations").select("id, name, slug").eq("id", id).maybeSingle(),
     supabase.from("org_modules").select("module, enabled, config").eq("org_id", id),
-    supabase.from("sites").select("id, name").eq("org_id", id).order("name"),
-    supabase.from("zones").select("id, name, site_id").eq("org_id", id).order("name"),
-    createAdminClient().from("memberships").select("user_id, role").eq("org_id", id),
   ]);
+  if (!org) notFound();
   const enabled = new Map((mods.data ?? []).map((m) => [m.module, m]));
-  const devices = (await Promise.all(Object.keys(PACKAGES).map((m) => listObjects(getPool(), id, m)))).flat();
-  const { data: users } = await createAdminClient().auth.admin.listUsers();
-  const emailOf = new Map((users?.users ?? []).map((u) => [u.id, u.email]));
-  const siteName = new Map((sites.data ?? []).map((s) => [s.id, s.name]));
+  const configurable = Object.values(PACKAGES).filter((m) => enabled.get(m.id)?.enabled && m.settings.length);
+  const tabLabel: Record<Tab, string> = { overview: t.overview, thresholds: t.thresholds, sites: t.sitesZones, members: t.members };
 
   return (
     <div>
@@ -123,6 +166,66 @@ export default async function OrgAdmin(props: PageProps<"/admin/orgs/[id]">) {
         </Link>
       </div>
 
+      <nav className="mt-6 flex gap-1 overflow-x-auto border-b border-line-soft text-sm">
+        {TABS.filter((k) => k !== "thresholds" || configurable.length).map((k) => (
+          <Link
+            key={k}
+            href={k === "overview" ? path(id) : `${path(id)}?tab=${k}`}
+            prefetch
+            className={`-mb-px whitespace-nowrap border-b-2 px-3 py-2 ${
+              tab === k ? "border-ice text-frost" : "border-transparent text-dim hover:text-mist"
+            }`}
+          >
+            {tabLabel[k]}
+          </Link>
+        ))}
+      </nav>
+
+      {tab === "overview" && <Overview id={id} enabled={enabled} t={t} locale={locale} />}
+      {tab === "thresholds" &&
+        configurable.map((m) => (
+          <div key={m.id}>
+            <SectionTitle>
+              {m.name} · {t.orgDefaults}
+            </SectionTitle>
+            <p className="mb-3 text-sm text-mist">{t.orgDefaultsHelp}</p>
+            <SettingsForm
+              mod={m}
+              action={saveThresholds}
+              hidden={{ org: id, module: m.id }}
+              values={(enabled.get(m.id)?.config ?? {}) as Record<string, number>}
+              inherited={m.defaults as Record<string, number>}
+              editable
+              allowEmpty={false}
+              t={t}
+              locale={locale}
+            />
+          </div>
+        ))}
+      {tab === "sites" && <Sites id={id} t={t} locale={locale} />}
+      {tab === "members" && <Members id={id} t={t} />}
+    </div>
+  );
+}
+
+type Ctx = { id: string; t: Dict };
+
+function RemoveButton({ t }: { t: Dict }) {
+  return (
+    <ConfirmButton message={t.confirmRemove} className="text-xs text-dim hover:text-alarm">
+      {t.remove}
+    </ConfirmButton>
+  );
+}
+
+function Overview({
+  id,
+  enabled,
+  t,
+  locale,
+}: Ctx & { enabled: Map<string, { enabled: boolean }>; locale: Locale }) {
+  return (
+    <>
       <SectionTitle>{t.modules}</SectionTitle>
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         {Object.values(PACKAGES).map((m) => {
@@ -150,109 +253,129 @@ export default async function OrgAdmin(props: PageProps<"/admin/orgs/[id]">) {
           </div>
         ))}
       </div>
+    </>
+  );
+}
 
-      {Object.values(PACKAGES)
-        .filter((m) => enabled.get(m.id)?.enabled && m.settings.length)
-        .map((m) => (
-          <div key={m.id}>
-            <SectionTitle>
-              {m.name} · {t.orgDefaults}
-            </SectionTitle>
-            <p className="mb-3 text-sm text-mist">{t.orgDefaultsHelp}</p>
-            <SettingsForm
-              mod={m}
-              action={saveThresholds}
-              hidden={{ org: id, module: m.id }}
-              values={(enabled.get(m.id)?.config ?? {}) as Record<string, number>}
-              inherited={m.defaults as Record<string, number>}
-              editable
-              allowEmpty={false}
-              t={t}
-              locale={locale}
-            />
-          </div>
-        ))}
+async function Sites({ id, t, locale }: Ctx & { locale: Locale }) {
+  const supabase = createAdminClient();
+  const [sites, zones, devices] = await Promise.all([
+    supabase.from("sites").select("id, name").eq("org_id", id).order("name"),
+    supabase.from("zones").select("id, name, site_id").eq("org_id", id).order("name"),
+    Promise.all(Object.keys(PACKAGES).map((m) => listObjects(getPool(), id, m))).then((l) => l.flat()),
+  ]);
+  const siteName = new Map((sites.data ?? []).map((s) => [s.id, s.name]));
 
+  return (
+    <>
       <SectionTitle>{t.sitesZones}</SectionTitle>
-      <div className="card p-5">
-        <ul className="space-y-1 text-sm">
-          {(sites.data ?? []).map((s) => (
-            <li key={s.id}>
+      <div className="grid gap-3 md:grid-cols-2">
+        {(sites.data ?? []).map((s) => (
+          <div key={s.id} className="card p-5">
+            <div className="flex items-center justify-between gap-3">
               <span className="font-medium">{s.name}</span>
-              <span className="text-mist">
-                {" "}
-                · {(zones.data ?? []).filter((z) => z.site_id === s.id).map((z) => z.name).join(", ") || "–"}
-              </span>
-            </li>
-          ))}
-        </ul>
-        <div className="mt-4 flex flex-wrap gap-6">
-          <form action={addSite} className="flex gap-2">
-            <input type="hidden" name="org" value={id} />
-            <input name="name" placeholder={t.newSite} required />
-            <button className="btn">+</button>
-          </form>
-          {!!sites.data?.length && (
-            <form action={addZone} className="flex gap-2">
-              <input type="hidden" name="org" value={id} />
-              <select name="site">
-                {sites.data.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.name}
-                  </option>
+              <form action={removeSite}>
+                <input type="hidden" name="org" value={id} />
+                <input type="hidden" name="id" value={s.id} />
+                <RemoveButton t={t} />
+              </form>
+            </div>
+            <ul className="mt-3 divide-y divide-line-soft text-sm">
+              {(zones.data ?? [])
+                .filter((z) => z.site_id === s.id)
+                .map((z) => (
+                  <li key={z.id} className="flex items-center justify-between py-1.5">
+                    <span className="text-mist">{z.name}</span>
+                    <form action={removeZone}>
+                      <input type="hidden" name="org" value={id} />
+                      <input type="hidden" name="id" value={z.id} />
+                      <RemoveButton t={t} />
+                    </form>
+                  </li>
                 ))}
-              </select>
-              <input name="name" placeholder={t.newZone} required />
+            </ul>
+            <form action={addZone} className="mt-3 flex gap-2">
+              <input type="hidden" name="org" value={id} />
+              <input type="hidden" name="site" value={s.id} />
+              <input name="name" placeholder={t.newZone} required className="min-w-0 flex-1" />
               <button className="btn">+</button>
             </form>
-          )}
-        </div>
-      </div>
-
-      <SectionTitle>{t.devices}</SectionTitle>
-      <div className="card divide-y divide-line-soft">
-        {devices.map((d) => (
-          <form key={d.id} action={updateDevice} className="flex flex-wrap items-center gap-3 px-5 py-3 text-sm">
-            <input type="hidden" name="org" value={id} />
-            <input type="hidden" name="id" value={d.id} />
-            <span className="w-20 capitalize text-mist">{d.type}</span>
-            <span className="num w-24 truncate text-dim">#{d.externalId}</span>
-            <input name="name" defaultValue={d.name} className="w-40" />
-            <select name="zone" defaultValue={d.zoneId ?? ""}>
-              <option value="">{t.unassigned}</option>
-              {(zones.data ?? []).map((z) => (
-                <option key={z.id} value={z.id}>
-                  {siteName.get(z.site_id)} · {z.name}
-                </option>
-              ))}
-            </select>
-            <span className="flex-1 text-xs text-dim">
-              {t.lastSeen}: {timeAgo(d.lastSeen, locale, t)}
-            </span>
-            <button className="btn text-xs">{t.save}</button>
-          </form>
+          </div>
         ))}
+        <form action={addSite} className="card flex items-start gap-2 border-dashed p-5">
+          <input type="hidden" name="org" value={id} />
+          <input name="name" placeholder={t.newSite} required className="min-w-0 flex-1" />
+          <button className="btn">+</button>
+        </form>
       </div>
 
-      <p className="mt-2 text-xs text-dim">
-        <Link href="/admin/engine" className="hover:text-frost">
-          {t.sources} →
-        </Link>
-      </p>
+      {!!devices.length && (
+        <>
+          <SectionTitle
+            right={
+              <Link href="/admin/engine" className="text-xs text-dim hover:text-frost">
+                {t.sources} →
+              </Link>
+            }
+          >
+            {t.devices}
+          </SectionTitle>
+          <div className="card divide-y divide-line-soft">
+            {devices.map((d) => (
+              <form key={d.id} action={updateDevice} className="flex flex-wrap items-center gap-3 px-5 py-3 text-sm">
+                <input type="hidden" name="org" value={id} />
+                <input type="hidden" name="id" value={d.id} />
+                <span className="w-20 capitalize text-mist">{d.type}</span>
+                <span className="num w-24 truncate text-dim">#{d.externalId}</span>
+                <input name="name" defaultValue={d.name} className="w-40" />
+                <select name="zone" defaultValue={d.zoneId ?? ""}>
+                  <option value="">{t.unassigned}</option>
+                  {(zones.data ?? []).map((z) => (
+                    <option key={z.id} value={z.id}>
+                      {siteName.get(z.site_id)} · {z.name}
+                    </option>
+                  ))}
+                </select>
+                <span className="flex-1 text-xs text-dim">
+                  {t.lastSeen}: {timeAgo(d.lastSeen, locale, t)}
+                </span>
+                <button className="btn text-xs">{t.save}</button>
+              </form>
+            ))}
+          </div>
+        </>
+      )}
+    </>
+  );
+}
 
+async function Members({ id, t }: Ctx) {
+  const admin = createAdminClient();
+  const { data: members } = await admin.from("memberships").select("user_id, role").eq("org_id", id);
+  // one lookup per member instead of listing every user of the platform
+  const users = await Promise.all((members ?? []).map((m) => admin.auth.admin.getUserById(m.user_id)));
+
+  return (
+    <>
       <SectionTitle>{t.members}</SectionTitle>
-      <div className="card p-5">
-        <ul className="space-y-1 text-sm">
-          {(members.data ?? []).map((m) => (
-            <li key={m.user_id}>
-              {emailOf.get(m.user_id)} <span className="text-dim">· {t[`role_${m.role as "owner" | "member" | "viewer"}`]}</span>
-            </li>
-          ))}
-        </ul>
-        <form action={addMember} className="mt-4 flex flex-wrap gap-2">
+      <div className="card divide-y divide-line-soft">
+        {(members ?? []).map((m, i) => (
+          <div key={m.user_id} className="flex items-center justify-between gap-3 px-5 py-3 text-sm">
+            <span className="truncate">{users[i].data.user?.email ?? m.user_id}</span>
+            <span className="flex items-center gap-4">
+              <span className="text-dim">{t[`role_${m.role as "owner" | "member" | "viewer"}`]}</span>
+              <form action={removeMember}>
+                <input type="hidden" name="org" value={id} />
+                <input type="hidden" name="user" value={m.user_id} />
+                <RemoveButton t={t} />
+              </form>
+            </span>
+          </div>
+        ))}
+        <form action={addMember} className="flex flex-wrap gap-2 px-5 py-4">
           <input type="hidden" name="org" value={id} />
-          <input name="email" type="email" placeholder={t.email} required />
-          <input name="password" placeholder={t.tempPassword} minLength={8} required />
+          <input name="email" type="email" placeholder={t.email} required className="min-w-0 flex-1" />
+          <input name="password" placeholder={t.tempPassword} minLength={8} required className="min-w-0 flex-1" />
           <select name="role" defaultValue="member">
             {(["owner", "member", "viewer"] as const).map((r) => (
               <option key={r} value={r}>
@@ -263,6 +386,6 @@ export default async function OrgAdmin(props: PageProps<"/admin/orgs/[id]">) {
           <button className="btn">{t.addMember}</button>
         </form>
       </div>
-    </div>
+    </>
   );
 }
