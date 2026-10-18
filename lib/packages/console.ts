@@ -10,8 +10,9 @@ export interface ConsoleObject {
   externalId: string | null;
   name: string;
   type: string;
-  zoneId: string | null;
-  zone: string | null;
+  /** Where the object is (located_in), and the names from its site down to that place. */
+  placeId: string | null;
+  placePath: string[];
   properties: Record<string, unknown>;
   state: Record<string, unknown>;
   lastSeen: string | null;
@@ -37,13 +38,21 @@ export async function listObjects(db: TenantDb, module: string, objectId?: strin
   const pkg = getPackageDef(module);
   const { rows } = await db.query<{
     id: string; external_id: string | null; name: string | null; type: string; properties: Record<string, unknown>;
-    state: Record<string, unknown>; last_seen: Date | null; zone: string | null; worst: string | null;
+    state: Record<string, unknown>; last_seen: Date | null; place_id: string | null; place_path: string[] | null; worst: string | null;
   }>(
-    `select o.id, o.external_id, o.name, t.key type, o.properties, o.state, o.last_seen, z.name zone,
+    `select o.id, o.external_id, o.name, t.key type, o.properties, o.state, o.last_seen, l.dst_id place_id,
+            (with recursive up(id, name, depth) as (
+               select p.id, p.name, 0 from objects p where p.tenant_id = o.tenant_id and p.id = l.dst_id
+               union all
+               select q.id, q.name, up.depth + 1 from up
+               join links pl on pl.tenant_id = o.tenant_id and pl.type = 'part_of' and pl.src_id = up.id
+               join objects q on q.tenant_id = o.tenant_id and q.id = pl.dst_id
+               where up.depth < 32
+             ) select array_agg(name order by depth desc) from up) place_path,
             (select a.severity from object_alerts a where a.object_id = o.id and a.status <> 'resolved'
              order by case a.severity when 'alarm' then 0 when 'warn' then 1 else 2 end limit 1) worst
      from objects o join object_types t on t.id = o.type_id
-     left join zones z on z.org_id = o.tenant_id and z.id::text = o.properties->>'zone_id'
+     left join links l on l.tenant_id = o.tenant_id and l.type = 'located_in' and l.src_id = o.id
      where o.tenant_id = $1 and t.module = $2 and ($3::uuid is null or o.id = $3)
      order by coalesce(o.name, o.external_id)`,
     [db.tenantId, module, objectId ?? null],
@@ -67,8 +76,8 @@ export async function listObjects(db: TenantDb, module: string, objectId?: strin
       externalId: r.external_id,
       name: r.name ?? r.external_id ?? r.id.slice(0, 8),
       type: r.type,
-      zoneId: (r.properties.zone_id as string) ?? null,
-      zone: r.zone,
+      placeId: r.place_id,
+      placePath: r.place_path ?? [],
       properties: r.properties,
       state: r.state,
       lastSeen: iso(r.last_seen),

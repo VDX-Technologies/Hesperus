@@ -7,6 +7,7 @@ import type { Locale } from "@/lib/packages/types";
 import { tenantDb } from "@/lib/engine/db";
 import { upsertRules } from "@/lib/engine/rules";
 import { listObjects } from "@/lib/packages/console";
+import { createPlace, deletePlace, flattenPlaces, movePlace, placeTree, renamePlace, setObjectPlace, type Place } from "@/lib/engine/places";
 import { getPackageDef, PACKAGES, UPCOMING } from "@/lib/packages/ui";
 import { parseSettings } from "@/lib/settings";
 import { SettingsForm } from "@/components/settings-form";
@@ -41,19 +42,33 @@ async function saveThresholds(formData: FormData) {
   revalidatePath(path(org));
 }
 
-async function addSite(formData: FormData) {
+async function addPlace(formData: FormData) {
   "use server";
-  const { supabase } = await requireAdmin();
+  await requireAdmin();
   const org = String(formData.get("org"));
-  await supabase.from("sites").insert({ org_id: org, name: String(formData.get("name")) });
+  const parent = String(formData.get("parent") ?? "");
+  await createPlace(tenantDb(org), { kind: parent ? "area" : "site", name: String(formData.get("name")), parentId: parent || null });
   revalidatePath(path(org));
 }
 
-async function addZone(formData: FormData) {
+async function updatePlace(formData: FormData) {
   "use server";
-  const { supabase } = await requireAdmin();
+  await requireAdmin();
   const org = String(formData.get("org"));
-  await supabase.from("zones").insert({ org_id: org, site_id: String(formData.get("site")), name: String(formData.get("name")) });
+  const id = String(formData.get("id"));
+  const db = tenantDb(org);
+  const name = String(formData.get("name")).trim();
+  if (name) await renamePlace(db, id, name);
+  const parent = String(formData.get("parent") ?? "");
+  if (parent) await movePlace(db, id, parent);
+  revalidatePath(path(org));
+}
+
+async function removePlace(formData: FormData) {
+  "use server";
+  await requireAdmin();
+  const org = String(formData.get("org"));
+  await deletePlace(tenantDb(org), String(formData.get("id")));
   revalidatePath(path(org));
 }
 
@@ -61,13 +76,10 @@ async function updateDevice(formData: FormData) {
   "use server";
   await requireAdmin();
   const org = String(formData.get("org"));
-  const zone = String(formData.get("zone"));
-  await tenantDb(org).query(
-    `update objects set name = $3,
-       properties = case when $4::text is null then properties - 'zone_id' else properties || jsonb_build_object('zone_id', $4::text) end
-     where tenant_id = $1 and id = $2`,
-    [org, String(formData.get("id")), String(formData.get("name")).trim() || null, zone || null],
-  );
+  const id = String(formData.get("id"));
+  const db = tenantDb(org);
+  await db.query(`update objects set name = $3 where tenant_id = $1 and id = $2`, [org, id, String(formData.get("name")).trim() || null]);
+  await setObjectPlace(db, id, String(formData.get("place")) || null);
   revalidatePath(path(org));
 }
 
@@ -90,38 +102,6 @@ async function addMember(formData: FormData) {
   }
   await admin.from("memberships").upsert({ org_id: org, user_id: userId, role: String(formData.get("role")) });
   revalidatePath(path(org));
-}
-
-async function removeSite(formData: FormData) {
-  "use server";
-  await requireAdmin();
-  const org = String(formData.get("org"));
-  const site = String(formData.get("id"));
-  const admin = createAdminClient();
-  const { data: zones } = await admin.from("zones").select("id").eq("org_id", org).eq("site_id", site);
-  await unassignZones(org, (zones ?? []).map((z) => z.id));
-  // zones go with the site (on delete cascade)
-  await admin.from("sites").delete().eq("org_id", org).eq("id", site);
-  revalidatePath(path(org));
-}
-
-async function removeZone(formData: FormData) {
-  "use server";
-  await requireAdmin();
-  const org = String(formData.get("org"));
-  const zone = String(formData.get("id"));
-  await unassignZones(org, [zone]);
-  await createAdminClient().from("zones").delete().eq("org_id", org).eq("id", zone);
-  revalidatePath(path(org));
-}
-
-/** Engine objects keep zone_id in their properties: no FK, so clear it by hand. */
-async function unassignZones(org: string, zones: string[]) {
-  if (!zones.length) return;
-  await tenantDb(org).query(
-    `update objects set properties = properties - 'zone_id' where tenant_id = $1 and properties->>'zone_id' = any($2)`,
-    [org, zones],
-  );
 }
 
 async function removeMember(formData: FormData) {
@@ -149,7 +129,7 @@ export default async function OrgAdmin(props: PageProps<"/admin/orgs/[id]">) {
   if (!org) notFound();
   const enabled = new Map((mods.data ?? []).map((m) => [m.module, m]));
   const configurable = Object.values(PACKAGES).filter((m) => enabled.get(m.id)?.enabled && m.settings.length);
-  const tabLabel: Record<Tab, string> = { overview: t.overview, thresholds: t.thresholds, sites: t.sitesZones, members: t.members };
+  const tabLabel: Record<Tab, string> = { overview: t.overview, thresholds: t.thresholds, sites: t.places, members: t.members };
 
   return (
     <div>
@@ -257,52 +237,73 @@ function Overview({
   );
 }
 
+/** One place with its areas below; areas can be renamed, moved under another place, removed. */
+function PlaceNode({ id, place, all, t }: Ctx & { place: Place; all: { place: Place; path: string[] }[] }) {
+  // a place cannot move under itself or its own areas
+  const below = new Set(flattenPlaces([place]).map((p) => p.place.id));
+  return (
+    <li className="py-2">
+      <div className="flex flex-wrap items-center gap-2">
+        <form action={updatePlace} className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+          <input type="hidden" name="org" value={id} />
+          <input type="hidden" name="id" value={place.id} />
+          <span className="w-10 text-[11px] uppercase tracking-wider text-dim">{place.kind === "site" ? t.site : t.area}</span>
+          <input name="name" defaultValue={place.name} className="min-w-0 flex-1" />
+          {place.kind === "area" && (
+            <select name="parent" defaultValue={place.parentId ?? ""} className="max-w-48">
+              {all
+                .filter((p) => !below.has(p.place.id))
+                .map((p) => (
+                  <option key={p.place.id} value={p.place.id}>
+                    {p.path.join(" · ")}
+                  </option>
+                ))}
+            </select>
+          )}
+          <button className="btn text-xs">{t.save}</button>
+        </form>
+        <form action={removePlace}>
+          <input type="hidden" name="org" value={id} />
+          <input type="hidden" name="id" value={place.id} />
+          <RemoveButton t={t} />
+        </form>
+      </div>
+      <ul className="ml-4 border-l border-line-soft pl-3">
+        {place.children.map((c) => (
+          <PlaceNode key={c.id} id={id} place={c} all={all} t={t} />
+        ))}
+        <li className="py-1.5">
+          <form action={addPlace} className="flex gap-2">
+            <input type="hidden" name="org" value={id} />
+            <input type="hidden" name="parent" value={place.id} />
+            <input name="name" placeholder={t.newArea} required className="min-w-0 flex-1" />
+            <button className="btn">+</button>
+          </form>
+        </li>
+      </ul>
+    </li>
+  );
+}
+
 async function Sites({ id, t, locale }: Ctx & { locale: Locale }) {
-  const supabase = createAdminClient();
-  const [sites, zones, devices] = await Promise.all([
-    supabase.from("sites").select("id, name").eq("org_id", id).order("name"),
-    supabase.from("zones").select("id, name, site_id").eq("org_id", id).order("name"),
-    Promise.all(Object.keys(PACKAGES).map((m) => listObjects(tenantDb(id), m))).then((l) => l.flat()),
+  const db = tenantDb(id);
+  const [tree, devices] = await Promise.all([
+    placeTree(db),
+    Promise.all(Object.keys(PACKAGES).map((m) => listObjects(db, m))).then((l) => l.flat()),
   ]);
-  const siteName = new Map((sites.data ?? []).map((s) => [s.id, s.name]));
+  const all = flattenPlaces(tree);
 
   return (
     <>
-      <SectionTitle>{t.sitesZones}</SectionTitle>
-      <div className="grid gap-3 md:grid-cols-2">
-        {(sites.data ?? []).map((s) => (
-          <div key={s.id} className="card p-5">
-            <div className="flex items-center justify-between gap-3">
-              <span className="font-medium">{s.name}</span>
-              <form action={removeSite}>
-                <input type="hidden" name="org" value={id} />
-                <input type="hidden" name="id" value={s.id} />
-                <RemoveButton t={t} />
-              </form>
-            </div>
-            <ul className="mt-3 divide-y divide-line-soft text-sm">
-              {(zones.data ?? [])
-                .filter((z) => z.site_id === s.id)
-                .map((z) => (
-                  <li key={z.id} className="flex items-center justify-between py-1.5">
-                    <span className="text-mist">{z.name}</span>
-                    <form action={removeZone}>
-                      <input type="hidden" name="org" value={id} />
-                      <input type="hidden" name="id" value={z.id} />
-                      <RemoveButton t={t} />
-                    </form>
-                  </li>
-                ))}
-            </ul>
-            <form action={addZone} className="mt-3 flex gap-2">
-              <input type="hidden" name="org" value={id} />
-              <input type="hidden" name="site" value={s.id} />
-              <input name="name" placeholder={t.newZone} required className="min-w-0 flex-1" />
-              <button className="btn">+</button>
-            </form>
-          </div>
-        ))}
-        <form action={addSite} className="card flex items-start gap-2 border-dashed p-5">
+      <SectionTitle>{t.places}</SectionTitle>
+      <div className="card p-5">
+        {!tree.length && <p className="text-sm text-dim">{t.noSites}</p>}
+        <ul className="divide-y divide-line-soft text-sm">
+          {tree.map((p) => (
+            <PlaceNode key={p.id} id={id} place={p} all={all} t={t} />
+          ))}
+        </ul>
+        <form action={addPlace} className="mt-3 flex gap-2">
           <input type="hidden" name="org" value={id} />
           <input name="name" placeholder={t.newSite} required className="min-w-0 flex-1" />
           <button className="btn">+</button>
@@ -328,11 +329,11 @@ async function Sites({ id, t, locale }: Ctx & { locale: Locale }) {
                 <span className="w-20 capitalize text-mist">{d.type}</span>
                 <span className="num w-24 truncate text-dim">#{d.externalId}</span>
                 <input name="name" defaultValue={d.name} className="w-40" />
-                <select name="zone" defaultValue={d.zoneId ?? ""}>
+                <select name="place" defaultValue={d.placeId ?? ""} className="max-w-56">
                   <option value="">{t.unassigned}</option>
-                  {(zones.data ?? []).map((z) => (
-                    <option key={z.id} value={z.id}>
-                      {siteName.get(z.site_id)} · {z.name}
+                  {all.map((p) => (
+                    <option key={p.place.id} value={p.place.id}>
+                      {p.path.join(" · ")}
                     </option>
                   ))}
                 </select>

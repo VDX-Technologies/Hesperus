@@ -34,7 +34,7 @@ export default async function Settings(props: PageProps<"/o/[slug]/settings">) {
                   <Link key={d.id} href={`/o/${slug}/devices/${d.id}#settings`} className="card block p-4 active:bg-steel/40">
                     <div className="flex items-baseline justify-between gap-3">
                       <span className="font-medium text-ice">{d.name}</span>
-                      <span className="text-xs text-dim">{d.zone ?? t.unassigned}</span>
+                      <span className="text-xs text-dim">{d.placePath.join(" · ") || t.unassigned}</span>
                     </div>
                     <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
                       {mod.settings.map((s) => (
@@ -75,7 +75,7 @@ export default async function Settings(props: PageProps<"/o/[slug]/settings">) {
                           <Link href={`/o/${slug}/devices/${d.id}#settings`} className="whitespace-nowrap font-medium text-ice hover:underline">
                             {d.name}
                           </Link>
-                          <div className="whitespace-nowrap text-xs text-dim">{d.zone ?? t.unassigned}</div>
+                          <div className="whitespace-nowrap text-xs text-dim">{d.placePath.join(" · ") || t.unassigned}</div>
                         </td>
                         {mod.settings.map((s) => (
                           <td key={s.key} className="num px-3 py-3 text-mist">

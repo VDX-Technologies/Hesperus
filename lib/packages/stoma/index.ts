@@ -36,7 +36,7 @@ export const stomaPackage: ModulePackage = {
   objectTypes: [{
     key: "node",
     name: { en: "Stoma node", it: "Nodo Stoma" },
-    properties: { ir: { type: "object" }, zone_id: { type: "string" }, config: { type: "object" } },
+    properties: { ir: { type: "object" }, config: { type: "object" } },
   }],
   metrics: [...stoma.metrics.map((m) => ({ key: m.key, unit: m.unit, label: m.label })), ...HELPERS],
 
