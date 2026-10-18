@@ -56,6 +56,12 @@ export const GROUPS: Group[] = [
         units: DAYS,
         nullable: { en: "forever", it: "per sempre" },
       },
+      {
+        key: "retention.audit_days",
+        label: { en: "Activity history", it: "Storico attività" },
+        units: DAYS,
+        nullable: { en: "forever", it: "per sempre" },
+      },
     ],
   },
   {

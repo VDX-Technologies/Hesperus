@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { requireOrg } from "@/lib/auth";
 import { tenantDb } from "@/lib/engine/db";
 import { upsertRules } from "@/lib/engine/rules";
+import { record } from "@/lib/engine/audit";
 import { getPackageDef } from "@/lib/packages/ui";
 import { safePath } from "@/lib/safe-path";
 import { parseSettings } from "@/lib/settings";
@@ -13,7 +14,7 @@ export async function saveOrgSettings(formData: FormData) {
   const slug = String(formData.get("slug"));
   const back = safePath(formData.get("back"));
   const mod = getPackageDef(String(formData.get("module")));
-  const { supabase, org, role } = await requireOrg(slug);
+  const { supabase, user, org, role } = await requireOrg(slug);
   if (!mod || role !== "owner") redirect(`${back}?error=readOnly`);
   const config = parseSettings(mod.settings, formData);
   const err = mod.validate?.({ ...mod.defaults, ...config });
@@ -21,6 +22,7 @@ export async function saveOrgSettings(formData: FormData) {
   const { error } = await supabase.from("org_modules").update({ config }).eq("org_id", org.id).eq("module", mod.id);
   if (error) redirect(`${back}?error=readOnly`);
   await upsertRules(tenantDb(org.id), mod.id, mod.rules(config), null);
+  await record(tenantDb(org.id), user, "thresholds.org", { subject: mod.id, data: config });
   revalidatePath(`/o/${slug}`, "layout");
   redirect(`${back}?saved=1`);
 }
@@ -30,7 +32,7 @@ export async function saveDeviceSettings(formData: FormData) {
   const slug = String(formData.get("slug"));
   const back = safePath(formData.get("back"));
   const id = String(formData.get("device"));
-  const { org, role, modules } = await requireOrg(slug);
+  const { user, org, role, modules } = await requireOrg(slug);
   if (role !== "owner") redirect(`${back}?error=readOnly`);
   const db = tenantDb(org.id);
   const { rows } = await db.query<{ module: string }>(
@@ -49,6 +51,7 @@ export async function saveDeviceSettings(formData: FormData) {
     [org.id, id, JSON.stringify(config)],
   );
   await upsertRules(db, mod.id, mod.rules(merged), id);
+  await record(db, user, "thresholds.object", { objectId: id, subject: mod.id, data: config });
   revalidatePath(back);
   redirect(`${back}?saved=1`);
 }

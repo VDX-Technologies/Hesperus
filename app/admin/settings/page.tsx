@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { requireAdmin } from "@/lib/auth";
 import { getT } from "@/lib/i18n";
 import { crossTenantDb } from "@/lib/engine/db";
+import { recordPlatform } from "@/lib/engine/audit";
 import { alertRecipients } from "@/lib/engine/health";
 import { mailerFromEnv } from "@/lib/engine/mail";
 import { getSettings, num } from "@/lib/engine/settings";
@@ -21,12 +22,13 @@ const put = (key: string, value: unknown) =>
 
 async function saveAlerts(formData: FormData) {
   "use server";
-  await requireAdmin();
+  const { user } = await requireAdmin();
   const to = String(formData.get("to")).split(/[\s,;]+/).filter((x) => x.includes("@"));
   await put("alerts.email_to", to);
   await put("alerts.email_from", String(formData.get("from")).trim());
   const h = Number(formData.get("repeat"));
   if (h > 0) await put("alerts.repeat_h", h);
+  await recordPlatform(crossTenantDb("settings"), user, "settings.update", { "alerts.email_to": to });
   await flash("ok");
 }
 
@@ -52,22 +54,25 @@ async function sendTest() {
 
 async function saveGroup(formData: FormData) {
   "use server";
-  await requireAdmin();
+  const { user } = await requireAdmin();
   const group = GROUPS.find((g) => g.id === formData.get("group"));
   if (!group) return;
   const values = group.fields.map((f) => [f.key, parse(f, String(formData.get(f.key) ?? ""), String(formData.get(`${f.key}:unit`) ?? "0"))] as const);
   const bad = values.find(([, v]) => v instanceof Error);
   if (bad) return flash(`error: ${bad[0]}`);
   for (const [key, v] of values) await put(key, v);
+  await recordPlatform(crossTenantDb("settings"), user, "settings.update", Object.fromEntries(values));
   await flash("ok");
 }
 
 async function saveSetting(formData: FormData) {
   "use server";
-  await requireAdmin();
+  const { user } = await requireAdmin();
   const key = String(formData.get("key"));
   try {
-    await put(key, JSON.parse(String(formData.get("value"))));
+    const value = JSON.parse(String(formData.get("value")));
+    await put(key, value);
+    await recordPlatform(crossTenantDb("settings"), user, "settings.update", { [key]: value });
   } catch (e) {
     return flash(`error: ${key}: ${(e as Error).message}`);
   }

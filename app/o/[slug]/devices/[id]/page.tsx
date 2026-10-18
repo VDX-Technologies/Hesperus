@@ -4,6 +4,8 @@ import { requireOrg } from "@/lib/auth";
 import { getT } from "@/lib/i18n";
 import { tenantDb } from "@/lib/engine/db";
 import { listObjects } from "@/lib/packages/console";
+import { listAudit } from "@/lib/engine/audit";
+import { ActivityList } from "@/components/activity-list";
 import { getPackageDef } from "@/lib/packages/ui";
 import { hasUi, MODULE_UI } from "@/components/modules/registry";
 import { SettingsForm } from "@/components/settings-form";
@@ -25,7 +27,7 @@ export default async function DevicePage(props: PageProps<"/o/[slug]/devices/[id
   const pkg = rows[0]?.module;
   const mod = pkg ? getPackageDef(pkg) : undefined;
   if (!pkg || !mod || !hasUi(pkg)) notFound();
-  const [device] = await listObjects(db, pkg, id);
+  const [[device], history] = await Promise.all([listObjects(db, pkg, id), listAudit(db, { objectId: id, limit: 20 })]);
   if (!device) notFound();
   const { Device } = MODULE_UI[pkg];
   const orgCfg = (modules.find((m) => m.module === mod.id)?.config ?? {}) as Record<string, number>;
@@ -63,6 +65,8 @@ export default async function DevicePage(props: PageProps<"/o/[slug]/devices/[id
           />
         </section>
       )}
+      <SectionTitle>{t.objectHistory}</SectionTitle>
+      <ActivityList entries={history} t={t} locale={locale} />
     </div>
   );
 }

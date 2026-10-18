@@ -6,6 +6,8 @@ import { getT, timeAgo, type Dict } from "@/lib/i18n";
 import type { Locale } from "@/lib/packages/types";
 import { tenantDb } from "@/lib/engine/db";
 import { upsertRules } from "@/lib/engine/rules";
+import { listAudit, record } from "@/lib/engine/audit";
+import { ActivityList } from "@/components/activity-list";
 import { listObjects } from "@/lib/packages/console";
 import { createPlace, deletePlace, flattenPlaces, movePlace, placeTree, renamePlace, setObjectPlace, type Place } from "@/lib/engine/places";
 import { getPackageDef, PACKAGES, UPCOMING } from "@/lib/packages/ui";
@@ -19,18 +21,19 @@ const path = (id: string) => `/admin/orgs/${id}`;
 
 async function toggleModule(formData: FormData) {
   "use server";
-  await requireAdmin();
+  const { user } = await requireAdmin();
   const org = String(formData.get("org"));
   // service role: customers may only touch the "config" column of org_modules
   await createAdminClient()
     .from("org_modules")
     .upsert({ org_id: org, module: String(formData.get("module")), enabled: formData.get("enabled") === "1" });
+  await record(tenantDb(org), user, formData.get("enabled") === "1" ? "module.enable" : "module.disable", { subject: String(formData.get("module")) });
   revalidatePath(path(org));
 }
 
 async function saveThresholds(formData: FormData) {
   "use server";
-  await requireAdmin();
+  const { user } = await requireAdmin();
   const org = String(formData.get("org"));
   const mod = getPackageDef(String(formData.get("module")));
   if (!mod) return;
@@ -38,22 +41,25 @@ async function saveThresholds(formData: FormData) {
   if (!mod.validate?.({ ...mod.defaults, ...config })) {
     await createAdminClient().from("org_modules").update({ config }).eq("org_id", org).eq("module", mod.id);
     await upsertRules(tenantDb(org), mod.id, mod.rules(config), null);
+    await record(tenantDb(org), user, "thresholds.org", { subject: mod.id, data: config });
   }
   revalidatePath(path(org));
 }
 
 async function addPlace(formData: FormData) {
   "use server";
-  await requireAdmin();
+  const { user } = await requireAdmin();
   const org = String(formData.get("org"));
   const parent = String(formData.get("parent") ?? "");
-  await createPlace(tenantDb(org), { kind: parent ? "area" : "site", name: String(formData.get("name")), parentId: parent || null });
+  const name = String(formData.get("name"));
+  const id = await createPlace(tenantDb(org), { kind: parent ? "area" : "site", name, parentId: parent || null });
+  await record(tenantDb(org), user, "place.create", { objectId: id, subject: name, data: { parent: parent || null } });
   revalidatePath(path(org));
 }
 
 async function updatePlace(formData: FormData) {
   "use server";
-  await requireAdmin();
+  const { user } = await requireAdmin();
   const org = String(formData.get("org"));
   const id = String(formData.get("id"));
   const db = tenantDb(org);
@@ -61,31 +67,36 @@ async function updatePlace(formData: FormData) {
   if (name) await renamePlace(db, id, name);
   const parent = String(formData.get("parent") ?? "");
   if (parent) await movePlace(db, id, parent);
+  if (name || parent) await record(db, user, "place.update", { objectId: id, subject: name || null, data: { parent: parent || null } });
   revalidatePath(path(org));
 }
 
 async function removePlace(formData: FormData) {
   "use server";
-  await requireAdmin();
+  const { user } = await requireAdmin();
   const org = String(formData.get("org"));
-  await deletePlace(tenantDb(org), String(formData.get("id")));
+  const id = String(formData.get("id"));
+  await deletePlace(tenantDb(org), id);
+  await record(tenantDb(org), user, "place.delete", { objectId: id });
   revalidatePath(path(org));
 }
 
 async function updateDevice(formData: FormData) {
   "use server";
-  await requireAdmin();
+  const { user } = await requireAdmin();
   const org = String(formData.get("org"));
   const id = String(formData.get("id"));
   const db = tenantDb(org);
   await db.query(`update objects set name = $3 where tenant_id = $1 and id = $2`, [org, id, String(formData.get("name")).trim() || null]);
-  await setObjectPlace(db, id, String(formData.get("place")) || null);
+  const place = String(formData.get("place")) || null;
+  await setObjectPlace(db, id, place);
+  await record(db, user, "object.update", { objectId: id, subject: String(formData.get("name")).trim() || null, data: { place } });
   revalidatePath(path(org));
 }
 
 async function addMember(formData: FormData) {
   "use server";
-  await requireAdmin();
+  const { user } = await requireAdmin();
   const org = String(formData.get("org"));
   const admin = createAdminClient();
   const email = String(formData.get("email")).trim().toLowerCase();
@@ -101,19 +112,21 @@ async function addMember(formData: FormData) {
     userId = data.user.id;
   }
   await admin.from("memberships").upsert({ org_id: org, user_id: userId, role: String(formData.get("role")) });
+  await record(tenantDb(org), user, "member.add", { subject: email, data: { role: String(formData.get("role")) } });
   revalidatePath(path(org));
 }
 
 async function removeMember(formData: FormData) {
   "use server";
-  await requireAdmin();
+  const { user } = await requireAdmin();
   const org = String(formData.get("org"));
   // only the membership: the login may belong to other organizations too
   await createAdminClient().from("memberships").delete().eq("org_id", org).eq("user_id", String(formData.get("user")));
+  await record(tenantDb(org), user, "member.remove", { data: { user: String(formData.get("user")) } });
   revalidatePath(path(org));
 }
 
-const TABS = ["overview", "thresholds", "sites", "members"] as const;
+const TABS = ["overview", "thresholds", "sites", "members", "activity"] as const;
 type Tab = (typeof TABS)[number];
 
 export default async function OrgAdmin(props: PageProps<"/admin/orgs/[id]">) {
@@ -129,7 +142,7 @@ export default async function OrgAdmin(props: PageProps<"/admin/orgs/[id]">) {
   if (!org) notFound();
   const enabled = new Map((mods.data ?? []).map((m) => [m.module, m]));
   const configurable = Object.values(PACKAGES).filter((m) => enabled.get(m.id)?.enabled && m.settings.length);
-  const tabLabel: Record<Tab, string> = { overview: t.overview, thresholds: t.thresholds, sites: t.places, members: t.members };
+  const tabLabel: Record<Tab, string> = { overview: t.overview, thresholds: t.thresholds, sites: t.places, members: t.members, activity: t.activity };
 
   return (
     <div>
@@ -184,6 +197,7 @@ export default async function OrgAdmin(props: PageProps<"/admin/orgs/[id]">) {
         ))}
       {tab === "sites" && <Sites id={id} t={t} locale={locale} />}
       {tab === "members" && <Members id={id} t={t} />}
+      {tab === "activity" && <ActivityList entries={await listAudit(tenantDb(id), { limit: 200 })} t={t} locale={locale} />}
     </div>
   );
 }

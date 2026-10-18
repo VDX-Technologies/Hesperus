@@ -21,6 +21,7 @@ export default async function OrgLayout(props: LayoutProps<"/o/[slug]">) {
         nav={[
           { href: `/o/${slug}`, label: t.overview },
           { href: `/o/${slug}/alerts`, label: t.alerts, badge: count },
+          { href: `/o/${slug}/activity`, label: t.activity },
           { href: `/o/${slug}/settings`, label: t.settings },
         ]}
       />
