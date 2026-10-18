@@ -182,6 +182,21 @@ La risposta riporta: messaggi accettati e rifiutati, metriche ed eventi scritti,
 
 La console è sottoscritta via **Supabase Realtime** alle tabelle `objects` e `object_alerts` (`components/live-refresh.tsx`). Quando cambiano, la pagina si ricarica dal server con un piccolo ritardo (800 ms) per raggruppare più cambiamenti. In ogni caso si aggiorna ogni 60 secondi.
 
+### 6.8 Un'altra porta: il caricamento di file CSV
+
+Non tutti i dati arrivano da un gateway: i registri (raccolta, trattamenti, ...) spesso esistono già come fogli di calcolo. Una source con `connector = 'upload'` accetta file CSV caricati dalla console in `/o/[slug]/upload`. Il codice è in `lib/engine/upload.ts` (`ingestUpload`) e `lib/engine/csv.ts`.
+
+1. Solo l'**owner** dell'org può caricare. La source deve essere di tipo upload, non in pausa, e appartenere al tenant.
+2. Limiti da `engine_settings`: dimensione (`upload.max_bytes`, `413`), righe (`upload.max_rows`, `413`), file al giorno per source (`upload.files_per_day`, `429`; i file rifiutati non contano).
+3. Il testo viene decodificato in UTF-8, con ripiego su Windows-1252 (i CSV esportati da Excel). Il separatore (`,` `;` o tab) è riconosciuto dalla prima riga.
+4. Lo stesso file (stesso hash SHA-256) non può essere caricato due volte nella stessa source: `409`.
+5. Le colonne vengono tradotte con la **mappatura** salvata in `sources.config.mapping` (colonna del file → campo del modulo); i valori di `config.fixed` (es. `kind: "harvest"`) si aggiungono a ogni riga. Le colonne non mappate vengono ignorate; se nessuna colonna è mappata, `422`.
+6. Ogni riga diventa un messaggio e segue **lo stesso percorso del push** (§6.2–6.6): raw, `normalize`, oggetti, metriche, eventi, regole. Una riga non valida viene rifiutata con il suo **numero di riga nel file**; le altre proseguono.
+7. Il file originale viene salvato su R2 (`docs/<tenant>/<source>/<hash>-<nome>`) con una riga in `documents` (righe totali, accettate, rifiutate) e i collegamenti agli oggetti citati in `document_objects`.
+8. Nel registro attività finiscono `upload.mapping` (mappatura cambiata) e `upload.file` (file caricato).
+
+Il form legge nel browser solo l'intestazione del file, propone per ogni colonna il campo salvato o uno con lo stesso nome, e invia file e mappatura con una Server Action (limite del corpo portato a 6 MB in `next.config.ts`).
+
 ---
 
 ## 7. Regole e allarmi (`lib/engine/rules.ts`)
@@ -285,6 +300,9 @@ Tutti i valori sono modificabili da `/admin/settings` senza toccare il codice.
 | `alerts.email_to` | [] | Destinatari delle email di salute (vuoto = platform admin) |
 | `alerts.email_from` | VDX Core | Mittente delle email di salute |
 | `alerts.repeat_h` | 24 | Ogni quante ore ripetere l'email per un problema ancora aperto |
+| `upload.max_bytes` | 5 MB | Dimensione massima di un file caricato |
+| `upload.max_rows` | 5000 | Righe massime di un file caricato |
+| `upload.files_per_day` | 50 | File caricabili in 24 ore per ogni source upload |
 
 ---
 
@@ -352,6 +370,12 @@ Stoma usa nodi sensore in serra collegati a un gateway LoRa.
 
 I valori predefiniti sono in `model.ts`; `rulesFromConfig` trasforma le soglie del cliente in regole dell'engine.
 
+### 11.3 Records: registri da file
+
+Il modulo `records` (`lib/packages/records/`) è generico: ogni riga di un registro è una **voce** con data (`date`), soggetto (`subject`, es. un appezzamento) e campi facoltativi (`kind`, `product`, `quantity`, `unit`, `dose`, `area`, `operator`, `note`). `normalize` legge date europee (`03/09/2026`, `3.9.26 07:30`, ISO) e numeri con virgola o punto (`1.234,5`), e rifiuta righe senza data o soggetto.
+
+Ogni soggetto diventa un oggetto, ogni voce un evento `records.entry`; `quantity`, `dose` e `area` sono anche metriche, quindi si possono graficare. La console mostra le voci recenti per soggetto (`console.ts`, `listEntries`).
+
 ---
 
 ## 12. La console web
@@ -365,6 +389,7 @@ I valori predefiniti sono in `model.ts`; `rulesFromConfig` trasforma le soglie d
 | `/o/[slug]` | membri dell'org | panoramica dei dispositivi del cliente |
 | `/o/[slug]/alerts` | membri | allarmi aperti e storici |
 | `/o/[slug]/devices/[id]` | membri | dettaglio e grafici di un dispositivo |
+| `/o/[slug]/upload` | owner (gli altri vedono solo l'elenco) | caricamento di file CSV nelle source upload, ultimi file caricati |
 | `/o/[slug]/settings` | owner (gli altri in sola lettura) | soglie aziendali e per dispositivo |
 | `/admin` | staff VDX | elenco clienti, creazione di nuove org |
 | `/admin/orgs/[id]` | staff | gestione di un cliente (moduli, soglie, membri, siti, zone, dispositivi) |
@@ -422,7 +447,7 @@ Lo schema vive in `supabase/migrations/` (file SQL in ordine di data). Ogni modi
 
 Si eseguono con `npm test` (vitest).
 
-- `tests/engine/`: ingest, regole, archivio, health e rollup.
+- `tests/engine/`: ingest, regole, archivio, health, rollup e upload CSV.
 - `tests/packages/stoma/`: i calcoli di Stoma.
 - `tests/db/`: l'harness che crea un **database usa-e-getta** per ogni file di test, applicando tutte le migrazioni. Richiede un Postgres locale (`npx supabase start`) oppure `TEST_DATABASE_URL`.
 

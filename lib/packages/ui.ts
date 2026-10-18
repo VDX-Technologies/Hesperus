@@ -1,9 +1,10 @@
 // Console side of the installed packages, and products on the roadmap.
 import { stoma } from "./stoma/model";
+import { records } from "./records/model";
 import type { PackageDef } from "./types";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export const PACKAGES: Record<string, PackageDef<any>> = { [stoma.id]: stoma };
+export const PACKAGES: Record<string, PackageDef<any>> = { [stoma.id]: stoma, [records.id]: records };
 
 /** Shown in the vendor console, not yet installable. */
 export const UPCOMING = [

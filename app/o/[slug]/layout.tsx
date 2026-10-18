@@ -9,7 +9,12 @@ export default async function OrgLayout(props: LayoutProps<"/o/[slug]">) {
   const { slug } = await props.params;
   const { org, isAdmin } = await requireOrg(slug);
   const { t, locale } = await getT();
-  const count = await countOpenAlerts(tenantDb(org.id));
+  const db = tenantDb(org.id);
+  const [count, uploads] = await Promise.all([
+    countOpenAlerts(db),
+    db.query(`select 1 from sources where tenant_id = $1 and connector = 'upload' limit 1`, [org.id]),
+  ]);
+  const hasUpload = uploads.rowCount! > 0;
   return (
     <>
       <Header
@@ -21,6 +26,7 @@ export default async function OrgLayout(props: LayoutProps<"/o/[slug]">) {
         nav={[
           { href: `/o/${slug}`, label: t.overview },
           { href: `/o/${slug}/alerts`, label: t.alerts, badge: count },
+          ...(hasUpload ? [{ href: `/o/${slug}/upload`, label: t.upload }] : []),
           { href: `/o/${slug}/activity`, label: t.activity },
           { href: `/o/${slug}/settings`, label: t.settings },
         ]}

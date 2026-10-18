@@ -21,11 +21,17 @@ async function showToken(token: string) {
 async function addSource(formData: FormData) {
   "use server";
   await requireAdmin();
+  const upload = formData.get("connector") === "upload";
+  const kind = String(formData.get("kind") ?? "").trim();
   const { token } = await createSource(crossTenantDb("admin"), {
     tenantId: String(formData.get("org")),
     module: String(formData.get("module")),
     name: String(formData.get("name")).trim(),
+    connector: upload ? "upload" : "push",
+    config: upload ? { mapping: {}, fixed: kind ? { kind } : {} } : {},
   });
+  // upload sources are used from the console, their token is never needed
+  if (upload) redirect(PATH);
   await showToken(token);
 }
 
@@ -78,8 +84,8 @@ export default async function EnginePage() {
   const [usage, dbSize, sources, jobs, notices, orgs] = await Promise.all([
     monthUsage(db),
     dbBytes(db),
-    db.query<{ id: string; name: string; org: string; module: string; status: string; token_hint: string | null; last_seen: Date | null; last_error: string | null }>(
-      `select s.id, s.name, o.name org, s.module, s.status, s.token_hint, s.last_seen, s.last_error
+    db.query<{ id: string; name: string; org: string; module: string; connector: string; status: string; token_hint: string | null; last_seen: Date | null; last_error: string | null }>(
+      `select s.id, s.name, o.name org, s.module, s.connector, s.status, s.token_hint, s.last_seen, s.last_error
        from sources s join organizations o on o.id = s.tenant_id order by o.name, s.name`,
     ),
     db.query<{ name: string; last_run: Date | null; last_ok: Date | null; last_error: string | null; last_duration_ms: number | null; last_result: unknown }>(
@@ -155,7 +161,7 @@ export default async function EnginePage() {
                 <td className="py-2 pr-4">
                   <div className="font-medium">{r.name}</div>
                   <div className="num text-xs text-dim">
-                    {r.module} · …{r.token_hint}
+                    {r.module} · {r.connector}{r.connector === "push" && <> · …{r.token_hint}</>}
                   </div>
                 </td>
                 <td className="py-2 pr-4 text-mist">{r.org}</td>
@@ -193,6 +199,11 @@ export default async function EnginePage() {
               <option key={m}>{m}</option>
             ))}
           </select>
+          <select name="connector" defaultValue="push">
+            <option value="push">push</option>
+            <option value="upload">upload</option>
+          </select>
+          <input name="kind" placeholder={t.sourceKind} className="w-36" />
           <button className="btn">{t.create}</button>
         </form>
       </div>

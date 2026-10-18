@@ -19,6 +19,8 @@ export interface IngestResult {
   alerts: { opened: number; resolved: number };
   /** Configs to forward to devices whose acknowledged version is out of date. */
   configs: ({ type: string; externalId: string } & DeviceConfig)[];
+  /** Objects written by the batch. */
+  objectIds: string[];
 }
 
 type Registry = { types: Map<string, string>; metrics: Map<string, number> };
@@ -84,7 +86,7 @@ export async function ingestPush(
 
   const reg = await registerPackage(db, pkg);
   const result: IngestResult = {
-    accepted: 0, rejected: [], metrics: 0, events: 0, alerts: { opened: 0, resolved: 0 }, configs: [],
+    accepted: 0, rejected: [], metrics: 0, events: 0, alerts: { opened: 0, resolved: 0 }, configs: [], objectIds: [],
   };
   const items: Normalized[] = [];
 
@@ -141,6 +143,7 @@ export async function ingestPush(
     derivedState.set(k, rows[0].state.derived ?? {});
     pkgState.set(k, rows[0].state.pkg ?? {});
   }
+  result.objectIds = [...objectIds.values()];
 
   // Derived metrics and the package step, in time order so they see the previous point.
   if (pkg.derived?.length || pkg.step) {

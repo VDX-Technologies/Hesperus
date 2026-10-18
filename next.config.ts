@@ -27,6 +27,8 @@ const security = [
 
 const nextConfig: NextConfig = {
   poweredByHeader: false,
+  // CSV uploads go through a server action: room for upload.max_bytes (5 MB) plus multipart overhead
+  experimental: { serverActions: { bodySizeLimit: "6mb" } },
   async headers() {
     return [{ source: "/:path*", headers: security }];
   },

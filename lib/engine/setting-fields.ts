@@ -95,6 +95,15 @@ export const GROUPS: Group[] = [
       { key: "raw.inbox_stale_min", label: { en: "Unarchived raw alert after", it: "Avviso dati non archiviati dopo" }, units: MIN },
     ],
   },
+  {
+    id: "upload",
+    title: { en: "File uploads", it: "Caricamento file" },
+    fields: [
+      { key: "upload.max_bytes", label: { en: "Max file size", it: "Dimensione massima file" }, units: BYTES },
+      { key: "upload.max_rows", label: { en: "Max rows per file", it: "Righe massime per file" }, units: COUNT },
+      { key: "upload.files_per_day", label: { en: "Files per day per source", it: "File al giorno per fonte" }, units: COUNT },
+    ],
+  },
 ];
 
 /** Shown elsewhere on the page (alerts form). */
