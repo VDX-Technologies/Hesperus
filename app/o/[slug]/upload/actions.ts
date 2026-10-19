@@ -5,7 +5,8 @@ import { crossTenantDb, tenantDb } from "@/lib/engine/db";
 import { ConnectorError } from "@/lib/engine/connectors";
 import { extract, type FileFormat } from "@/lib/engine/extract";
 import { storeFromEnv } from "@/lib/engine/store";
-import { ingestUpload, saveUploadConfig, uploadSources, type UploadResult } from "@/lib/engine/upload";
+import { ingestUpload, knownSubjects, saveUploadConfig, uploadConfig, uploadSources, type UploadResult } from "@/lib/engine/upload";
+import { readMemory, recognize, type Recognition } from "@/lib/packages/records/recognize";
 import { getPackage } from "@/lib/packages";
 
 export type UploadState = { error?: string; result?: Omit<UploadResult, "documentId"> } | null;
@@ -42,14 +43,27 @@ export async function uploadFile(_prev: UploadState, formData: FormData): Promis
   }
 }
 
-export type Preview = { format: FileFormat; headers: string[]; rows: number } | { error: string };
+export type Preview =
+  | { format: FileFormat; headers: string[]; rows: number; sample: string[][]; recognition: Recognition | null }
+  | { error: string };
 
-/** Reads a chosen file on the server and returns the columns of the table found in it, for the mapping. */
+/**
+ * Reads a chosen file on the server and says what each column of its table is: the field, how sure,
+ * and whether the register has seen files like it. The first rows come back for the preview.
+ */
 export async function previewFile(formData: FormData): Promise<Preview> {
-  const { role } = await requireOrg(String(formData.get("slug")));
+  const { org, role } = await requireOrg(String(formData.get("slug")));
   if (role !== "owner") return { error: "uploadOnlyOwner" };
   const file = formData.get("file");
   if (!(file instanceof File) || !file.size) return { error: "uploadErr_400" };
+  const tdb = tenantDb(org.id);
+  const source = (await uploadSources(tdb)).find((s) => s.id === formData.get("source"));
   const { format, table } = await extract(file.name, file.type, new Uint8Array(await file.arrayBuffer()));
-  return { format, headers: table?.headers ?? [], rows: table?.rows.length ?? 0 };
+  if (!table) return { format, headers: [], rows: 0, sample: [], recognition: null };
+  const recognition = recognize(table, {
+    memory: readMemory(source?.config.memory),
+    mapping: source ? uploadConfig(source).mapping : {},
+    subjects: await knownSubjects(tdb),
+  });
+  return { format, headers: table.headers, rows: table.rows.length, sample: table.rows.slice(0, 5), recognition };
 }

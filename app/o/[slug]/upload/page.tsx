@@ -1,7 +1,7 @@
 import { requireOrg } from "@/lib/auth";
 import { getT, timeAgo, type Dict } from "@/lib/i18n";
 import { tenantDb } from "@/lib/engine/db";
-import { listUploads, uploadConfig, uploadSources } from "@/lib/engine/upload";
+import { listUploads, uploadSources } from "@/lib/engine/upload";
 import { RECORD_FIELDS, REQUIRED_FIELDS } from "@/lib/packages/records/model";
 import { SectionTitle } from "@/components/ui";
 import { UploadForm } from "./form";
@@ -28,15 +28,12 @@ export default async function Upload(props: PageProps<"/o/[slug]/upload">) {
       ) : (
         <UploadForm
           slug={slug}
-          sources={sources.filter((s) => s.status !== "paused").map((s) => ({ id: s.id, name: s.name, mapping: uploadConfig(s).mapping }))}
+          sources={sources.filter((s) => s.status !== "paused").map((s) => ({ id: s.id, name: s.name, }))}
           fields={RECORD_FIELDS.map((f) => ({ key: f, label: t[`rec_${f}` as keyof Dict], required: REQUIRED_FIELDS.includes(f) }))}
           labels={{
             uploadSource: t.uploadSource,
-            uploadFile: t.uploadFile,
             uploadPick: t.uploadPick,
             uploadDrop: t.uploadDrop,
-            uploadChange: t.uploadChange,
-            uploadMapping: t.uploadMapping,
             uploadMappingHelp: t.uploadMappingHelp,
             uploadIgnore: t.uploadIgnore,
             uploadSend: t.uploadSend,
@@ -48,6 +45,15 @@ export default async function Upload(props: PageProps<"/o/[slug]/upload">) {
             uploadNoTable: t.uploadNoTable,
             uploadRejectedRows: t.uploadRejectedRows,
             uploadLine: t.uploadLine,
+            uploadSendReady: t.uploadSendReady,
+            uploadReady: t.uploadReady,
+            uploadReview: t.uploadReview,
+            uploadKnown: t.uploadKnown,
+            uploadMissing: t.uploadMissing,
+            uploadRemove: t.uploadRemove,
+            uploadClear: t.uploadClear,
+            uploadSure: t.uploadSure,
+            uploadUnsure: t.uploadUnsure,
             errors,
           }}
         />

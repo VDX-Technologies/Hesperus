@@ -11,6 +11,7 @@ import { ConnectorError, uploadConnector, uploadConfig, type UploadConfig } from
 import { ingestPush, type IngestResult } from "./ingest";
 import { getSettings, num } from "./settings";
 import { record, type Actor } from "./audit";
+import { learn, readMemory } from "../packages/records/recognize";
 
 export interface UploadFile {
   name: string;
@@ -102,6 +103,13 @@ export async function ingestUpload(
     ],
   );
   out.documentId = rows[0].id;
+  // what this file taught: its signature and the traits of each mapped and ignored column
+  if (table && found.table && out.accepted) {
+    const subjects = await knownSubjects(tdb);
+    await tdb.query(`update sources set config = config || jsonb_build_object('memory', $3::jsonb) where tenant_id = $1 and id = $2`, [
+      source.tenant_id, source.id, JSON.stringify(learn(readMemory(source.config.memory), found.table, mapping, subjects)),
+    ]);
+  }
   if (objectIds.size) await tdb.query(
     `insert into document_objects (tenant_id, document_id, object_id) select $1, $2, unnest($3::uuid[]) on conflict do nothing`,
     [source.tenant_id, out.documentId, [...objectIds]],
@@ -123,6 +131,15 @@ export async function saveUploadConfig(db: TenantDb, sourceId: string, cfg: Uplo
   );
   if (!rows.length) throw new ConnectorError(404, "no such upload source");
   await record(db, actor, "upload.mapping", { subject: rows[0].name, data: { mapping } });
+}
+
+/** Names of the tenant's objects, lowercased, to recognise a column of subjects. */
+export async function knownSubjects(db: TenantDb, limit = 5000): Promise<Set<string>> {
+  const { rows } = await db.query<{ n: string }>(
+    `select distinct lower(name) n from objects where tenant_id = $1 and name is not null limit $2`,
+    [db.tenantId, limit],
+  );
+  return new Set(rows.map((r) => r.n));
 }
 
 /** Upload sources of a tenant with their mapping. */

@@ -7,7 +7,7 @@ export type RecordField = (typeof RECORD_FIELDS)[number];
 export const REQUIRED_FIELDS: RecordField[] = ["date", "subject"];
 
 /** Words a column header is usually written with, per field (Italian and English). */
-const FIELD_WORDS: Record<RecordField, string[]> = {
+export const FIELD_WORDS: Record<RecordField, string[]> = {
   date: ["data", "date", "giorno", "day", "quando", "when", "timestamp", "ora", "time"],
   subject: ["soggetto", "subject", "campo", "appezzamento", "particella", "parcella", "appezz", "vigna", "vigneto", "coltura", "lotto", "settore", "serra", "animale", "capo", "mezzo", "macchina", "località", "localita", "luogo", "zona", "field", "plot", "block", "site", "location", "crop"],
   kind: ["tipo", "kind", "type", "categoria", "category", "operazione", "attivita", "attività", "lavorazione", "intervento"],
@@ -20,7 +20,7 @@ const FIELD_WORDS: Record<RecordField, string[]> = {
   note: ["note", "nota", "notes", "osservazioni", "commento", "commenti", "comments", "descrizione", "description", "memo"],
 };
 
-const words = (s: string) =>
+export const words = (s: string) =>
   s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/\([^)]*\)|\[[^\]]*\]/g, " ").split(/[^a-z0-9.]+/).filter(Boolean);
 
 /**

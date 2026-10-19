@@ -1,15 +1,38 @@
 "use client";
-import { useActionState, useRef, useState } from "react";
-import { SubmitButton } from "@/components/submit-button";
-import { previewFile, uploadFile, type UploadState } from "./actions";
-import { guessFields } from "@/lib/packages/records/model";
+import { useRef, useState } from "react";
+import { previewFile, uploadFile, type Preview, type UploadState } from "./actions";
 
 type Labels = Record<
-  "uploadSource" | "uploadFile" | "uploadPick" | "uploadDrop" | "uploadChange" | "uploadMapping" | "uploadMappingHelp" | "uploadIgnore" | "uploadSend" | "uploadDone" | "uploadStored" | "uploadReading" | "uploadFound" | "uploadNoTable" | "uploadRejectedRows" | "uploadLine" | "uploadSending",
+  | "uploadSource" | "uploadPick" | "uploadDrop" | "uploadMappingHelp" | "uploadIgnore" | "uploadSend" | "uploadDone"
+  | "uploadStored" | "uploadReading" | "uploadFound" | "uploadNoTable" | "uploadRejectedRows" | "uploadLine" | "uploadSending"
+  | "uploadSendReady" | "uploadReady" | "uploadReview" | "uploadKnown" | "uploadMissing" | "uploadRemove" | "uploadClear"
+  | "uploadSure" | "uploadUnsure",
   string
 > & { errors: Record<string, string> };
 
-/** Picks the register and the file, reads the header row in the browser and lets the user map each column. */
+type Status = "reading" | "ready" | "review" | "sending" | "done" | "error";
+
+interface Item {
+  id: number;
+  file: File;
+  status: Status;
+  preview?: Extract<Preview, { headers: string[] }>;
+  mapping: Record<string, string>;
+  confidence: Record<string, number>;
+  result?: UploadState;
+  error?: string;
+}
+
+/** Below this a column is shown for review; a file with every column above it can go in one click. */
+const SURE = 0.75;
+
+let next = 1;
+
+/**
+ * Upload queue: any number of files are read on the server, every column is recognised with how
+ * sure the guess is, files that are fully recognised are ready to send, the others open for review
+ * of the doubtful columns only.
+ */
 export function UploadForm({
   slug,
   sources,
@@ -17,69 +40,104 @@ export function UploadForm({
   labels: l,
 }: {
   slug: string;
-  sources: { id: string; name: string; mapping: Record<string, string> }[];
+  sources: { id: string; name: string }[];
   fields: { key: string; label: string; required: boolean }[];
   labels: Labels;
 }) {
-  const [state, action] = useActionState<UploadState, FormData>(uploadFile, null);
   const [sourceId, setSourceId] = useState(sources[0]?.id ?? "");
-  const [headers, setHeaders] = useState<string[]>([]);
-  const [readError, setReadError] = useState(false);
-  const [reading, setReading] = useState(false);
-  const [found, setFound] = useState<number | null>(null);
-  const [file, setFile] = useState<File | null>(null);
+  const [items, setItems] = useState<Item[]>([]);
+  const [open, setOpen] = useState<number | null>(null);
   const [dragging, setDragging] = useState(false);
   const input = useRef<HTMLInputElement>(null);
-  const mapping = sources.find((s) => s.id === sourceId)?.mapping ?? {};
+  const required = fields.filter((f) => f.required).map((f) => f.key);
+  const label = (k: string) => fields.find((f) => f.key === k)?.label ?? k;
 
-  // the server reads the file (spreadsheet, PDF, Word, text…) and says which columns it found
-  const readHeaders = async (file: File | undefined) => {
-    setFile(file ?? null);
-    setHeaders([]);
-    setFound(null);
-    setReadError(false);
-    if (!file) return;
-    setReading(true);
+  const patch = (id: number, p: Partial<Item>) => setItems((xs) => xs.map((x) => (x.id === id ? { ...x, ...p } : x)));
+
+  const missing = (it: Item) => (it.preview?.headers.length ? required.filter((f) => !Object.values(it.mapping).includes(f)) : []);
+  const doubtful = (it: Item) => it.preview?.headers.filter((h) => (it.confidence[h] ?? 1) < SURE) ?? [];
+  const settle = (it: Item): Status => (missing(it).length || doubtful(it).length ? "review" : "ready");
+
+  const read = async (it: Item, source = sourceId) => {
+    patch(it.id, { status: "reading", error: undefined });
     try {
       const fd = new FormData();
       fd.set("slug", slug);
-      fd.set("file", file);
+      fd.set("source", source);
+      fd.set("file", it.file);
       const p = await previewFile(fd);
-      if ("error" in p) setReadError(true);
-      else {
-        setHeaders(p.headers);
-        setFound(p.rows);
-      }
+      if ("error" in p) return patch(it.id, { status: "error", error: p.error });
+      const cols = p.recognition?.columns ?? [];
+      const done: Item = {
+        ...it,
+        preview: p,
+        mapping: Object.fromEntries(cols.map((c) => [c.header, c.field])),
+        confidence: Object.fromEntries(cols.map((c) => [c.header, c.confidence])),
+      };
+      const status = settle(done);
+      patch(it.id, { ...done, status });
+      // a layout confirmed before goes straight in
+      if (p.recognition?.known && status === "ready") await send(done);
     } catch {
-      setReadError(true);
-    } finally {
-      setReading(false);
+      patch(it.id, { status: "error", error: "uploadErr_400" });
     }
   };
 
-  // a column keeps its saved field, else the one its name suggests ("Campo", "Dose (l/ha)"…)
-  const guesses = guessFields(headers);
-  const guess = (h: string, i: number) => mapping[h] ?? guesses[i];
-
-  // a dropped file goes into the real input, so the form submits it like a picked one
-  const onDrop = (e: React.DragEvent) => {
-    e.preventDefault();
-    setDragging(false);
-    const f = e.dataTransfer.files[0];
-    if (!f || !input.current) return;
-    const dt = new DataTransfer();
-    dt.items.add(f);
-    input.current.files = dt.files;
-    readHeaders(f);
+  const add = (files: FileList | File[]) => {
+    const fresh = [...files].map((file): Item => ({ id: next++, file, status: "reading", mapping: {}, confidence: {} }));
+    setItems((xs) => [...xs, ...fresh]);
+    // two at a time: big batches do not flood the server
+    const queue = [...fresh];
+    const worker = async () => {
+      for (let it = queue.shift(); it; it = queue.shift()) await read(it);
+    };
+    void Promise.all([worker(), worker()]);
   };
 
+  const send = async (it: Item) => {
+    patch(it.id, { status: "sending" });
+    const fd = new FormData();
+    fd.set("slug", slug);
+    fd.set("source", sourceId);
+    fd.set("file", it.file);
+    for (const [h, f] of Object.entries(it.mapping)) if (f) fd.set(`map_${h}`, f);
+    try {
+      const r = await uploadFile(null, fd);
+      patch(it.id, r?.error ? { status: "error", error: r.error, result: r } : { status: "done", result: r });
+    } catch {
+      patch(it.id, { status: "error", error: "uploadErr_400" });
+    }
+  };
+
+  const sendReady = async () => {
+    for (const it of items.filter((x) => x.status === "ready")) await send(it);
+  };
+
+  // a column changed by hand is sure: the user said so
+  const setField = (it: Item, header: string, field: string) => {
+    const mapping = { ...it.mapping };
+    // a field fills one column only
+    for (const h in mapping) if (field && mapping[h] === field) mapping[h] = "";
+    mapping[header] = field;
+    const changed: Item = { ...it, mapping, confidence: { ...it.confidence, [header]: 1 } };
+    patch(it.id, { mapping, confidence: changed.confidence, status: settle(changed) });
+  };
+
+  const changeSource = (id: string) => {
+    setSourceId(id);
+    // each register has its own memory: open files are read again against it
+    for (const it of items) if (it.status !== "done" && it.status !== "sending") void read(it, id);
+  };
+
+  const ready = items.filter((x) => x.status === "ready").length;
+  const tone = (c: number) => (c >= SURE ? "border-ok/50 bg-ok/10" : c >= 0.5 ? "border-warn/60 bg-warn/10" : "border-alarm/60 bg-alarm/10");
+
   return (
-    <form action={action} className="card space-y-4 p-5">
-      <input type="hidden" name="slug" value={slug} />
-      <div className="grid gap-4 sm:grid-cols-2">
+    <div className="card space-y-4 p-5">
+      <div className="grid gap-4 sm:grid-cols-[16rem_1fr]">
         <label className="block text-sm">
           <span className="text-dim">{l.uploadSource}</span>
-          <select name="source" value={sourceId} onChange={(e) => setSourceId(e.target.value)} className="mt-1 w-full">
+          <select value={sourceId} onChange={(e) => changeSource(e.target.value)} className="mt-1 w-full">
             {sources.map((s) => (
               <option key={s.id} value={s.id}>
                 {s.name}
@@ -87,98 +145,188 @@ export function UploadForm({
             ))}
           </select>
         </label>
-        <div className="block text-sm">
-          <span className="text-dim">{l.uploadFile}</span>
-          <label
-            onDragOver={(e) => {
-              e.preventDefault();
-              setDragging(true);
+        <label
+          onDragOver={(e) => {
+            e.preventDefault();
+            setDragging(true);
+          }}
+          onDragLeave={() => setDragging(false)}
+          onDrop={(e) => {
+            e.preventDefault();
+            setDragging(false);
+            add(e.dataTransfer.files);
+          }}
+          className={`flex cursor-pointer items-center gap-3 self-end rounded-lg border border-dashed px-4 py-3 text-sm transition-colors hover:border-frost/60 hover:bg-steel/30 ${dragging ? "border-frost bg-steel/40" : "border-line"}`}
+        >
+          <input
+            ref={input}
+            type="file"
+            multiple
+            onChange={(e) => {
+              if (e.target.files) add(e.target.files);
+              e.target.value = "";
             }}
-            onDragLeave={() => setDragging(false)}
-            onDrop={onDrop}
-            className={`mt-1 flex cursor-pointer items-center gap-3 rounded-lg border border-dashed px-4 py-3 transition-colors hover:border-frost/60 hover:bg-steel/30 ${dragging ? "border-frost bg-steel/40" : "border-line"}`}
-          >
-            <input
-              ref={input}
-              name="file"
-              type="file"
-              required
-              onChange={(e) => readHeaders(e.target.files?.[0])}
-              className="sr-only"
-            />
-            <svg viewBox="0 0 24 24" className="h-5 w-5 shrink-0 text-mist" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden>
-              <path d="M12 16V4m0 0-4 4m4-4 4 4M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-            {file ? (
-              <span className="flex min-w-0 flex-1 items-center justify-between gap-3">
-                <span className="truncate font-medium text-ice">{file.name}</span>
-                <span className="shrink-0 text-xs text-dim underline">{l.uploadChange}</span>
-              </span>
-            ) : (
-              <span>
-                <span className="font-medium text-ice">{l.uploadPick}</span> <span className="text-dim">{l.uploadDrop}</span>
-              </span>
-            )}
-          </label>
-        </div>
+            className="sr-only"
+          />
+          <svg viewBox="0 0 24 24" className="h-5 w-5 shrink-0 text-mist" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden>
+            <path d="M12 16V4m0 0-4 4m4-4 4 4M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+          <span>
+            <span className="font-medium text-ice">{l.uploadPick}</span> <span className="text-dim">{l.uploadDrop}</span>
+          </span>
+        </label>
       </div>
 
-      {reading && <p className="text-sm text-dim">{l.uploadReading}</p>}
-      {readError && <p className="text-sm text-alarm">{l.errors.uploadErr_400}</p>}
-      {found === 0 && !headers.length && <p className="text-sm text-dim">{l.uploadNoTable}</p>}
-      {headers.length > 0 && (
-        <div>
-          <div className="text-sm font-medium">
-            {l.uploadMapping} <span className="num font-normal text-dim">· {found} {l.uploadFound}</span>
-          </div>
-          <p className="mt-0.5 text-xs text-dim">{l.uploadMappingHelp}</p>
-          <div className="mt-3 grid gap-x-4 gap-y-2 sm:grid-cols-2 lg:grid-cols-3">
-            {headers.map((h, i) => (
-              <label key={`${sourceId}:${h}`} className="flex items-center justify-between gap-3 text-sm">
-                <span className="min-w-0 truncate text-mist" title={h}>
-                  {h || "–"}
-                </span>
-                <select name={`map_${h}`} defaultValue={guess(h, i)} className="w-40 shrink-0">
-                  <option value="">{l.uploadIgnore}</option>
-                  {fields.map((f) => (
-                    <option key={f.key} value={f.key}>
-                      {f.label}
-                      {f.required ? " *" : ""}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            ))}
-          </div>
-        </div>
-      )}
-
-      <SubmitButton pending={l.uploadSending} className="h-10 rounded-lg bg-frost px-4 text-sm font-medium text-ink-950 transition-colors hover:bg-white">
-        {l.uploadSend}
-      </SubmitButton>
-
-      {state?.error && <p className="text-sm text-alarm">{l.errors[state.error] ?? state.error}</p>}
-      {state?.result && (
-        <div className="space-y-2 text-sm">
-          <p className="text-ok">
-            {state.result.table ? `${state.result.accepted} / ${state.result.rows} ${l.uploadDone}` : l.uploadStored}
-          </p>
-          {state.result.rejected.length > 0 && (
-            <div className="rounded-lg border border-warn/50 bg-warn/10 p-3">
-              <div className="text-warn">
-                {state.result.rejected.length} {l.uploadRejectedRows}
-              </div>
-              <ul className="mt-1 max-h-48 space-y-0.5 overflow-y-auto text-xs text-mist">
-                {state.result.rejected.map((r) => (
-                  <li key={r.line}>
-                    {l.uploadLine} <span className="num">{r.line}</span>: {r.error}
-                  </li>
-                ))}
-              </ul>
+      {items.length > 0 && (
+        <>
+          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line-soft pt-4">
+            <p className="num text-xs text-dim">
+              {items.length} file · {ready} {l.uploadReady} · {items.filter((x) => x.status === "review").length} {l.uploadReview} ·{" "}
+              {items.filter((x) => x.status === "done").length} {l.uploadDone}
+            </p>
+            <div className="flex gap-2">
+              <button type="button" onClick={() => setItems((xs) => xs.filter((x) => x.status !== "done"))} className="h-9 rounded-lg border border-line px-3 text-sm text-mist hover:text-ice">
+                {l.uploadClear}
+              </button>
+              <button
+                type="button"
+                disabled={!ready}
+                onClick={sendReady}
+                className="h-9 rounded-lg bg-frost px-4 text-sm font-medium text-ink-950 transition-colors hover:bg-white disabled:opacity-40"
+              >
+                {l.uploadSendReady} ({ready})
+              </button>
             </div>
-          )}
-        </div>
+          </div>
+
+          <ul className="divide-y divide-line-soft rounded-lg border border-line-soft">
+            {items.map((it) => {
+              const p = it.preview;
+              const miss = missing(it);
+              const unsure = doubtful(it);
+              const expanded = open === it.id || (it.status === "review" && open === null && items.find((x) => x.status === "review")?.id === it.id);
+              const cols = p?.headers ?? [];
+              const known = p?.recognition?.known;
+              return (
+                <li key={it.id} className="text-sm">
+                  <div className="flex items-center gap-3 px-3 py-2.5">
+                    <span
+                      className={`h-2 w-2 shrink-0 rounded-full ${
+                        it.status === "done" ? "bg-ok" : it.status === "error" ? "bg-alarm" : it.status === "review" ? "bg-warn" : it.status === "ready" ? "bg-frost" : "animate-pulse bg-mist"
+                      }`}
+                    />
+                    <button type="button" onClick={() => setOpen(expanded ? -1 : it.id)} className="min-w-0 flex-1 truncate text-left font-medium text-ice" title={it.file.name}>
+                      {it.file.name}
+                    </button>
+                    <span className="num shrink-0 text-xs text-dim">
+                      {it.status === "reading" && l.uploadReading}
+                      {it.status === "sending" && l.uploadSending}
+                      {(it.status === "ready" || it.status === "review") &&
+                        (cols.length ? `${p?.rows} ${l.uploadFound}${known ? ` · ${l.uploadKnown}` : ""}` : l.uploadNoTable)}
+                      {it.status === "review" && unsure.length > 0 && <span className="ml-2 text-warn">{unsure.length} {l.uploadUnsure}</span>}
+                      {it.status === "review" && miss.length > 0 && (
+                        <span className="ml-2 text-alarm">
+                          {l.uploadMissing}: {miss.map(label).join(", ")}
+                        </span>
+                      )}
+                      {it.status === "done" && it.result?.result && (
+                        <span className="text-ok">
+                          {it.result.result.table ? `${it.result.result.accepted} / ${it.result.result.rows} ${l.uploadDone}` : l.uploadStored}
+                          {it.result.result.rejected.length > 0 && (
+                            <span className="ml-2 text-warn">
+                              {it.result.result.rejected.length} {l.uploadRejectedRows}
+                            </span>
+                          )}
+                        </span>
+                      )}
+                      {it.status === "error" && <span className="text-alarm">{l.errors[it.error ?? ""] ?? it.error}</span>}
+                    </span>
+                    {(it.status === "ready" || it.status === "review") && (
+                      <button
+                        type="button"
+                        disabled={miss.length > 0}
+                        onClick={() => send(it)}
+                        className="h-7 shrink-0 rounded-md border border-line px-2.5 text-xs text-ice hover:border-frost/60 disabled:opacity-40"
+                      >
+                        {l.uploadSend}
+                      </button>
+                    )}
+                    {it.status !== "sending" && (
+                      <button type="button" onClick={() => setItems((xs) => xs.filter((x) => x.id !== it.id))} className="shrink-0 text-dim hover:text-ice" aria-label={l.uploadRemove} title={l.uploadRemove}>
+                        ×
+                      </button>
+                    )}
+                  </div>
+
+                  {expanded && cols.length > 0 && it.status !== "done" && (
+                    <div className="space-y-2 px-3 pb-3">
+                      <p className="text-xs text-dim">
+                        {l.uploadMappingHelp} <span className="text-ok">■</span> {l.uploadSure} <span className="text-warn">■</span> {l.uploadUnsure}
+                      </p>
+                      <div className="overflow-x-auto rounded-lg border border-line-soft">
+                        <table className="w-full text-xs">
+                          <thead>
+                            <tr>
+                              {cols.map((h) => {
+                                const c = it.confidence[h] ?? 0;
+                                return (
+                                  <th key={h} className="min-w-36 p-1.5 text-left align-top font-normal">
+                                    <div className="truncate text-mist" title={h}>
+                                      {h}
+                                    </div>
+                                    <div className={`mt-1 flex items-center gap-1 rounded-md border px-1 ${tone(c)}`}>
+                                      <select
+                                        value={it.mapping[h] ?? ""}
+                                        onChange={(e) => setField(it, h, e.target.value)}
+                                        disabled={it.status === "sending"}
+                                        className="min-w-0 flex-1 border-0 bg-transparent py-1 text-xs"
+                                      >
+                                        <option value="">{l.uploadIgnore}</option>
+                                        {fields.map((f) => (
+                                          <option key={f.key} value={f.key}>
+                                            {f.label}
+                                            {f.required ? " *" : ""}
+                                          </option>
+                                        ))}
+                                      </select>
+                                      <span className="num shrink-0 text-[10px] text-dim">{Math.round(c * 100)}%</span>
+                                    </div>
+                                  </th>
+                                );
+                              })}
+                            </tr>
+                          </thead>
+                          <tbody className="num">
+                            {p?.sample.map((r, i) => (
+                              <tr key={i} className="border-t border-line-soft">
+                                {cols.map((h, k) => (
+                                  <td key={h} className={`max-w-48 truncate p-1.5 ${it.mapping[h] ? "text-ice" : "text-dim line-through decoration-dim/40"}`}>
+                                    {r[k]}
+                                  </td>
+                                ))}
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
+
+                  {it.status === "done" && expanded && (it.result?.result?.rejected.length ?? 0) > 0 && (
+                    <ul className="max-h-48 space-y-0.5 overflow-y-auto px-3 pb-3 text-xs text-mist">
+                      {it.result!.result!.rejected.map((r) => (
+                        <li key={r.line}>
+                          {l.uploadLine} <span className="num">{r.line}</span>: {r.error}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        </>
       )}
-    </form>
+    </div>
   );
 }
