@@ -2,6 +2,7 @@
 import { useActionState, useRef, useState } from "react";
 import { SubmitButton } from "@/components/submit-button";
 import { previewFile, uploadFile, type UploadState } from "./actions";
+import { guessFields } from "@/lib/packages/records/model";
 
 type Labels = Record<
   "uploadSource" | "uploadFile" | "uploadPick" | "uploadDrop" | "uploadChange" | "uploadMapping" | "uploadMappingHelp" | "uploadIgnore" | "uploadSend" | "uploadDone" | "uploadStored" | "uploadReading" | "uploadFound" | "uploadNoTable" | "uploadRejectedRows" | "uploadLine" | "uploadSending",
@@ -56,8 +57,9 @@ export function UploadForm({
     }
   };
 
-  // a column keeps its saved field, else one named like it
-  const guess = (h: string) => mapping[h] ?? fields.find((f) => f.key === h.trim().toLowerCase() || f.label.toLowerCase() === h.trim().toLowerCase())?.key ?? "";
+  // a column keeps its saved field, else the one its name suggests ("Campo", "Dose (l/ha)"…)
+  const guesses = guessFields(headers);
+  const guess = (h: string, i: number) => mapping[h] ?? guesses[i];
 
   // a dropped file goes into the real input, so the form submits it like a picked one
   const onDrop = (e: React.DragEvent) => {
@@ -131,12 +133,12 @@ export function UploadForm({
           </div>
           <p className="mt-0.5 text-xs text-dim">{l.uploadMappingHelp}</p>
           <div className="mt-3 grid gap-x-4 gap-y-2 sm:grid-cols-2 lg:grid-cols-3">
-            {headers.map((h) => (
+            {headers.map((h, i) => (
               <label key={`${sourceId}:${h}`} className="flex items-center justify-between gap-3 text-sm">
                 <span className="min-w-0 truncate text-mist" title={h}>
                   {h || "–"}
                 </span>
-                <select name={`map_${h}`} defaultValue={guess(h)} className="w-40 shrink-0">
+                <select name={`map_${h}`} defaultValue={guess(h, i)} className="w-40 shrink-0">
                   <option value="">{l.uploadIgnore}</option>
                   {fields.map((f) => (
                     <option key={f.key} value={f.key}>
