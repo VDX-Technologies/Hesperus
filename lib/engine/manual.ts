@@ -98,7 +98,7 @@ async function insert(
   db: TenantDb,
   source: Source,
   author: Author,
-  e: { type: string; ts: Date; severity: Severity; payload: Record<string, unknown>; objectIds: string[]; supersedes: number | null },
+  e: { type: string; ts: Date; severity: Severity; payload: Record<string, unknown>; objectIds: string[]; supersedes: number | null; voided?: string },
   now: Date,
 ): Promise<number> {
   await db.query(`insert into raw_inbox (tenant_id, source_id, received_at, body) values ($1, $2, $3, $4)`, [
@@ -108,12 +108,12 @@ async function insert(
     // one statement: the event and its links land together or not at all
     const { rows } = await db.query<{ id: string }>(
       `with e as (
-         insert into events (tenant_id, ts, type, severity, payload, source_id, recorded_at, author, author_label, supersedes)
-         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) returning id
+         insert into events (tenant_id, ts, type, severity, payload, source_id, recorded_at, author, author_label, supersedes, voided)
+         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $12) returning id
        )
        insert into event_objects (tenant_id, event_id, object_id)
        select $1, e.id, o from e, unnest($11::uuid[]) o returning event_id id`,
-      [db.tenantId, e.ts, e.type, e.severity, e.payload, source.id, now, author.id, author.email ?? null, e.supersedes, e.objectIds],
+      [db.tenantId, e.ts, e.type, e.severity, e.payload, source.id, now, author.id, author.email ?? null, e.supersedes, e.objectIds, e.voided ?? null],
     );
     return Number(rows[0].id);
   } catch (err) {
@@ -145,8 +145,8 @@ export async function correctEvent(
   input: { ts: Date; payload: Record<string, unknown>; objectIds?: string[] },
   now = new Date(),
 ): Promise<number> {
-  const { rows } = await db.query<{ type: string; severity: Severity; author: string | null; objects: string[]; latest: boolean }>(
-    `select e.type, e.severity, e.author,
+  const { rows } = await db.query<{ type: string; severity: Severity; author: string | null; objects: string[]; latest: boolean; voided: string | null }>(
+    `select e.type, e.severity, e.author, e.voided,
             array(select object_id from event_objects where tenant_id = $1 and event_id = e.id) objects,
             not exists (select 1 from events n where n.tenant_id = $1 and n.supersedes = e.id) latest
        from events e where e.tenant_id = $1 and e.id = $2`,
@@ -155,12 +155,40 @@ export async function correctEvent(
   const prev = rows[0];
   if (!prev || !prev.author || prev.type !== spec.type) throw new ManualEventError(404, "event not found");
   if (!prev.latest) throw new ManualEventError(409, "this version was already corrected");
+  if (prev.voided) throw new ManualEventError(409, "this event was voided");
 
   const objectIds = await check(db, spec, author, { ts: input.ts, payload: input.payload, objectIds: input.objectIds ?? prev.objects }, now);
   const source = await manualSource(db, spec.module);
   const id = await insert(db, source, author, { type: prev.type, ts: input.ts, severity: prev.severity, payload: input.payload, objectIds, supersedes: eventId }, now);
   await record(db, author, "event.correct", {
     objectId: objectIds[0], subject: prev.type, data: { event: id, supersedes: eventId, ts: input.ts.toISOString(), payload: input.payload, objects: objectIds },
+  });
+  return id;
+}
+
+/**
+ * Voids a manual event: a last version with the same payload, time and objects that says why it
+ * no longer counts. It drops out of lists, dashboards and exports and stays in the history.
+ */
+export async function voidEvent(db: TenantDb, author: Author, eventId: number, reason: string, now = new Date()): Promise<number> {
+  if (!canRecord(author.role)) throw new ManualEventError(403, "viewers cannot void events");
+  const why = reason.trim();
+  if (!why) throw new ManualEventError(400, "a reason is required");
+  const { rows } = await db.query<{ type: string; ts: Date; severity: Severity; payload: Record<string, unknown>; author: string | null; voided: string | null; objects: string[]; latest: boolean }>(
+    `select e.type, e.ts, e.severity, e.payload, e.author, e.voided,
+            array(select object_id from event_objects where tenant_id = $1 and event_id = e.id) objects,
+            not exists (select 1 from events n where n.tenant_id = $1 and n.supersedes = e.id) latest
+       from events e where e.tenant_id = $1 and e.id = $2`,
+    [db.tenantId, eventId],
+  );
+  const prev = rows[0];
+  if (!prev || !prev.author) throw new ManualEventError(404, "event not found");
+  if (prev.voided) throw new ManualEventError(409, "this event was already voided");
+  if (!prev.latest) throw new ManualEventError(409, "this version was already corrected");
+  const source = await manualSource(db, prev.type.split(".")[0]);
+  const id = await insert(db, source, author, { type: prev.type, ts: prev.ts, severity: prev.severity, payload: prev.payload, objectIds: prev.objects, supersedes: eventId, voided: why }, now);
+  await record(db, author, "event.void", {
+    objectId: prev.objects[0], subject: prev.type, data: { event: id, supersedes: eventId, reason: why },
   });
   return id;
 }

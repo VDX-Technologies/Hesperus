@@ -1,13 +1,15 @@
 "use server";
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import { requireOrg } from "@/lib/auth";
 import { crossTenantDb, tenantDb } from "@/lib/engine/db";
 import { ConnectorError } from "@/lib/engine/connectors";
 import { extract, type FileFormat } from "@/lib/engine/extract";
 import { storeFromEnv } from "@/lib/engine/store";
-import { ingestUpload, knownSubjects, saveUploadConfig, uploadConfig, uploadSources, type UploadResult } from "@/lib/engine/upload";
+import { deleteUpload, ingestUpload, knownSubjects, reprocessUpload, saveUploadConfig, uploadConfig, uploadSources, type UploadResult } from "@/lib/engine/upload";
 import { readMemory, recognize, type Recognition } from "@/lib/packages/records/recognize";
 import { getPackage } from "@/lib/packages";
+import { moveLegacyEntries } from "@/lib/packages/agronomy/import";
 
 export type UploadState = { error?: string; result?: Omit<UploadResult, "documentId"> } | null;
 
@@ -36,7 +38,7 @@ export async function uploadFile(_prev: UploadState, formData: FormData): Promis
       user,
     );
     revalidatePath(`/o/${slug}`, "layout");
-    return { result: { table: r.table, rows: r.rows, accepted: r.accepted, rejected: r.rejected, metrics: r.metrics, events: r.events } };
+    return { result: { table: r.table, register: r.register, rows: r.rows, accepted: r.accepted, rejected: r.rejected, metrics: r.metrics, events: r.events } };
   } catch (e) {
     if (e instanceof ConnectorError) return { error: `uploadErr_${e.status === 404 ? 403 : e.status}` };
     console.error("upload failed", e);
@@ -67,4 +69,41 @@ export async function previewFile(formData: FormData): Promise<Preview> {
     subjects: await knownSubjects(tdb),
   });
   return { format, headers: table.headers, rows: table.rows.length, sample: table.rows.slice(0, 5), recognition };
+}
+
+/** Owner-only actions on the uploaded files; each comes back to the page with a message. */
+async function owner(formData: FormData) {
+  const slug = String(formData.get("slug"));
+  const ctx = await requireOrg(slug);
+  const back = `/o/${slug}/upload`;
+  if (ctx.role !== "owner") redirect(`${back}?error=uploadOnlyOwner`);
+  return { ...ctx, slug, back };
+}
+
+export async function deleteDocument(formData: FormData) {
+  const { user, org, slug, back } = await owner(formData);
+  const r = await deleteUpload(tenantDb(org.id), String(formData.get("id")), user);
+  revalidatePath(`/o/${slug}`, "layout");
+  redirect(r ? `${back}?done=deleted&n=${r.events}` : `${back}?error=uploadErr_403`);
+}
+
+export async function reprocessDocument(formData: FormData) {
+  const { user, org, slug, back } = await owner(formData);
+  let to: string;
+  try {
+    const r = await reprocessUpload(crossTenantDb("ingest"), storeFromEnv(), org.id, String(formData.get("id")), getPackage, user);
+    to = `${back}?done=reprocessed&n=${r.events}`;
+  } catch (e) {
+    if (!(e instanceof ConnectorError)) console.error("reprocess failed", e);
+    to = `${back}?error=uploadErr_${e instanceof ConnectorError ? (e.status === 404 ? 403 : e.status) : 500}`;
+  }
+  revalidatePath(`/o/${slug}`, "layout");
+  redirect(to);
+}
+
+export async function moveLegacy(formData: FormData) {
+  const { user, org, slug, back } = await owner(formData);
+  const r = await moveLegacyEntries(crossTenantDb("ingest"), org.id, user);
+  revalidatePath(`/o/${slug}`, "layout");
+  redirect(`${back}?done=moved&n=${r.moved}`);
 }

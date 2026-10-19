@@ -15,6 +15,8 @@ export interface EventRow {
   author: string | null;
   authorLabel: string | null;
   supersedes: number | null;
+  /** Why the event was voided, on the version that voids it. */
+  voided: string | null;
   rootId: number;
   /** 1 for the first version, 2 for its first correction, ... */
   version: number;
@@ -33,6 +35,8 @@ export interface EventQuery {
   author?: string;
   /** false = every version, not only the latest. */
   current?: boolean;
+  /** Only the voided events (their voiding version). */
+  voided?: boolean;
   limit?: number;
   /** Paging: events older than this id. */
   before?: number;
@@ -53,25 +57,25 @@ export function parseCursor(s: string | null | undefined): Cursor | undefined {
   return Number.isNaN(ts.getTime()) ? undefined : { ts, id: Number(m[2]) };
 }
 
-const COLS = `e.id, e.ts, e.recorded_at, e.type, e.severity, e.payload, e.source_id, e.author, e.author_label, e.supersedes,
+const COLS = `e.id, e.ts, e.recorded_at, e.type, e.severity, e.payload, e.source_id, e.author, e.author_label, e.supersedes, e.voided,
   coalesce(e.root_id, e.id) root_id,
   (select count(*)::int from events v where v.tenant_id = $1 and coalesce(v.root_id, v.id) = coalesce(e.root_id, e.id) and v.id <= e.id) version,
   array(select eo.object_id from event_objects eo where eo.tenant_id = $1 and eo.event_id = e.id) object_ids`;
 
 type Raw = {
   id: string; ts: Date; recorded_at: Date; type: string; severity: Severity; payload: Record<string, unknown>; source_id: string | null;
-  author: string | null; author_label: string | null; supersedes: string | null; root_id: string; version: number; object_ids: string[];
+  author: string | null; author_label: string | null; supersedes: string | null; voided: string | null; root_id: string; version: number; object_ids: string[];
 };
 
 const toRow = (r: Raw): EventRow => ({
   id: Number(r.id), ts: r.ts, recordedAt: r.recorded_at, type: r.type, severity: r.severity, payload: r.payload, sourceId: r.source_id,
-  author: r.author, authorLabel: r.author_label, supersedes: r.supersedes === null ? null : Number(r.supersedes), rootId: Number(r.root_id),
+  author: r.author, authorLabel: r.author_label, supersedes: r.supersedes === null ? null : Number(r.supersedes), voided: r.voided, rootId: Number(r.root_id),
   version: r.version, objectIds: r.object_ids,
 });
 
 /** Newest event time first (then newest id), or oldest first with `asc`. */
 export async function listEvents(db: TenantDb, q: EventQuery = {}): Promise<EventRow[]> {
-  const table = q.current === false ? "events" : "events_current";
+  const table = q.current === false ? "events" : q.voided ? "(select * from events where voided is not null)" : "events_current";
   const { rows } = await db.query<Raw>(
     `with recursive scope(id) as (
        select $2::uuid where $2::uuid is not null

@@ -77,7 +77,7 @@ export async function ingestPush(
   messages: RawMessage[],
   pkg: ModulePackage,
   now = new Date(),
-  opts: { replay?: boolean; events?: boolean } = {},
+  opts: { replay?: boolean; events?: boolean; documentId?: string } = {},
 ): Promise<IngestResult> {
   const settings = await getSettings(db);
   const maxBatch = num(settings, "ingest.max_batch", 500);
@@ -198,8 +198,8 @@ export async function ingestPush(
   for (const n of withEvents ? items : []) {
     for (const ev of n.events ?? []) {
       const { rows } = await db.query<{ id: string }>(
-        `insert into events (tenant_id, ts, type, severity, payload, source_id) values ($1, $2, $3, $4, $5, $6) returning id`,
-        [source.tenant_id, n.ts ?? now, `${pkg.id}.${ev.type}`, ev.severity, ev.payload ?? {}, source.id],
+        `insert into events (tenant_id, ts, type, severity, payload, source_id, document_id) values ($1, $2, $3, $4, $5, $6, $7) returning id`,
+        [source.tenant_id, n.ts ?? now, `${pkg.id}.${ev.type}`, ev.severity, ev.payload ?? {}, source.id, opts.documentId ?? null],
       );
       await db.query(`insert into event_objects (tenant_id, event_id, object_id) values ($1, $2, $3)`, [
         source.tenant_id, rows[0].id, objectIds.get(`${n.object.type}\u0000${n.object.externalId}`),

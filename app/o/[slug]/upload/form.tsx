@@ -8,7 +8,7 @@ type Labels = Record<
   | "uploadSendReady" | "uploadReady" | "uploadReview" | "uploadKnown" | "uploadMissing" | "uploadRemove" | "uploadClear"
   | "uploadSure" | "uploadUnsure",
   string
-> & { errors: Record<string, string> };
+> & { errors: Record<string, string>; registers: Record<string, string> };
 
 type Status = "reading" | "ready" | "review" | "sending" | "done" | "error";
 
@@ -232,6 +232,7 @@ export function UploadForm({
                       {it.status === "done" && it.result?.result && (
                         <span className="text-ok">
                           {it.result.result.table ? `${it.result.result.accepted} / ${it.result.result.rows} ${l.uploadDone}` : l.uploadStored}
+                          {it.result.result.register && <span className="ml-2 text-ice">→ {l.registers[it.result.result.register]}</span>}
                           {it.result.result.rejected.length > 0 && (
                             <span className="ml-2 text-warn">
                               {it.result.result.rejected.length} {l.uploadRejectedRows}

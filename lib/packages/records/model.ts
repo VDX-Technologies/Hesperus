@@ -2,7 +2,7 @@
 import type { PackageDef } from "../types";
 
 /** Fields a file column can be mapped to, in form order. */
-export const RECORD_FIELDS = ["date", "subject", "kind", "quantity", "unit", "product", "dose", "area", "operator", "note"] as const;
+export const RECORD_FIELDS = ["date", "subject", "kind", "quantity", "unit", "product", "adversity", "dose", "area", "operator", "note"] as const;
 export type RecordField = (typeof RECORD_FIELDS)[number];
 export const REQUIRED_FIELDS: RecordField[] = ["date", "subject"];
 
@@ -14,6 +14,7 @@ export const FIELD_WORDS: Record<RecordField, string[]> = {
   quantity: ["quantita", "quantità", "qta", "qty", "quantity", "kg", "q.li", "quintali", "litri", "peso", "weight", "totale", "amount"],
   unit: ["unita", "unità", "um", "u.m.", "unit", "units", "misura"],
   product: ["prodotto", "product", "formulato", "principio", "fitofarmaco", "concime", "fertilizzante", "materiale", "articolo", "item"],
+  adversity: ["avversita", "avversità", "avversita'", "patogeno", "malattia", "parassita", "fitopatia", "bersaglio", "target", "motivo", "pest", "disease"],
   dose: ["dose", "dosaggio", "dosage", "rate"],
   area: ["superficie", "area", "ha", "ettari", "hectares", "estensione", "sup"],
   operator: ["operatore", "operator", "addetto", "tecnico", "responsabile", "eseguito", "nome", "worker", "user", "utente"],

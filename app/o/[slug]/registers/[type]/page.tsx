@@ -10,6 +10,8 @@ import {
 import { exportsOf } from "@/lib/packages/exports";
 import { SectionTitle } from "@/components/ui";
 import { RegisterForm } from "@/components/registers/register-form";
+import { ConfirmButton } from "@/components/confirm-button";
+import { voidEntry } from "../actions";
 import { registerContext, typeFrom } from "../context";
 
 const PAGE = 50;
@@ -36,13 +38,15 @@ export default async function Register(props: PageProps<"/o/[slug]/registers/[ty
   const after = parseCursor(typeof sp.after === "string" ? sp.after : undefined);
   const editId = Number(sp.edit) || 0;
 
-  const [page, objects, sugg, last, editing] = await Promise.all([
+  const [page, objects, sugg, last, editing, voided] = await Promise.all([
     listEvents(ctx.db, { ...registerQuery(type, f), after, limit: PAGE + 1 }),
     subjectObjects(ctx.db, type.subject, { all: true }),
     fieldSuggestions(ctx.db, type),
     writer ? lastEventBy(ctx.db, ctx.user.id, type.type) : null,
     writer && editId ? getEvent(ctx.db, editId) : null,
+    listEvents(ctx.db, { types: [type.type], voided: true, limit: 50 }),
   ]);
+  const error = typeof sp.error === "string" && sp.error in t ? t[sp.error as keyof Dict] : null;
   const rows = page.slice(0, PAGE);
   const more = page.length > PAGE;
   const names = new Map(objects.map((o) => [o.id, o.name]));
@@ -68,8 +72,11 @@ export default async function Register(props: PageProps<"/o/[slug]/registers/[ty
         </div>
       </div>
 
+      {sp.voided && <p className="mt-4 rounded-lg border border-ok/40 bg-ok/10 px-4 py-2.5 text-sm">{t.voidedOk}</p>}
+      {error && <p className="mt-4 rounded-lg border border-alarm/40 bg-alarm/10 px-4 py-2.5 text-sm">{error}</p>}
+
       {writer && (
-        <section className="card mt-6 p-4">
+        <section id="new" className="card mt-6 scroll-mt-20 p-4">
           <div className="mb-3 flex items-center justify-between">
             <h2 className="text-sm font-medium">{edit ? t.correctEntry : t.newEntry}</h2>
             {edit && <Link href={base} className="text-xs text-dim hover:underline">{t.cancel}</Link>}
@@ -149,6 +156,18 @@ export default async function Register(props: PageProps<"/o/[slug]/registers/[ty
                     <td className="px-2 py-2 text-right">
                       {e.author && <Link href={withQuery({ edit: String(e.id) })} className="text-xs text-frost hover:underline">{t.correct}</Link>}
                       {e.version > 1 && <div className="text-[11px] text-dim">{t.version} {e.version}</div>}
+                      {e.author && (
+                        <details className="mt-1 text-left">
+                          <summary className="cursor-pointer list-none text-right text-xs text-alarm hover:underline">{t.voidEntry}</summary>
+                          <form action={voidEntry} className="mt-1 flex gap-1">
+                            <input type="hidden" name="slug" value={slug} />
+                            <input type="hidden" name="type" value={type.type} />
+                            <input type="hidden" name="id" value={e.id} />
+                            <input name="reason" required minLength={3} placeholder={t.voidReason} className="w-40 text-xs" />
+                            <ConfirmButton message={t.voidConfirm} className="rounded-md border border-alarm/40 px-2 py-1 text-xs text-alarm hover:bg-alarm/10">{t.voidEntry}</ConfirmButton>
+                          </form>
+                        </details>
+                      )}
                     </td>
                   )}
                 </tr>
@@ -163,6 +182,27 @@ export default async function Register(props: PageProps<"/o/[slug]/registers/[ty
         {after && <Link href={query ? `${base}?${query}` : base} className="btn">{t.firstPage}</Link>}
         {more && <Link href={withQuery({ after: cursorOf(rows[rows.length - 1]) })} className="btn">{t.nextPage} →</Link>}
       </div>
+
+      {voided.length > 0 && (
+        <details className="mt-8">
+          <summary className="cursor-pointer text-sm text-dim">{t.voidedEntries} · <span className="num">{voided.length}</span></summary>
+          <div className="mt-2 overflow-x-auto">
+            <table className="w-full text-sm">
+              <tbody>
+                {voided.map((e) => (
+                  <tr key={e.id} className="border-t border-line align-top text-dim">
+                    {columns.map((c) => <td key={c.key} className="px-2 py-2 line-through">{registerCell(type, e, c.key, names, locale)}</td>)}
+                    <td className="px-2 py-2 text-xs">
+                      {t.voidedBy} {e.authorLabel ?? "–"} · {e.recordedAt.toLocaleDateString(locale)}
+                      <div className="text-mist">«{e.voided}»</div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </details>
+      )}
     </div>
   );
 }

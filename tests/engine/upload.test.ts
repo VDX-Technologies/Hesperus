@@ -15,6 +15,11 @@ import { parseDate, parseNumber, recordsPackage } from "../../lib/packages/recor
 
 vi.mock("server-only", () => ({}));
 const { listEntries } = await import("../../lib/packages/records/console");
+// what an upload wrote to a register, with the crop each row hangs on
+const work = async (type: string) =>
+  (await db.query<{ ts: Date; payload: Record<string, unknown>; crop: string; author_label: string }>(
+    `select e.ts, e.payload, o.name crop, e.author_label from events e join event_objects eo on eo.event_id = e.id join objects o on o.id = eo.object_id
+     where e.tenant_id = $1 and e.type = $2 order by e.ts`, [ORG, type])).rows;
 
 let db: Client;
 let drop: () => Promise<void>;
@@ -82,7 +87,7 @@ describe("upload", () => {
 
     const csv = "Data;Appezzamento;Kg raccolti;Note;Extra\n01/09/2026;Vigna nord;1.250,5;prima passata;x\n02/09/2026;Vigna sud;980;;\n03/09/2026;Vigna nord;1100;;\n";
     const r = await ingestUpload(db, store, harvest, { name: "raccolta 2026.csv", type: "text/csv", bytes: enc(csv) }, recordsPackage, USER, now);
-    expect(r).toMatchObject({ rows: 3, accepted: 3, rejected: [], metrics: 3, events: 3 });
+    expect(r).toMatchObject({ register: "harvest", rows: 3, accepted: 3, rejected: [], events: 3 });
 
     const doc = (await db.query(`select * from documents where id = $1`, [r.documentId])).rows[0];
     expect(doc).toMatchObject({ tenant_id: ORG, source_id: harvest.id, filename: "raccolta 2026.csv", size: String(csv.length) });
@@ -91,11 +96,12 @@ describe("upload", () => {
     const linked = await db.query(`select count(*)::int n from document_objects where document_id = $1`, [r.documentId]);
     expect(linked.rows[0].n).toBe(2); // two subjects
 
-    const entries = await listEntries(A);
-    expect(entries).toHaveLength(3);
-    const first = entries.find((e) => e.payload.date === "2026-09-01T12:00:00.000Z")!;
-    expect(first).toMatchObject({ subject: "Vigna nord", payload: { kind: "harvest", quantity: 1250.5, note: "prima passata" } });
-    expect(first.payload).not.toHaveProperty("Extra");
+    // the rows are harvests on their crops, not a register of their own
+    expect(await listEntries(A)).toHaveLength(0);
+    const rows = await work("agronomy.harvest");
+    expect(rows).toHaveLength(3);
+    expect(rows[0]).toMatchObject({ crop: "Vigna nord", author_label: USER.email, payload: { yield: { value: 1250.5, unit: "kg" }, notes: "prima passata · harvest" } });
+    expect(rows[0].payload).not.toHaveProperty("Extra");
 
     const audit = await db.query(`select action, subject, actor_label from audit_log where tenant_id = $1 order by id`, [ORG]);
     expect(audit.rows.map((x) => [x.action, x.subject])).toEqual([["upload.mapping", "Raccolta"], ["upload.file", "raccolta 2026.csv"]]);
@@ -124,8 +130,11 @@ describe("upload", () => {
     expect(r.rejected.map((x) => x.line)).toEqual([3, 4, 5]);
     expect(r.rejected[0].error).toMatch(/subject/);
 
-    const rame = (await listEntries(A)).find((e) => e.payload.product === "Rame")!;
-    expect(rame.payload).toMatchObject({ kind: "treatment", dose: 2.5, area: 1.2, operator: "Mario", subject: "Vigna nord" });
+    expect(r.register).toBe("treatment");
+    const rame = (await work("agronomy.treatment")).find((e) => e.payload.product === "Rame")!;
+    // the quantity is the dose times the area, in litres from the dose column's header
+    expect(rame.payload).toMatchObject({ area_ha: 1.2, quantity: { value: 3, unit: "L" }, operator: "Mario", adversity: "non indicata" });
+    expect(rame.crop).toBe("Vigna nord");
     const [up] = await listUploads(A);
     expect(up).toMatchObject({ rejectedCount: 3, rejected: [{ line: 3 }, { line: 4 }, { line: 5 }] });
     const src = await db.query(`select last_error from sources where id = $1`, [treatments.id]);
@@ -183,7 +192,7 @@ describe("any file", () => {
     const later = new Date(now.getTime() + 3600e3);
     const r = await ingestUpload(db, store, treatments, { name: "ottobre.xlsx", bytes: new Uint8Array(XLSX.write(wb, { type: "array", bookType: "xlsx" })) }, recordsPackage, USER, later);
     expect(r).toMatchObject({ table: true, rows: 1, accepted: 1 });
-    expect((await listEntries(A)).find((e) => e.subject === "Uliveto")?.payload).toMatchObject({ product: "Rame", dose: 2, area: 1.5 });
+    expect((await work("agronomy.treatment")).find((e) => e.crop === "Uliveto")?.payload).toMatchObject({ product: "Rame", area_ha: 1.5, quantity: { value: 3, unit: "L" } });
 
     const memo = await ingestUpload(db, store, treatments, { name: "verbale.txt", bytes: enc("Verbale del sopralluogo in vigna.\nTutto regolare.\n") }, recordsPackage, USER, later);
     expect(memo).toMatchObject({ table: false, rows: 0, accepted: 0 });

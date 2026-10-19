@@ -9,7 +9,7 @@ import { ingestPush, registerPackage } from "../../lib/engine/ingest";
 import { createPlace, setObjectPlace } from "../../lib/engine/places";
 import { ValidationError, type ModulePackage } from "../../lib/engine/package";
 import { parseDecimal, payloadFromForm, validateProperties, type Schema } from "../../lib/engine/schema";
-import { correctManualEvent, createManualEvent, ManualEventError, type Author } from "../../lib/engine/manual";
+import { correctManualEvent, createManualEvent, ManualEventError, voidEvent, type Author } from "../../lib/engine/manual";
 import { eventHistory, getEvent, lastEventBy, listEvents } from "../../lib/engine/events";
 import { listAudit } from "../../lib/engine/audit";
 
@@ -170,6 +170,22 @@ describe("manual events", () => {
     await expect(db.query(`delete from events where id = $1`, [v1])).rejects.toThrow(/cannot be changed/);
     const audit = await listAudit(A, { objectId: things[1] });
     expect(audit.filter((a) => a.action === "event.correct").length).toBe(2);
+  });
+
+  it("voids with a reason: out of the current events, kept in the history and the audit", async () => {
+    const ts = new Date("2026-10-11T12:00:00Z");
+    const v1 = await createManualEvent(A, pkg, owner, { type: "dose", ts, payload: dose(2, "Annullato"), objectIds: [things[1]] });
+    await expect(voidEvent(A, viewer, v1, "errore")).rejects.toMatchObject({ status: 403 });
+    await expect(voidEvent(A, member, v1, "  ")).rejects.toMatchObject({ status: 400 });
+    const v2 = await voidEvent(A, member, v1, "inserita due volte");
+    await expect(voidEvent(A, owner, v2, "ancora")).rejects.toMatchObject({ status: 409 });
+    await expect(correctManualEvent(A, pkg, owner, v2, { ts, payload: dose(3) })).rejects.toMatchObject({ status: 409 });
+
+    expect((await listEvents(A, { payload: { product: "Annullato" } })).length).toBe(0);
+    const voided = await listEvents(A, { voided: true, types: ["evmod.dose"] });
+    expect(voided.map((e) => [e.id, e.voided, e.payload.product])).toEqual([[v2, "inserita due volte", "Annullato"]]);
+    expect((await eventHistory(A, v1)).map((h) => h.voided)).toEqual([null, "inserita due volte"]);
+    expect((await listAudit(A, { objectId: things[1] })).some((a) => a.action === "event.void")).toBe(true);
   });
 
   it("reads by place (recursively), period and author; lastEventBy", async () => {

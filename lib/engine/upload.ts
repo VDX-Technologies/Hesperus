@@ -12,6 +12,7 @@ import { ingestPush, type IngestResult } from "./ingest";
 import { getSettings, num } from "./settings";
 import { record, type Actor } from "./audit";
 import { learn, readMemory } from "../packages/records/recognize";
+import { classify, importAgronomy, type Register } from "../packages/agronomy/import";
 
 export interface UploadFile {
   name: string;
@@ -23,6 +24,8 @@ export interface UploadResult {
   documentId: string;
   /** False when the file is only kept as a document, with no rows read. */
   table: boolean;
+  /** The register the rows went to when the file was recognised as agronomy work. */
+  register: Register | null;
   rows: number;
   accepted: number;
   /** Rejected rows by line number in the file (the header is line 1). */
@@ -77,32 +80,53 @@ export async function ingestUpload(
   // Content-addressed key: putNew refuses an existing key, which also catches a concurrent retry.
   const key = `docs/${source.tenant_id}/${source.id}/${sha256}-${safeName(file.name)}`;
   const contentType = file.type || (found.format === "csv" ? "text/csv" : "application/octet-stream");
-  if (!(await store.putNew(key, file.bytes, contentType))) throw new ConnectorError(409, "this file was already uploaded");
-  await db.query(`select engine_count('r2.writes', 1, $1)`, [now]);
+  // the archive never overwrites: a file deleted and loaded again finds its bytes already there
+  if (await store.putNew(key, file.bytes, contentType)) await db.query(`select engine_count('r2.writes', 1, $1)`, [now]);
+  else if ((await tdb.query(`select 1 from documents where tenant_id = $1 and storage_key = $2`, [source.tenant_id, key])).rowCount) throw new ConnectorError(409, "this file was already uploaded");
 
-  const out: UploadResult = { documentId: "", table, rows: messages.length, accepted: 0, rejected: [], metrics: 0, events: 0 };
+  // what the file is about decides the register: treatments go to the treatments register
+  const { fixed } = uploadConfig(source);
+  const register = table ? classify(messages, `${String(fixed?.kind ?? "")} ${file.name}`) : null;
+  const out: UploadResult = { documentId: "", table, register, rows: messages.length, accepted: 0, rejected: [], metrics: 0, events: 0 };
   const objectIds = new Set<string>();
-  for (let i = 0; i < messages.length; i += batch) {
-    const r: IngestResult = await ingestPush(db, source, messages.slice(i, i + batch), pkg, now);
-    out.accepted += r.accepted;
-    out.metrics += r.metrics;
-    out.events += r.events;
-    out.rejected.push(...r.rejected.map((x) => ({ line: i + x.index + 2, error: x.error })));
-    r.objectIds.forEach((id) => objectIds.add(id));
-  }
-
+  // the document comes first so every event can say which file it came from
   const { rows } = await tdb.query<{ id: string }>(
     `insert into documents (tenant_id, storage_key, filename, content_type, size, sha256, metadata, text_content, source_id, created_at)
      values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) returning id`,
     [
-      source.tenant_id, key, file.name, contentType, file.bytes.length, sha256,
-      { kind: "upload", format: found.format, table, rows: out.rows, accepted: out.accepted, rejected: out.rejected.slice(0, 100), rejectedCount: out.rejected.length },
+      source.tenant_id, key, file.name, contentType, file.bytes.length, sha256, { kind: "upload", format: found.format, table, register },
       // the text is kept for search; postgres text cannot hold NUL
       found.text?.replace(/\u0000/g, "").slice(0, 500_000) ?? null,
       source.id, now,
     ],
   );
-  out.documentId = rows[0].id;
+  const documentId = (out.documentId = rows[0].id);
+  try {
+    if (register) {
+      // the unit a dose or quantity column is written in, from its header: "Dose (l/ha)"
+      const units = found.table!.headers.filter((h) => ["dose", "quantity"].includes(mapping[h])).join(" ");
+      const r = await importAgronomy(db, source, messages, register, actor, { units, now, documentId });
+      out.accepted = r.accepted;
+      out.events = r.events;
+      out.rejected = r.rejected.map((x) => ({ line: x.index + 2, error: x.error }));
+      r.objectIds.forEach((id) => objectIds.add(id));
+    } else for (let i = 0; i < messages.length; i += batch) {
+      const r: IngestResult = await ingestPush(db, source, messages.slice(i, i + batch), pkg, now, { documentId });
+      out.accepted += r.accepted;
+      out.metrics += r.metrics;
+      out.events += r.events;
+      out.rejected.push(...r.rejected.map((x) => ({ line: i + x.index + 2, error: x.error })));
+      r.objectIds.forEach((id) => objectIds.add(id));
+    }
+  } catch (e) {
+    // a load that broke halfway is taken back whole
+    await tdb.query(`delete from documents where tenant_id = $1 and id = $2`, [source.tenant_id, documentId]);
+    throw e;
+  }
+  await tdb.query(`update documents set metadata = metadata || $3 where tenant_id = $1 and id = $2`, [
+    source.tenant_id, documentId,
+    { rows: out.rows, accepted: out.accepted, rejected: out.rejected.slice(0, 100), rejectedCount: out.rejected.length },
+  ]);
   // what this file taught: its signature and the traits of each mapped and ignored column
   if (table && found.table && out.accepted) {
     const subjects = await knownSubjects(tdb);
@@ -163,14 +187,17 @@ export interface UploadedDocument {
   accepted: number;
   rejected: { line: number; error: string }[];
   rejectedCount: number;
+  register: string | null;
+  events: number;
 }
 
 /** Latest uploaded files, newest first. */
 export async function listUploads(db: TenantDb, limit = 20): Promise<UploadedDocument[]> {
   const { rows } = await db.query<{
-    id: string; filename: string | null; size: string; source: string | null; created_at: Date; metadata: Record<string, unknown>;
+    id: string; filename: string | null; size: string; source: string | null; created_at: Date; metadata: Record<string, unknown>; events: number;
   }>(
-    `select d.id, d.filename, d.size, s.name source, d.created_at, d.metadata
+    `select d.id, d.filename, d.size, s.name source, d.created_at, d.metadata,
+            (select count(*)::int from events e where e.tenant_id = d.tenant_id and e.document_id = d.id) events
      from documents d left join sources s on s.id = d.source_id and s.tenant_id = d.tenant_id
      where d.tenant_id = $1 and d.metadata->>'kind' = 'upload'
      order by d.created_at desc limit $2`,
@@ -187,7 +214,49 @@ export async function listUploads(db: TenantDb, limit = 20): Promise<UploadedDoc
     accepted: Number(r.metadata.accepted ?? 0),
     rejected: (r.metadata.rejected as UploadedDocument["rejected"]) ?? [],
     rejectedCount: Number(r.metadata.rejectedCount ?? 0),
+    register: typeof r.metadata.register === "string" ? r.metadata.register : null,
+    events: r.events,
   }));
+}
+
+/** Deletes an uploaded file and everything read from it (its events go by cascade). */
+export async function deleteUpload(db: TenantDb, documentId: string, actor: Actor): Promise<{ filename: string | null; events: number } | null> {
+  const { rows } = await db.query<{ filename: string | null; events: number }>(
+    `select filename, (select count(*)::int from events e where e.tenant_id = d.tenant_id and e.document_id = d.id) events
+     from documents d where tenant_id = $1 and id = $2 and metadata->>'kind' = 'upload'`,
+    [db.tenantId, documentId],
+  );
+  if (!rows.length) return null;
+  await db.query(`delete from documents where tenant_id = $1 and id = $2`, [db.tenantId, documentId]);
+  await record(db, actor, "upload.delete", { subject: rows[0].filename, data: { events: rows[0].events } });
+  return rows[0];
+}
+
+/**
+ * Reads an uploaded file again from the archive with the source's current mapping: what it loaded
+ * before is removed, then the file is classified and loaded as if new.
+ */
+export async function reprocessUpload(
+  db: Db,
+  store: ObjectStore,
+  tenantId: string,
+  documentId: string,
+  pkgOf: (module: string) => ModulePackage | undefined,
+  actor: Actor,
+): Promise<UploadResult> {
+  const tdb = forTenant(db, tenantId);
+  const { rows } = await tdb.query<{ storage_key: string; filename: string | null; content_type: string | null; source_id: string | null }>(
+    `select storage_key, filename, content_type, source_id from documents where tenant_id = $1 and id = $2 and metadata->>'kind' = 'upload'`,
+    [tenantId, documentId],
+  );
+  const doc = rows[0];
+  const source = doc && (await uploadSources(tdb)).find((s) => s.id === doc.source_id);
+  const pkg = source && pkgOf(source.module);
+  if (!doc || !source || !pkg) throw new ConnectorError(404, "no such upload");
+  const bytes = await store.get(doc.storage_key);
+  if (!bytes) throw new ConnectorError(404, "file missing from the archive");
+  await tdb.query(`delete from documents where tenant_id = $1 and id = $2`, [tenantId, documentId]);
+  return ingestUpload(db, store, source, { name: doc.filename ?? "file", type: doc.content_type ?? "", bytes }, pkg, actor);
 }
 
 export { uploadConfig, decodeText };

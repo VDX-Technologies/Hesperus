@@ -112,6 +112,10 @@ function ruleScore(field: RecordField, header: string, p: Profile): number {
       s += text > 0.8 ? 0 : -4;
       if (field === "kind") s += p.distinct < 0.4 ? 0.5 : 0;
       break;
+    case "adversity":
+      // only its name tells a pest from any other text
+      s += text > 0.8 ? -1.5 : -4;
+      break;
     case "note":
       s += text > 0.8 ? (p.avgLength > 25 ? 1.5 : 0) : -4;
       break;

@@ -7,7 +7,7 @@ import { records } from "./model";
 
 export { records };
 
-const TEXT = ["kind", "unit", "product", "operator", "note"] as const;
+const TEXT = ["kind", "unit", "product", "adversity", "operator", "note"] as const;
 const NUMBERS = ["quantity", "dose", "area"] as const;
 
 /** dd/mm/yyyy, dd-mm-yyyy, dd.mm.yyyy (optionally with hh:mm) or ISO 8601. */
@@ -53,7 +53,8 @@ export const recordsPackage: ModulePackage = {
     if (!subject) throw new ValidationError("subject is required");
     if (m.date === undefined || m.date === "") throw new ValidationError("date is required");
     const ts = parseDate(m.date);
-    const payload: Record<string, unknown> = { subject, date: ts.toISOString() };
+    // the subject is the event's object and the date its time: the payload keeps the rest
+    const payload: Record<string, unknown> = {};
     for (const k of TEXT) if (m[k] !== undefined && m[k] !== "") payload[k] = String(m[k]);
     const metrics: Record<string, number | undefined> = {};
     for (const k of NUMBERS) {

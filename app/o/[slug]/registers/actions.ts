@@ -1,7 +1,7 @@
 "use server";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { ManualEventError, canRecord, correctEvent, recordEvent } from "@/lib/engine/manual";
+import { ManualEventError, canRecord, correctEvent, recordEvent, voidEvent } from "@/lib/engine/manual";
 import { formSchema, saveEventType, specOf, type EventTypeInput } from "@/lib/engine/registers";
 import { payloadFromForm } from "@/lib/engine/schema";
 import type { EventFormState } from "@/components/event-form";
@@ -42,6 +42,22 @@ export async function recordEntry(_prev: EventFormState, form: FormData): Promis
   revalidatePath(`/o/${slug}`, "layout");
   if (supersedes) redirect(`/o/${slug}/registers/${encodeURIComponent(t.type)}`);
   return { ok: Date.now() };
+}
+
+/** Voids an entry with the reason given; it leaves the lists and stays in the history. */
+export async function voidEntry(form: FormData): Promise<void> {
+  const slug = String(form.get("slug"));
+  const ctx = await registerContext(slug);
+  const base = `/o/${slug}/registers/${encodeURIComponent(String(form.get("type")))}`;
+  let error = "";
+  try {
+    await voidEvent(ctx.db, ctx.author, Number(form.get("id")), String(form.get("reason") ?? ""));
+  } catch (e) {
+    if (!(e instanceof ManualEventError)) throw e;
+    error = e.status === 400 ? "voidReasonRequired" : `manualErr_${e.status}`;
+  }
+  revalidatePath(`/o/${slug}`, "layout");
+  redirect(error ? `${base}?error=${error}` : `${base}?voided=1`);
 }
 
 /** Creates or replaces a custom event type from the editor (owner only). */

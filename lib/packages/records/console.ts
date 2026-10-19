@@ -22,3 +22,6 @@ export async function listEntries(db: TenantDb, opts: { objectId?: string; limit
   );
   return rows.map((r) => ({ id: String(r.id), ts: r.ts.toISOString(), objectId: r.object_id, subject: r.name ?? "", payload: r.payload }));
 }
+
+/** Entries for the analysis: the most recent ones up to a high cap, in any order. */
+export const loadEntries = (db: TenantDb, opts: { objectId?: string } = {}) => listEntries(db, { ...opts, limit: 20000 });

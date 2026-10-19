@@ -11,7 +11,7 @@ type Values = Record<string, number | null>;
 const KEY_METRICS = ["temp_c", "rh", "leaf_c", "cond_margin", "vpd_kpa", "co2"];
 
 /** Stoma widget on the organization overview: one card per sensor, grouped by place. */
-export async function StomaOverview({ orgId, slug, t, locale }: { orgId: string; slug: string; t: Dict; locale: Locale }) {
+export async function StomaOverview({ orgId, slug, t, locale }: { orgId: string; slug: string; t: Dict; locale: Locale; period?: number }) {
   const cards = await listObjects(tenantDb(orgId), "stoma");
   const metrics = new Map(stoma.metrics.map((m) => [m.key, m]));
   const counts = { ok: 0, warn: 0, alarm: 0, offline: 0 };
