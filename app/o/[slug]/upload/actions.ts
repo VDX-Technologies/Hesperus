@@ -39,7 +39,8 @@ export async function uploadFile(_prev: UploadState, formData: FormData): Promis
     return { result: { table: r.table, rows: r.rows, accepted: r.accepted, rejected: r.rejected, metrics: r.metrics, events: r.events } };
   } catch (e) {
     if (e instanceof ConnectorError) return { error: `uploadErr_${e.status === 404 ? 403 : e.status}` };
-    throw e;
+    console.error("upload failed", e);
+    return { error: "uploadErr_500" };
   }
 }
 

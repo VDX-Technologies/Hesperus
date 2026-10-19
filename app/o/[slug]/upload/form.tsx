@@ -79,7 +79,7 @@ export function UploadForm({
       // a layout confirmed before goes straight in
       if (p.recognition?.known && status === "ready") await send(done);
     } catch {
-      patch(it.id, { status: "error", error: "uploadErr_400" });
+      patch(it.id, { status: "error", error: "uploadErr_500" });
     }
   };
 
@@ -105,7 +105,7 @@ export function UploadForm({
       const r = await uploadFile(null, fd);
       patch(it.id, r?.error ? { status: "error", error: r.error, result: r } : { status: "done", result: r });
     } catch {
-      patch(it.id, { status: "error", error: "uploadErr_400" });
+      patch(it.id, { status: "error", error: "uploadErr_500" });
     }
   };
 

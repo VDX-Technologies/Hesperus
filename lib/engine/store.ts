@@ -1,6 +1,8 @@
-// Object storage for the immutable raw archive. R2 (or any S3 API) in production, memory in
+// Object storage for the immutable raw archive. R2 (or any S3 API) in production, a local folder in development, memory in
 // tests. Writes never overwrite: put fails with "exists" so the caller picks another key.
 import { PutObjectCommand, GetObjectCommand, ListObjectsV2Command, S3Client } from "@aws-sdk/client-s3";
+import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
+import { dirname, join, relative, resolve, sep } from "node:path";
 
 export interface ObjectStore {
   /** Creates key; returns false if it already exists (never overwrites). */
@@ -116,10 +118,65 @@ export class S3Store implements ObjectStore {
   }
 }
 
-/** R2 from env: R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET (R2_ENDPOINT overrides). */
+/** Objects as files under a folder: for development with no R2 at hand. */
+export class FileStore implements ObjectStore {
+  constructor(private root: string) {}
+
+  private path(key: string) {
+    const p = resolve(this.root, key);
+    if (!p.startsWith(resolve(this.root) + sep)) throw new Error("key outside the store");
+    return p;
+  }
+
+  async putNew(key: string, body: Uint8Array) {
+    const p = this.path(key);
+    await mkdir(dirname(p), { recursive: true });
+    try {
+      await writeFile(p, body, { flag: "wx" });
+      return true;
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code === "EEXIST") return false;
+      throw e;
+    }
+  }
+
+  async get(key: string) {
+    try {
+      return new Uint8Array(await readFile(this.path(key)));
+    } catch {
+      return null;
+    }
+  }
+
+  async list(prefix: string) {
+    const files = await readdir(this.root, { recursive: true, withFileTypes: true }).catch(() => []);
+    return files
+      .filter((f) => f.isFile())
+      .map((f) => relative(this.root, join(f.parentPath, f.name)).split(sep).join("/"))
+      .filter((k) => k.startsWith(prefix))
+      .sort();
+  }
+
+  async usage(prefix: string) {
+    let objects = 0, bytes = 0;
+    for (const k of await this.list(prefix)) {
+      objects++;
+      bytes += (await stat(this.path(k))).size;
+    }
+    return { objects, bytes };
+  }
+}
+
+/**
+ * R2 from env: R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET (R2_ENDPOINT overrides).
+ * Outside production with no R2 set, files go to .data/store in the project folder.
+ */
 export function storeFromEnv(): ObjectStore {
   const { R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET, R2_ENDPOINT } = process.env;
-  if (!R2_ACCESS_KEY_ID || !R2_SECRET_ACCESS_KEY || !R2_BUCKET) throw new Error("R2 credentials are not set");
+  if (!R2_ACCESS_KEY_ID || !R2_SECRET_ACCESS_KEY || !R2_BUCKET) {
+    if (process.env.NODE_ENV !== "production") return new FileStore(join(process.cwd(), ".data", "store"));
+    throw new Error("R2 credentials are not set");
+  }
   const s3 = new S3Client({
     region: "auto",
     endpoint: R2_ENDPOINT ?? `https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
