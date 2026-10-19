@@ -33,12 +33,16 @@ export default async function Upload(props: PageProps<"/o/[slug]/upload">) {
           labels={{
             uploadSource: t.uploadSource,
             uploadFile: t.uploadFile,
+            uploadPick: t.uploadPick,
+            uploadDrop: t.uploadDrop,
+            uploadChange: t.uploadChange,
             uploadMapping: t.uploadMapping,
             uploadMappingHelp: t.uploadMappingHelp,
             uploadIgnore: t.uploadIgnore,
             uploadSend: t.uploadSend,
             uploadSending: t.uploadSending,
             uploadDone: t.uploadDone,
+            uploadStored: t.uploadStored,
             uploadRejectedRows: t.uploadRejectedRows,
             uploadLine: t.uploadLine,
             errors,
@@ -61,7 +65,7 @@ export default async function Upload(props: PageProps<"/o/[slug]/upload">) {
               </div>
               <div className="num text-xs">
                 <span className="text-ok">
-                  {u.accepted} / {u.rows} {t.uploadDone}
+                  {u.table ? `${u.accepted} / ${u.rows} ${t.uploadDone}` : t.uploadStored}
                 </span>
                 {u.rejectedCount > 0 && (
                   <span className="ml-2 text-warn" title={u.rejected.slice(0, 10).map((r) => `${t.uploadLine} ${r.line}: ${r.error}`).join("\n")}>

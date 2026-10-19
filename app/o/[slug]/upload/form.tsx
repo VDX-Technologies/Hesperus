@@ -1,11 +1,11 @@
 "use client";
-import { useActionState, useState } from "react";
-import { parseCsv } from "@/lib/engine/csv";
+import { useActionState, useRef, useState } from "react";
+import { isTable, parseCsv } from "@/lib/engine/csv";
 import { SubmitButton } from "@/components/submit-button";
 import { uploadFile, type UploadState } from "./actions";
 
 type Labels = Record<
-  "uploadSource" | "uploadFile" | "uploadMapping" | "uploadMappingHelp" | "uploadIgnore" | "uploadSend" | "uploadDone" | "uploadRejectedRows" | "uploadLine" | "uploadSending",
+  "uploadSource" | "uploadFile" | "uploadPick" | "uploadDrop" | "uploadChange" | "uploadMapping" | "uploadMappingHelp" | "uploadIgnore" | "uploadSend" | "uploadDone" | "uploadStored" | "uploadRejectedRows" | "uploadLine" | "uploadSending",
   string
 > & { errors: Record<string, string> };
 
@@ -25,12 +25,16 @@ export function UploadForm({
   const [sourceId, setSourceId] = useState(sources[0]?.id ?? "");
   const [headers, setHeaders] = useState<string[]>([]);
   const [readError, setReadError] = useState(false);
+  const [file, setFile] = useState<File | null>(null);
+  const [dragging, setDragging] = useState(false);
+  const input = useRef<HTMLInputElement>(null);
   const mapping = sources.find((s) => s.id === sourceId)?.mapping ?? {};
 
   const readHeaders = async (file: File | undefined) => {
+    setFile(file ?? null);
     setHeaders([]);
     setReadError(false);
-    if (!file) return;
+    if (!file || !isTable(file.name)) return;
     try {
       // the header row is enough: read only the start of the file
       const head = await file.slice(0, 64 * 1024).text();
@@ -42,6 +46,18 @@ export function UploadForm({
 
   // a column keeps its saved field, else one named like it
   const guess = (h: string) => mapping[h] ?? fields.find((f) => f.key === h.trim().toLowerCase() || f.label.toLowerCase() === h.trim().toLowerCase())?.key ?? "";
+
+  // a dropped file goes into the real input, so the form submits it like a picked one
+  const onDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setDragging(false);
+    const f = e.dataTransfer.files[0];
+    if (!f || !input.current) return;
+    const dt = new DataTransfer();
+    dt.items.add(f);
+    input.current.files = dt.files;
+    readHeaders(f);
+  };
 
   return (
     <form action={action} className="card space-y-4 p-5">
@@ -57,10 +73,40 @@ export function UploadForm({
             ))}
           </select>
         </label>
-        <label className="block text-sm">
+        <div className="block text-sm">
           <span className="text-dim">{l.uploadFile}</span>
-          <input name="file" type="file" accept=".csv,text/csv,text/plain" required onChange={(e) => readHeaders(e.target.files?.[0])} className="mt-1 w-full" />
-        </label>
+          <label
+            onDragOver={(e) => {
+              e.preventDefault();
+              setDragging(true);
+            }}
+            onDragLeave={() => setDragging(false)}
+            onDrop={onDrop}
+            className={`mt-1 flex cursor-pointer items-center gap-3 rounded-lg border border-dashed px-4 py-3 transition-colors hover:border-frost/60 hover:bg-steel/30 ${dragging ? "border-frost bg-steel/40" : "border-line"}`}
+          >
+            <input
+              ref={input}
+              name="file"
+              type="file"
+              required
+              onChange={(e) => readHeaders(e.target.files?.[0])}
+              className="sr-only"
+            />
+            <svg viewBox="0 0 24 24" className="h-5 w-5 shrink-0 text-mist" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden>
+              <path d="M12 16V4m0 0-4 4m4-4 4 4M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+            {file ? (
+              <span className="flex min-w-0 flex-1 items-center justify-between gap-3">
+                <span className="truncate font-medium text-ice">{file.name}</span>
+                <span className="shrink-0 text-xs text-dim underline">{l.uploadChange}</span>
+              </span>
+            ) : (
+              <span>
+                <span className="font-medium text-ice">{l.uploadPick}</span> <span className="text-dim">{l.uploadDrop}</span>
+              </span>
+            )}
+          </label>
+        </div>
       </div>
 
       {readError && <p className="text-sm text-alarm">{l.errors.uploadErr_400}</p>}
@@ -97,7 +143,7 @@ export function UploadForm({
       {state?.result && (
         <div className="space-y-2 text-sm">
           <p className="text-ok">
-            {state.result.accepted} / {state.result.rows} {l.uploadDone}
+            {state.result.table ? `${state.result.accepted} / ${state.result.rows} ${l.uploadDone}` : l.uploadStored}
           </p>
           {state.result.rejected.length > 0 && (
             <div className="rounded-lg border border-warn/50 bg-warn/10 p-3">

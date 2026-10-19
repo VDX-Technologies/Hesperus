@@ -56,3 +56,6 @@ export function parseCsv(text: string, maxRows = Infinity): Csv {
   const [headers = [], ...rows] = records;
   return { delimiter, headers: headers.map((h) => h.trim()), rows };
 }
+
+/** Files read as rows; any other file (Excel, PDF, text, images…) is only kept as a document. */
+export const isTable = (name: string) => /\.(csv|tsv)$/i.test(name);

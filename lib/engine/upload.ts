@@ -6,6 +6,7 @@ import { forTenant, type Db, type TenantDb } from "./db";
 import type { ModulePackage } from "./package";
 import type { ObjectStore } from "./store";
 import type { Source } from "./sources";
+import { isTable } from "./csv";
 import { ConnectorError, uploadConnector, uploadConfig, type UploadConfig } from "./connectors";
 import { ingestPush, type IngestResult } from "./ingest";
 import { getSettings, num } from "./settings";
@@ -19,6 +20,8 @@ export interface UploadFile {
 
 export interface UploadResult {
   documentId: string;
+  /** False when the file is only kept as a document, with no rows read. */
+  table: boolean;
   rows: number;
   accepted: number;
   /** Rejected rows by line number in the file (the header is line 1). */
@@ -70,16 +73,17 @@ export async function ingestUpload(
   ]);
   if (dup.rowCount) throw new ConnectorError(409, "this file was already uploaded");
 
-  // Parse before storing anything: a file that cannot be read leaves no trace.
-  const messages = await uploadConnector.messages(source, { text: decodeText(file.bytes), maxRows });
+  // Parse before storing anything: a table that cannot be read leaves no trace. Other files are only stored.
+  const table = isTable(file.name);
+  const messages = table ? await uploadConnector.messages(source, { text: decodeText(file.bytes), maxRows }) : [];
 
   // Content-addressed key: putNew refuses an existing key, which also catches a concurrent retry.
   const key = `docs/${source.tenant_id}/${source.id}/${sha256}-${safeName(file.name)}`;
-  const contentType = file.type || "text/csv";
+  const contentType = file.type || (table ? "text/csv" : "application/octet-stream");
   if (!(await store.putNew(key, file.bytes, contentType))) throw new ConnectorError(409, "this file was already uploaded");
   await db.query(`select engine_count('r2.writes', 1, $1)`, [now]);
 
-  const out: UploadResult = { documentId: "", rows: messages.length, accepted: 0, rejected: [], metrics: 0, events: 0 };
+  const out: UploadResult = { documentId: "", table, rows: messages.length, accepted: 0, rejected: [], metrics: 0, events: 0 };
   const objectIds = new Set<string>();
   for (let i = 0; i < messages.length; i += batch) {
     const r: IngestResult = await ingestPush(db, source, messages.slice(i, i + batch), pkg, now);
@@ -95,7 +99,7 @@ export async function ingestUpload(
      values ($1, $2, $3, $4, $5, $6, $7, $8, $9) returning id`,
     [
       source.tenant_id, key, file.name, contentType, file.bytes.length, sha256,
-      { kind: "upload", rows: out.rows, accepted: out.accepted, rejected: out.rejected.slice(0, 100), rejectedCount: out.rejected.length },
+      { kind: "upload", table, rows: out.rows, accepted: out.accepted, rejected: out.rejected.slice(0, 100), rejectedCount: out.rejected.length },
       source.id, now,
     ],
   );
@@ -139,6 +143,7 @@ export interface UploadedDocument {
   size: number;
   source: string | null;
   createdAt: Date;
+  table: boolean;
   rows: number;
   accepted: number;
   rejected: { line: number; error: string }[];
@@ -162,6 +167,7 @@ export async function listUploads(db: TenantDb, limit = 20): Promise<UploadedDoc
     size: Number(r.size),
     source: r.source,
     createdAt: r.created_at,
+    table: r.metadata.table !== false,
     rows: Number(r.metadata.rows ?? 0),
     accepted: Number(r.metadata.accepted ?? 0),
     rejected: (r.metadata.rejected as UploadedDocument["rejected"]) ?? [],
