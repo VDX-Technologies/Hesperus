@@ -1,11 +1,10 @@
 "use client";
 import { useActionState, useRef, useState } from "react";
-import { isTable, parseCsv } from "@/lib/engine/csv";
 import { SubmitButton } from "@/components/submit-button";
-import { uploadFile, type UploadState } from "./actions";
+import { previewFile, uploadFile, type UploadState } from "./actions";
 
 type Labels = Record<
-  "uploadSource" | "uploadFile" | "uploadPick" | "uploadDrop" | "uploadChange" | "uploadMapping" | "uploadMappingHelp" | "uploadIgnore" | "uploadSend" | "uploadDone" | "uploadStored" | "uploadRejectedRows" | "uploadLine" | "uploadSending",
+  "uploadSource" | "uploadFile" | "uploadPick" | "uploadDrop" | "uploadChange" | "uploadMapping" | "uploadMappingHelp" | "uploadIgnore" | "uploadSend" | "uploadDone" | "uploadStored" | "uploadReading" | "uploadFound" | "uploadNoTable" | "uploadRejectedRows" | "uploadLine" | "uploadSending",
   string
 > & { errors: Record<string, string> };
 
@@ -25,22 +24,35 @@ export function UploadForm({
   const [sourceId, setSourceId] = useState(sources[0]?.id ?? "");
   const [headers, setHeaders] = useState<string[]>([]);
   const [readError, setReadError] = useState(false);
+  const [reading, setReading] = useState(false);
+  const [found, setFound] = useState<number | null>(null);
   const [file, setFile] = useState<File | null>(null);
   const [dragging, setDragging] = useState(false);
   const input = useRef<HTMLInputElement>(null);
   const mapping = sources.find((s) => s.id === sourceId)?.mapping ?? {};
 
+  // the server reads the file (spreadsheet, PDF, Word, text…) and says which columns it found
   const readHeaders = async (file: File | undefined) => {
     setFile(file ?? null);
     setHeaders([]);
+    setFound(null);
     setReadError(false);
-    if (!file || !isTable(file.name)) return;
+    if (!file) return;
+    setReading(true);
     try {
-      // the header row is enough: read only the start of the file
-      const head = await file.slice(0, 64 * 1024).text();
-      setHeaders(parseCsv(head.slice(0, head.search(/\r?\n|$/))).headers.filter(Boolean));
+      const fd = new FormData();
+      fd.set("slug", slug);
+      fd.set("file", file);
+      const p = await previewFile(fd);
+      if ("error" in p) setReadError(true);
+      else {
+        setHeaders(p.headers);
+        setFound(p.rows);
+      }
     } catch {
       setReadError(true);
+    } finally {
+      setReading(false);
     }
   };
 
@@ -109,10 +121,14 @@ export function UploadForm({
         </div>
       </div>
 
+      {reading && <p className="text-sm text-dim">{l.uploadReading}</p>}
       {readError && <p className="text-sm text-alarm">{l.errors.uploadErr_400}</p>}
+      {found === 0 && !headers.length && <p className="text-sm text-dim">{l.uploadNoTable}</p>}
       {headers.length > 0 && (
         <div>
-          <div className="text-sm font-medium">{l.uploadMapping}</div>
+          <div className="text-sm font-medium">
+            {l.uploadMapping} <span className="num font-normal text-dim">· {found} {l.uploadFound}</span>
+          </div>
           <p className="mt-0.5 text-xs text-dim">{l.uploadMappingHelp}</p>
           <div className="mt-3 grid gap-x-4 gap-y-2 sm:grid-cols-2 lg:grid-cols-3">
             {headers.map((h) => (

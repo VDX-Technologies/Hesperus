@@ -3,6 +3,7 @@ import { revalidatePath } from "next/cache";
 import { requireOrg } from "@/lib/auth";
 import { crossTenantDb, tenantDb } from "@/lib/engine/db";
 import { ConnectorError } from "@/lib/engine/connectors";
+import { extract, type FileFormat } from "@/lib/engine/extract";
 import { storeFromEnv } from "@/lib/engine/store";
 import { ingestUpload, saveUploadConfig, uploadSources, type UploadResult } from "@/lib/engine/upload";
 import { getPackage } from "@/lib/packages";
@@ -39,4 +40,16 @@ export async function uploadFile(_prev: UploadState, formData: FormData): Promis
     if (e instanceof ConnectorError) return { error: `uploadErr_${e.status === 404 ? 403 : e.status}` };
     throw e;
   }
+}
+
+export type Preview = { format: FileFormat; headers: string[]; rows: number } | { error: string };
+
+/** Reads a chosen file on the server and returns the columns of the table found in it, for the mapping. */
+export async function previewFile(formData: FormData): Promise<Preview> {
+  const { role } = await requireOrg(String(formData.get("slug")));
+  if (role !== "owner") return { error: "uploadOnlyOwner" };
+  const file = formData.get("file");
+  if (!(file instanceof File) || !file.size) return { error: "uploadErr_400" };
+  const { format, table } = await extract(file.name, file.type, new Uint8Array(await file.arrayBuffer()));
+  return { format, headers: table?.headers ?? [], rows: table?.rows.length ?? 0 };
 }

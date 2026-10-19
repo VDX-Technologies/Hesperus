@@ -8,6 +8,7 @@ import { createSource, type Source } from "../../lib/engine/sources";
 import { MemoryStore } from "../../lib/engine/store";
 import { ConnectorError } from "../../lib/engine/connectors";
 import { parseCsv } from "../../lib/engine/csv";
+import * as XLSX from "xlsx";
 import { getSettings } from "../../lib/engine/settings";
 import { decodeText, ingestUpload, listUploads, saveUploadConfig, uploadSources } from "../../lib/engine/upload";
 import { parseDate, parseNumber, recordsPackage } from "../../lib/packages/records";
@@ -168,5 +169,27 @@ describe("upload", () => {
     expect(await listUploads(B)).toEqual([]);
     await expect(saveUploadConfig(B, harvest.id, { mapping: { a: "date" } }, USER)).rejects.toMatchObject({ status: 404 });
     expect((await uploadSources(A)).map((s) => s.name)).toEqual(["Raccolta", "Trattamenti"]);
+  });
+});
+
+describe("any file", () => {
+  it("loads a spreadsheet through the mapping, and keeps a file with no table as a document with its text", async () => {
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
+      ["Trattamenti ottobre"],
+      ["data", "campo", "prodotto", "dose (l/ha)", "superficie ha", "operatore"],
+      ["12/10/2026", "Uliveto", "Rame", 2, 1.5, "Anna"],
+    ]), "Foglio1");
+    const later = new Date(now.getTime() + 3600e3);
+    const r = await ingestUpload(db, store, treatments, { name: "ottobre.xlsx", bytes: new Uint8Array(XLSX.write(wb, { type: "array", bookType: "xlsx" })) }, recordsPackage, USER, later);
+    expect(r).toMatchObject({ table: true, rows: 1, accepted: 1 });
+    expect((await listEntries(A)).find((e) => e.subject === "Uliveto")?.payload).toMatchObject({ product: "Rame", dose: 2, area: 1.5 });
+
+    const memo = await ingestUpload(db, store, treatments, { name: "verbale.txt", bytes: enc("Verbale del sopralluogo in vigna.\nTutto regolare.\n") }, recordsPackage, USER, later);
+    expect(memo).toMatchObject({ table: false, rows: 0, accepted: 0 });
+    const doc = (await db.query(`select text_content, metadata from documents where id = $1`, [memo.documentId])).rows[0];
+    expect(doc.text_content).toContain("sopralluogo");
+    expect(doc.metadata).toMatchObject({ format: "text", table: false });
+    expect((await listUploads(A)).find((u) => u.id === memo.documentId)).toMatchObject({ table: false });
   });
 });

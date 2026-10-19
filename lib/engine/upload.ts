@@ -6,7 +6,7 @@ import { forTenant, type Db, type TenantDb } from "./db";
 import type { ModulePackage } from "./package";
 import type { ObjectStore } from "./store";
 import type { Source } from "./sources";
-import { isTable } from "./csv";
+import { decodeText, extract } from "./extract";
 import { ConnectorError, uploadConnector, uploadConfig, type UploadConfig } from "./connectors";
 import { ingestPush, type IngestResult } from "./ingest";
 import { getSettings, num } from "./settings";
@@ -28,15 +28,6 @@ export interface UploadResult {
   rejected: { line: number; error: string }[];
   metrics: number;
   events: number;
-}
-
-/** UTF-8 if valid, else Windows-1252 (what spreadsheets on Windows export). */
-export function decodeText(bytes: Uint8Array): string {
-  try {
-    return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-  } catch {
-    return new TextDecoder("windows-1252").decode(bytes);
-  }
 }
 
 const safeName = (name: string) => name.replace(/[^\w.-]+/g, "_").slice(-80) || "file";
@@ -73,13 +64,18 @@ export async function ingestUpload(
   ]);
   if (dup.rowCount) throw new ConnectorError(409, "this file was already uploaded");
 
-  // Parse before storing anything: a table that cannot be read leaves no trace. Other files are only stored.
-  const table = isTable(file.name);
-  const messages = table ? await uploadConnector.messages(source, { text: decodeText(file.bytes), maxRows }) : [];
+  // Read before storing anything: a CSV or spreadsheet that cannot be read leaves no trace. Any
+  // other file is kept even with no table in it; a table found in it is loaded when mapped.
+  const found = await extract(file.name, file.type, file.bytes);
+  const sheet = found.format === "csv" || found.format === "sheet";
+  if (sheet && !found.table) throw new ConnectorError(400, "no table found in the file");
+  const { mapping } = uploadConfig(source);
+  const table = !!found.table && (sheet || found.table.headers.some((h) => mapping[h]));
+  const messages = table ? await uploadConnector.messages(source, { table: found.table, maxRows }) : [];
 
   // Content-addressed key: putNew refuses an existing key, which also catches a concurrent retry.
   const key = `docs/${source.tenant_id}/${source.id}/${sha256}-${safeName(file.name)}`;
-  const contentType = file.type || (table ? "text/csv" : "application/octet-stream");
+  const contentType = file.type || (found.format === "csv" ? "text/csv" : "application/octet-stream");
   if (!(await store.putNew(key, file.bytes, contentType))) throw new ConnectorError(409, "this file was already uploaded");
   await db.query(`select engine_count('r2.writes', 1, $1)`, [now]);
 
@@ -95,11 +91,13 @@ export async function ingestUpload(
   }
 
   const { rows } = await tdb.query<{ id: string }>(
-    `insert into documents (tenant_id, storage_key, filename, content_type, size, sha256, metadata, source_id, created_at)
-     values ($1, $2, $3, $4, $5, $6, $7, $8, $9) returning id`,
+    `insert into documents (tenant_id, storage_key, filename, content_type, size, sha256, metadata, text_content, source_id, created_at)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) returning id`,
     [
       source.tenant_id, key, file.name, contentType, file.bytes.length, sha256,
-      { kind: "upload", table, rows: out.rows, accepted: out.accepted, rejected: out.rejected.slice(0, 100), rejectedCount: out.rejected.length },
+      { kind: "upload", format: found.format, table, rows: out.rows, accepted: out.accepted, rejected: out.rejected.slice(0, 100), rejectedCount: out.rejected.length },
+      // the text is kept for search; postgres text cannot hold NUL
+      found.text?.replace(/\u0000/g, "").slice(0, 500_000) ?? null,
       source.id, now,
     ],
   );
@@ -175,4 +173,4 @@ export async function listUploads(db: TenantDb, limit = 20): Promise<UploadedDoc
   }));
 }
 
-export { uploadConfig };
+export { uploadConfig, decodeText };

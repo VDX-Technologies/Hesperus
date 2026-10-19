@@ -52,19 +52,26 @@ export const uploadConfig = (source: Source): UploadConfig => {
   return { mapping: c.mapping && typeof c.mapping === "object" ? c.mapping : {}, fixed: c.fixed ?? {} };
 };
 
-/** Upload: the input is the CSV text; one message per data row, through the source's mapping. */
+/**
+ * Upload: the input is CSV text, or a table already read from a file (see extract.ts); one message
+ * per data row, through the source's mapping.
+ */
 export const uploadConnector: Connector = {
   kind: "upload",
   messages(source, input) {
-    if (typeof input !== "object" || input === null || typeof (input as { text?: unknown }).text !== "string")
-      throw new ConnectorError(400, "expected CSV text");
-    const { text, maxRows } = input as { text: string; maxRows?: number };
+    const { text, table, maxRows = Infinity } = (input ?? {}) as { text?: unknown; table?: { headers: string[]; rows: string[][] }; maxRows?: number };
     let csv;
-    try {
-      csv = parseCsv(text, maxRows);
-    } catch (e) {
-      if (e instanceof RangeError) throw new ConnectorError(413, e.message);
-      throw new ConnectorError(400, (e as Error).message);
+    if (table) {
+      if (table.rows.length > maxRows) throw new ConnectorError(413, `more than ${maxRows} rows`);
+      csv = table;
+    } else {
+      if (typeof text !== "string") throw new ConnectorError(400, "expected CSV text or a table");
+      try {
+        csv = parseCsv(text, maxRows);
+      } catch (e) {
+        if (e instanceof RangeError) throw new ConnectorError(413, e.message);
+        throw new ConnectorError(400, (e as Error).message);
+      }
     }
     const { mapping, fixed } = uploadConfig(source);
     const columns = csv.headers.map((h) => mapping[h] || null);
