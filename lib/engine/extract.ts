@@ -19,6 +19,47 @@ export interface Extracted {
   text: string | null;
 }
 
+export interface ExtractOptions {
+  maxBytes?: number;
+  maxRows?: number;
+  maxColumns?: number;
+  maxSheets?: number;
+  maxPages?: number;
+  maxCells?: number;
+  maxTextChars?: number;
+}
+
+export type ExtractLimit = "bytes" | "rows" | "columns" | "sheets" | "pages" | "cells" | "text";
+
+export class ExtractLimitError extends Error {
+  constructor(public readonly limit: ExtractLimit, max: number) {
+    super(`file exceeds the ${limit} limit (${max})`);
+    this.name = "ExtractLimitError";
+  }
+}
+
+const limits = (options: ExtractOptions = {}) => ({
+  maxBytes: options.maxBytes ?? 5 * 1024 ** 2,
+  maxRows: options.maxRows ?? 5_000,
+  maxColumns: options.maxColumns ?? 200,
+  maxSheets: options.maxSheets ?? 20,
+  maxPages: options.maxPages ?? 500,
+  maxCells: options.maxCells ?? 1_000_000,
+  maxTextChars: options.maxTextChars ?? 500_000,
+});
+
+function checkText(text: string, maxTextChars: number) {
+  if (text.length > maxTextChars) throw new ExtractLimitError("text", maxTextChars);
+}
+
+function checkTable(table: Table | null, max: ReturnType<typeof limits>): Table | null {
+  if (!table) return null;
+  if (table.rows.length > max.maxRows) throw new ExtractLimitError("rows", max.maxRows);
+  if (table.headers.length > max.maxColumns) throw new ExtractLimitError("columns", max.maxColumns);
+  if ((table.rows.length + 1) * table.headers.length > max.maxCells) throw new ExtractLimitError("cells", max.maxCells);
+  return table;
+}
+
 const ext = (name: string) => name.toLowerCase().match(/\.([a-z0-9]+)$/)?.[1] ?? "";
 
 const SHEET = new Set(["xlsx", "xlsm", "xlsb", "xls", "ods", "fods", "numbers", "et"]);
@@ -88,34 +129,61 @@ function cellText(v: unknown): string {
   return v == null ? "" : String(v);
 }
 
-function readSheet(bytes: Uint8Array): Extracted {
-  const wb = XLSX.read(bytes, { type: "array", cellDates: true, UTC: true, dense: true });
+function readSheet(bytes: Uint8Array, max: ReturnType<typeof limits>): Extracted {
+  const book = XLSX.read(bytes, { type: "array", cellDates: true, UTC: true, dense: true, sheetRows: max.maxRows + 31 });
+  if (book.SheetNames.length > max.maxSheets) throw new ExtractLimitError("sheets", max.maxSheets);
   let table: Table | null = null;
   const text: string[] = [];
-  for (const name of wb.SheetNames) {
+  let textLength = 0, cellCount = 0;
+  const append = (value: string) => {
+    textLength += value.length + (text.length ? 1 : 0);
+    if (textLength > max.maxTextChars) throw new ExtractLimitError("text", max.maxTextChars);
+    text.push(value);
+  };
+  for (const name of book.SheetNames) {
+    const sheet = book.Sheets[name];
+    const fullref = (sheet as typeof sheet & { "!fullref"?: string })["!fullref"] ?? sheet["!ref"];
+    if (fullref) {
+      const range = XLSX.utils.decode_range(fullref);
+      if (range.e.r + 1 > max.maxRows + 30) throw new ExtractLimitError("rows", max.maxRows);
+      if (range.e.c + 1 > max.maxColumns) throw new ExtractLimitError("columns", max.maxColumns);
+    }
     const grid = XLSX.utils
-      .sheet_to_json<unknown[]>(wb.Sheets[name], { header: 1, raw: true, defval: "", blankrows: false, UTC: true })
+      .sheet_to_json<unknown[]>(sheet, { header: 1, raw: true, defval: "", blankrows: false, UTC: true })
       .map((r) => r.map(cellText));
     if (!grid.length) continue;
-    text.push(`# ${name}`, ...grid.map((r) => r.join("\t")));
+    for (const row of grid) {
+      if (row.length > max.maxColumns) throw new ExtractLimitError("columns", max.maxColumns);
+      cellCount += row.length;
+      if (cellCount > max.maxCells) throw new ExtractLimitError("cells", max.maxCells);
+    }
+    append(`# ${name}`);
+    for (const row of grid) append(row.join("\t"));
     // the sheet with the most rows is the data; the others are often notes or lookups
     const t = findTable(grid);
+    if (t && t.rows.length > max.maxRows) throw new ExtractLimitError("rows", max.maxRows);
     if (t && (!table || t.rows.length > table.rows.length)) table = t;
   }
-  return { format: "sheet", table, text: text.join("\n") || null };
+  return { format: "sheet", table: checkTable(table, max), text: text.join("\n") || null };
 }
 
 /** Delimited text; for a file not named .csv, most rows must have as many cells as the header. */
-function readDelimited(text: string, strict = false): Table | null {
+function readDelimited(text: string, strict: boolean, max: ReturnType<typeof limits>): Table | null {
   let csv: Csv;
   try {
-    csv = parseCsv(text);
-  } catch {
+    csv = parseCsv(text, max.maxRows, max.maxColumns);
+  } catch (e) {
+    if (e instanceof RangeError) {
+      const columnLimit = e.message.includes("columns");
+      throw new ExtractLimitError(columnLimit ? "columns" : "rows", columnLimit ? max.maxColumns : max.maxRows);
+    }
     return null;
   }
   if (strict && (csv.headers.length < 2 || csv.rows.filter((r) => r.length === csv.headers.length).length < Math.max(2, csv.rows.length * 0.8)))
     return null;
-  return findTable([csv.headers, ...csv.rows]);
+  const cells = csv.headers.length + csv.rows.reduce((n, row) => n + row.length, 0);
+  if (cells > max.maxCells) throw new ExtractLimitError("cells", max.maxCells);
+  return checkTable(findTable([csv.headers, ...csv.rows]), max);
 }
 
 /** A cell of a laid out line: its text and horizontal span. */
@@ -169,21 +237,34 @@ export function layoutTable(lines: Cell[][]): Table | null {
 }
 
 /** Plain text laid out in columns: cells are split on tabs or runs of two or more spaces. */
-function textLines(text: string): Cell[][] {
+function textLines(text: string, max: ReturnType<typeof limits>): Cell[][] {
+  checkText(text, max.maxTextChars);
+  let cellCount = 0;
   return text.split(/\r?\n/).map((line) => {
     const cells: Cell[] = [];
-    for (const m of line.matchAll(/[^\t ]+(?: [^\t ]+)*/g)) cells.push({ text: m[0], x0: m.index, x1: m.index + m[0].length });
+    for (const m of line.matchAll(/[^\t ]+(?: [^\t ]+)*/g)) {
+      cells.push({ text: m[0], x0: m.index, x1: m.index + m[0].length });
+      cellCount++;
+      if (cells.length > max.maxColumns) throw new ExtractLimitError("columns", max.maxColumns);
+      if (cellCount > max.maxCells) throw new ExtractLimitError("cells", max.maxCells);
+    }
     return cells;
   });
 }
 
-async function readPdf(bytes: Uint8Array): Promise<Extracted> {
+async function readPdf(bytes: Uint8Array, max: ReturnType<typeof limits>): Promise<Extracted> {
   const { extractTextItems } = await import("unpdf");
   const { items } = await extractTextItems(new Uint8Array(bytes));
+  if (items.length > max.maxPages) throw new ExtractLimitError("pages", max.maxPages);
   const lines: Cell[][] = [];
+  let charCount = 0, cellCount = 0;
   for (const page of items) {
     // words on the same baseline (within a third of the font size) make a line, top to bottom
     const words = page.filter((w) => w.str.trim()).sort((a, b) => b.y - a.y || a.x - b.x);
+    for (const w of words) {
+      charCount += w.str.length;
+      if (charCount > max.maxTextChars) throw new ExtractLimitError("text", max.maxTextChars);
+    }
     const pageLines: (typeof words)[] = [];
     for (const w of words) {
       const last = pageLines.at(-1);
@@ -195,17 +276,23 @@ async function readPdf(bytes: Uint8Array): Promise<Extracted> {
       // a gap wider than about one space ends the cell
       const cells: Cell[] = [];
       for (const w of l) {
+        cellCount++;
+        if (cellCount > max.maxCells) throw new ExtractLimitError("cells", max.maxCells);
         const c = cells.at(-1);
         if (c && w.x - c.x1 < Math.max(w.fontSize * 0.6, 3)) {
           c.text += (w.x - c.x1 > w.fontSize * 0.15 ? " " : "") + w.str.trim();
           c.x1 = w.x + w.width;
-        } else cells.push({ text: w.str.trim(), x0: w.x, x1: w.x + w.width });
+        } else {
+          cells.push({ text: w.str.trim(), x0: w.x, x1: w.x + w.width });
+          if (cells.length > max.maxColumns) throw new ExtractLimitError("columns", max.maxColumns);
+        }
       }
       lines.push(cells);
     }
   }
   const text = lines.map((l) => l.map((c) => c.text).join("\t")).join("\n");
-  return { format: "pdf", table: layoutTable(lines), text: text || null };
+  checkText(text, max.maxTextChars);
+  return { format: "pdf", table: checkTable(layoutTable(lines), max), text: text || null };
 }
 
 const unescape = (s: string) =>
@@ -220,58 +307,78 @@ const unescape = (s: string) =>
     .replace(/\s+/g, " ")
     .trim();
 
-async function readWord(bytes: Uint8Array): Promise<Extracted> {
+async function readWord(bytes: Uint8Array, max: ReturnType<typeof limits>): Promise<Extracted> {
   const mammoth = await import("mammoth");
   const buffer = Buffer.from(bytes);
   const [{ value: html }, { value: text }] = await Promise.all([mammoth.convertToHtml({ buffer }), mammoth.extractRawText({ buffer })]);
+  checkText(html, max.maxTextChars * 5);
+  checkText(text, max.maxTextChars);
   // the biggest table of the document
   let table: Table | null = null;
+  let tableCount = 0, cellCount = 0;
   for (const [t] of html.matchAll(/<table[\s\S]*?<\/table>/g)) {
+    tableCount++;
+    if (tableCount > max.maxSheets) throw new ExtractLimitError("sheets", max.maxSheets);
     const grid = [...t.matchAll(/<tr[\s\S]*?<\/tr>/g)].map(([tr]) => [...tr.matchAll(/<t[dh][^>]*>([\s\S]*?)<\/t[dh]>/g)].map((m) => unescape(m[1])));
+    for (const row of grid) {
+      if (row.length > max.maxColumns) throw new ExtractLimitError("columns", max.maxColumns);
+      cellCount += row.length;
+      if (cellCount > max.maxCells) throw new ExtractLimitError("cells", max.maxCells);
+    }
+    if (grid.length > max.maxRows + 30) throw new ExtractLimitError("rows", max.maxRows);
     const found = findTable(grid);
+    checkTable(found, max);
     if (found && (!table || found.rows.length > table.rows.length)) table = found;
   }
-  return { format: "word", table: table ?? layoutTable(textLines(text)), text: text.trim() || null };
+  return { format: "word", table: checkTable(table ?? layoutTable(textLines(text, max)), max), text: text.trim() || null };
 }
 
 /** Reads any file. A file that cannot be understood still comes back, with no table and no text. */
-export async function extract(name: string, type: string | undefined, bytes: Uint8Array): Promise<Extracted> {
+export async function extract(name: string, type: string | undefined, bytes: Uint8Array, options: ExtractOptions = {}): Promise<Extracted> {
+  const max = limits(options);
+  if (bytes.length > max.maxBytes) throw new ExtractLimitError("bytes", max.maxBytes);
   const format = fileFormat(name, type);
   try {
     switch (format) {
       case "csv": {
         const text = decodeText(bytes);
-        return { format, table: readDelimited(text), text };
+        checkText(text, max.maxTextChars);
+        return { format, table: readDelimited(text, false, max), text };
       }
       case "sheet":
-        return readSheet(bytes);
+        return readSheet(bytes, max);
       case "pdf":
-        return await readPdf(bytes);
+        return await readPdf(bytes, max);
       case "word":
-        return await readWord(bytes);
+        return await readWord(bytes, max);
       case "text": {
         const text = decodeText(bytes);
-        return { format, table: readDelimited(text, true) ?? layoutTable(textLines(text)), text };
+        checkText(text, max.maxTextChars);
+        return { format, table: checkTable(readDelimited(text, true, max) ?? layoutTable(textLines(text, max)), max), text };
       }
       case "other": {
         // an unknown extension may still be a spreadsheet (a zip, or an old Office file) or text
         const zip = bytes[0] === 0x50 && bytes[1] === 0x4b, ole = bytes[0] === 0xd0 && bytes[1] === 0xcf;
         if (zip || ole) {
           try {
-            const s = readSheet(bytes);
+            const s = readSheet(bytes, max);
             if (s.table) return s;
-          } catch {}
+          } catch (e) {
+            if (e instanceof ExtractLimitError) throw e;
+          }
           return { format, table: null, text: null };
         }
         const text = decodeText(bytes);
+        checkText(text, max.maxTextChars);
         // binary files decode to many control characters
         if ((text.match(/[\u0000-\u0008\u000e-\u001f�]/g)?.length ?? 0) > text.length / 100) return { format, table: null, text: null };
-        return { format: "text", table: readDelimited(text, true) ?? layoutTable(textLines(text)), text };
+        return { format: "text", table: checkTable(readDelimited(text, true, max) ?? layoutTable(textLines(text, max)), max), text };
       }
       default:
         return { format, table: null, text: null };
     }
-  } catch {
+  } catch (e) {
+    if (e instanceof ExtractLimitError) throw e;
     return { format, table: null, text: null };
   }
 }

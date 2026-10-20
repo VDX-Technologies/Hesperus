@@ -12,6 +12,15 @@ export interface Point {
   max?: number;
 }
 
+export interface MultiObjectPoint {
+  ts: Date;
+  objectId: string;
+  key: string;
+  value: number;
+  min: number;
+  max: number;
+}
+
 export async function pickLevel(db: Db, from: Date, to: Date): Promise<Level> {
   const s = await getSettings(db);
   const hours = (to.getTime() - from.getTime()) / 3_600_000;
@@ -42,4 +51,23 @@ export async function series(
   const out: Record<string, Point[]> = Object.fromEntries(q.metrics.map((k) => [k, []]));
   for (const { key, ...p } of rows) out[key].push(p.min === undefined ? { ts: p.ts, value: p.value } : p);
   return { level, series: out };
+}
+
+/** Five-minute sensor summaries for several objects in one bounded dashboard query. */
+export async function multiObjectSeries(
+  db: TenantDb,
+  q: { objectIds: string[]; module: string; metrics: string[]; from: Date; to: Date },
+): Promise<MultiObjectPoint[]> {
+  if (!q.objectIds.length || !q.metrics.length) return [];
+  const { rows } = await db.query<MultiObjectPoint>(
+    `select m.object_id "objectId", k.key, date_bin('5 minutes', m.ts, 'epoch') ts,
+            avg(m.value)::float8 value, min(m.value)::float8 min, max(m.value)::float8 max
+       from metrics m join metric_keys k on k.id = m.metric_id
+      where m.tenant_id = $1 and m.object_id = any($2::uuid[]) and k.module = $3
+        and k.key = any($4::text[]) and m.ts >= $5 and m.ts < $6
+      group by m.object_id, k.key, date_bin('5 minutes', m.ts, 'epoch')
+      order by ts, m.object_id, k.key`,
+    [db.tenantId, q.objectIds, q.module, q.metrics, q.from, q.to],
+  );
+  return rows;
 }

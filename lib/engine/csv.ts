@@ -22,7 +22,7 @@ function guessDelimiter(firstLine: string): string {
   return best;
 }
 
-export function parseCsv(text: string, maxRows = Infinity): Csv {
+export function parseCsv(text: string, maxRows = Infinity, maxColumns = Infinity): Csv {
   if (text.charCodeAt(0) === 0xfeff) text = text.slice(1);
   const delimiter = guessDelimiter(text.slice(0, text.search(/\r?\n|$/)));
   const records: string[][] = [];
@@ -30,6 +30,7 @@ export function parseCsv(text: string, maxRows = Infinity): Csv {
   const endRow = () => {
     row.push(field);
     field = "";
+    if (row.length > maxColumns) throw new RangeError(`more than ${maxColumns} columns`);
     if (row.length > 1 || row[0].trim() !== "") records.push(row); // blank lines are skipped
     row = [];
     if (records.length > maxRows + 1) throw new RangeError(`more than ${maxRows} rows`);
@@ -46,6 +47,7 @@ export function parseCsv(text: string, maxRows = Infinity): Csv {
     } else if (c === '"' && field === "") quoted = true;
     else if (c === delimiter) {
       row.push(field);
+      if (row.length >= maxColumns) throw new RangeError(`more than ${maxColumns} columns`);
       field = "";
     }
     else if (c === "\n") endRow();

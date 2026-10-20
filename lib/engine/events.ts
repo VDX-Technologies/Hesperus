@@ -140,3 +140,72 @@ export async function* allEvents(db: TenantDb, q: Omit<EventQuery, "limit" | "af
     after = rows[rows.length - 1];
   }
 }
+
+export interface DashboardEvent {
+  id: number;
+  ts: Date;
+  type: string;
+  payload: Record<string, unknown>;
+  authorLabel: string | null;
+  objectIds: string[];
+}
+
+/** Lightweight paged event reads for dashboard aggregates; omit version-history work. */
+export async function* allDashboardEvents(
+  db: TenantDb,
+  q: { types: string[]; from?: Date; to?: Date },
+  chunk = 1000,
+): AsyncGenerator<DashboardEvent> {
+  let after: Cursor | undefined;
+  for (;;) {
+    const { rows } = await db.query<{ id: string; ts: Date; type: string; payload: Record<string, unknown>; author_label: string | null; object_ids: string[] }>(
+      `with page as (
+         select e.id, e.ts, e.type, e.payload, e.author_label
+         from events_current e
+         where e.tenant_id = $1 and e.type = any($2::text[])
+           and ($3::timestamptz is null or e.ts >= $3)
+           and ($4::timestamptz is null or e.ts < $4)
+           and ($5::timestamptz is null or (e.ts, e.id) < ($5, $6::bigint))
+         order by e.ts desc, e.id desc
+         limit $7
+       )
+       select p.id, p.ts, p.type, p.payload, p.author_label,
+              array(select eo.object_id from event_objects eo where eo.tenant_id = $1 and eo.event_id = p.id) object_ids
+       from page p order by p.ts desc, p.id desc`,
+      [db.tenantId, q.types, q.from ?? null, q.to ?? null, after?.ts ?? null, after?.id ?? null, chunk],
+    );
+    const page = rows.map((r) => ({
+      id: Number(r.id), ts: r.ts, type: r.type, payload: r.payload, authorLabel: r.author_label, objectIds: r.object_ids,
+    }));
+    yield* page;
+    if (page.length < chunk) return;
+    const last = page[page.length - 1];
+    after = { ts: last.ts, id: last.id };
+  }
+}
+
+/** Latest event for each tracked object and register type, independent of dashboard period. */
+export async function latestDashboardObjectEvents(db: TenantDb, objectIds: string[], types: string[]): Promise<DashboardEvent[]> {
+  if (!objectIds.length || !types.length) return [];
+  const { rows } = await db.query<{ id: string; ts: Date; type: string; payload: Record<string, unknown>; author_label: string | null; object_id: string }>(
+    `select distinct on (eo.object_id, e.type) e.id, e.ts, e.type, e.payload, e.author_label, eo.object_id
+       from event_objects eo
+       join events_current e on e.tenant_id = eo.tenant_id and e.id = eo.event_id
+      where eo.tenant_id = $1 and eo.object_id = any($2::uuid[]) and e.type = any($3::text[])
+      order by eo.object_id, e.type, e.ts desc, e.id desc`,
+    [db.tenantId, objectIds, types],
+  );
+  return rows.map((r) => ({
+    id: Number(r.id), ts: r.ts, type: r.type, payload: r.payload, authorLabel: r.author_label, objectIds: [r.object_id],
+  }));
+}
+
+/** Latest timestamp per register type, including events without an object link. */
+export async function latestDashboardEventTimes(db: TenantDb, types: string[]): Promise<Map<string, Date>> {
+  if (!types.length) return new Map();
+  const { rows } = await db.query<{ type: string; ts: Date }>(
+    `select e.type, max(e.ts) ts from events_current e where e.tenant_id = $1 and e.type = any($2::text[]) group by e.type`,
+    [db.tenantId, types],
+  );
+  return new Map(rows.map((r) => [r.type, r.ts]));
+}

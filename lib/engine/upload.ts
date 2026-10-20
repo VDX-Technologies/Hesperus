@@ -6,7 +6,7 @@ import { forTenant, type Db, type TenantDb } from "./db";
 import type { ModulePackage } from "./package";
 import type { ObjectStore } from "./store";
 import type { Source } from "./sources";
-import { decodeText, extract } from "./extract";
+import { decodeText, extract, ExtractLimitError } from "./extract";
 import { ConnectorError, uploadConnector, uploadConfig, type UploadConfig } from "./connectors";
 import { ingestPush, type IngestResult } from "./ingest";
 import { getSettings, num } from "./settings";
@@ -70,7 +70,13 @@ export async function ingestUpload(
 
   // Read before storing anything: a CSV or spreadsheet that cannot be read leaves no trace. Any
   // other file is kept even with no table in it; a table found in it is loaded when mapped.
-  const found = await extract(file.name, file.type, file.bytes);
+  let found: Awaited<ReturnType<typeof extract>>;
+  try {
+    found = await extract(file.name, file.type, file.bytes, { maxBytes, maxRows });
+  } catch (e) {
+    if (e instanceof ExtractLimitError) throw new ConnectorError(413, e.message);
+    throw e;
+  }
   const sheet = found.format === "csv" || found.format === "sheet";
   if (sheet && !found.table) throw new ConnectorError(400, "no table found in the file");
   const { mapping } = uploadConfig(source);
@@ -189,6 +195,19 @@ export interface UploadedDocument {
   rejectedCount: number;
   register: string | null;
   events: number;
+}
+
+/** Exact file and rejected-row totals for the dashboard, independent of its recent-file list. */
+export async function countUploads(db: TenantDb, from?: Date): Promise<{ files: number; rejected: number }> {
+  const { rows } = await db.query<{ files: number; rejected: number }>(
+    `select count(*)::int files,
+            coalesce(sum(case when metadata->>'rejectedCount' ~ '^[0-9]+$' then (metadata->>'rejectedCount')::int else 0 end), 0)::int rejected
+       from documents
+      where tenant_id = $1 and metadata->>'kind' = 'upload'
+        and ($2::timestamptz is null or created_at >= $2)`,
+    [db.tenantId, from ?? null],
+  );
+  return rows[0];
 }
 
 /** Latest uploaded files, newest first. */

@@ -7,7 +7,7 @@ const DAY = 86_400_000;
 
 export const PERIODS = [7, 30, 90, 365, 0] as const;
 export type Period = (typeof PERIODS)[number];
-export const periodFrom = (v: unknown): Period => (PERIODS.includes(Number(v) as Period) && v !== "" ? (Number(v) as Period) : 90);
+export const periodFrom = (v: unknown): Period => (PERIODS.includes(Number(v) as Period) && v !== "" ? (Number(v) as Period) : 30);
 
 /** A crop with no treatment for longer than this is due a look. */
 export const OVERDUE_DAYS = 21;

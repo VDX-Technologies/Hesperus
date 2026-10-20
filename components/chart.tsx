@@ -1,7 +1,7 @@
 "use client";
 import { useState } from "react";
 import {
-  Area, AreaChart, Bar, Brush, CartesianGrid, ComposedChart, Legend, Line, LineChart, ReferenceLine, ResponsiveContainer, Scatter, ScatterChart, Tooltip, XAxis, YAxis, ZAxis,
+  Area, AreaChart, Bar, Brush, CartesianGrid, ComposedChart, Legend, Line, LineChart, ReferenceArea, ReferenceLine, ResponsiveContainer, Scatter, ScatterChart, Tooltip, XAxis, YAxis, ZAxis,
 } from "recharts";
 
 export interface Series {
@@ -275,69 +275,230 @@ export interface StackSeries { key: string; label: string; color: string }
  */
 export function StackChart({
   points, series, labels, locale, height = 320,
-}: { points: Record<string, number>[]; series: StackSeries[]; labels: { avg: string; total: string }; locale: string; height?: number }) {
+}: { points: Record<string, number>[]; series: StackSeries[]; labels: { total: string; timeline: string; volume: string; trend: string; mean: string }; locale: string; height?: number }) {
   const [off, setOff] = useState<Set<string>>(new Set());
   const shown = series.filter((s) => !off.has(s.key));
   const long = points.length > 120;
   const day = (v: number) => new Date(v).toLocaleDateString(locale, long ? { month: "short", year: "2-digit" } : { day: "numeric", month: "short" });
   const totals = Object.fromEntries(series.map((s) => [s.key, points.reduce((a, p) => a + (p[s.key] ?? 0), 0)]));
+  const mean = points.length ? points.reduce((sum, point) => sum + shown.reduce((daily, s) => daily + (point[s.key] ?? 0), 0), 0) / points.length : 0;
   const toggle = (k: string) => setOff((o) => { const n = new Set(o); if (n.has(k)) n.delete(k); else n.add(k); return n; });
+  const activeDays = points.filter((p) => (p.total ?? 0) > 0).length;
+  const sparse = points.length > 0 && activeDays <= 12 && activeDays / points.length <= 0.35;
+  const [viewChoice, setViewChoice] = useState<"timeline" | "volume" | null>(null);
+  const [trendChoice, setTrendChoice] = useState<boolean | null>(null);
+  const view = viewChoice ?? (sparse ? "timeline" : "volume");
+  const showTrend = trendChoice ?? !sparse;
+  const timelinePoints = shown.flatMap((s, index) => points
+    .filter((p) => (p[s.key] ?? 0) > 0)
+    .map((p) => ({ t: p.t, lane: index + 1, n: p[s.key], total: p.total, key: s.key, label: s.label })));
+  const timelineHeight = Math.max(220, Math.min(360, 124 + shown.length * 22));
   return (
     <div>
-      <div className="flex flex-wrap gap-1.5 border-b border-line-soft px-4 py-2.5">
-        {series.map((s) => (
-          <button key={s.key} onClick={() => toggle(s.key)} aria-pressed={!off.has(s.key)}
-            className={`flex items-center gap-1.5 rounded border px-2 py-0.5 text-[11px] transition-opacity ${off.has(s.key) ? "border-line-soft text-dim opacity-50" : "border-line text-mist"}`}>
-            <span className="h-2 w-2 rounded-sm" style={{ background: s.color }} />
-            {s.label} <span className="num text-frost">{totals[s.key]}</span>
-          </button>
-        ))}
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line-soft px-4 py-2.5">
+        <div className="flex min-w-0 flex-wrap gap-1.5">
+          {series.map((s) => (
+            <button key={s.key} onClick={() => toggle(s.key)} aria-pressed={!off.has(s.key)}
+              className={`flex items-center gap-1.5 rounded border px-2 py-0.5 text-[11px] transition-opacity ${off.has(s.key) ? "border-line-soft text-dim opacity-50" : "border-line text-mist"}`}>
+              <span className="h-2 w-2 rounded-sm" style={{ background: s.color }} />
+              {s.label} <span className="num text-frost">{totals[s.key]}</span>
+            </button>
+          ))}
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          <div className="flex gap-1 rounded-md border border-line-soft bg-ink-900 p-0.5">
+            {(["timeline", "volume"] as const).map((mode) => (
+              <button key={mode} aria-pressed={view === mode} onClick={() => setViewChoice(mode)}
+                className={`rounded px-2 py-1 text-[11px] ${view === mode ? "bg-steel text-frost" : "text-dim hover:text-mist"}`}>
+                {mode === "timeline" ? labels.timeline : labels.volume}
+              </button>
+            ))}
+          </div>
+          {view === "volume" && (
+            <button aria-pressed={showTrend} onClick={() => setTrendChoice(!showTrend)}
+              className={`rounded border px-2 py-1 text-[11px] ${showTrend ? "border-warn/50 text-warn" : "border-line-soft text-dim hover:text-mist"}`}>
+              {labels.trend}
+            </button>
+          )}
+        </div>
       </div>
       <div className="px-2 pt-3">
-        <ResponsiveContainer width="100%" height={height}>
-          <ComposedChart data={points} margin={{ top: 4, right: 12, bottom: 0, left: -14 }} barCategoryGap={1}>
-            <CartesianGrid stroke="#16191d" vertical={false} />
-            <XAxis dataKey="t" tickFormatter={day} {...AXIS} minTickGap={36} />
-            <YAxis {...AXIS} axisLine={false} allowDecimals={false} width={40} />
-            <Tooltip
-              cursor={{ fill: "#9fd8ff", fillOpacity: 0.06 }}
-              content={({ payload, label }) => {
-                const p = payload?.[0]?.payload as Record<string, number> | undefined;
-                if (!p) return null;
-                return (
-                  <div style={TOOLTIP} className="min-w-48 px-3 py-2">
-                    <div className="mb-1 text-dim">{new Date(label as number).toLocaleDateString(locale, { weekday: "short", day: "numeric", month: "short", year: "numeric" })}</div>
-                    {shown.filter((s) => p[s.key]).map((s) => (
-                      <div key={s.key} className="flex justify-between gap-4">
-                        <span className="flex items-center gap-1.5 text-mist"><span className="h-2 w-2 rounded-sm" style={{ background: s.color }} />{s.label}</span>
-                        <span className="num text-frost">{p[s.key]}</span>
+        {view === "timeline" ? (
+          <ResponsiveContainer width="100%" height={timelineHeight}>
+            <ScatterChart margin={{ top: 8, right: 12, bottom: 0, left: 4 }}>
+              <CartesianGrid stroke="#16191d" vertical />
+              <XAxis dataKey="t" type="number" scale="time" domain={points.length ? [points[0].t, points[points.length - 1].t + 86400000] : [0, 1]}
+                tickFormatter={day} {...AXIS} minTickGap={36} />
+              <YAxis dataKey="lane" type="number" domain={shown.length ? [0.5, shown.length + 0.5] : [0, 1]}
+                ticks={shown.map((_, i) => i + 1)} tickFormatter={(v: number) => shown[v - 1]?.label ?? ""}
+                {...AXIS} axisLine={false} tickLine={false} width={112} />
+              <ZAxis dataKey="n" type="number" range={[42, 112]} />
+              <Tooltip cursor={{ stroke: "#39414b", strokeDasharray: "3 3" }}
+                content={({ payload }) => {
+                  const p = payload?.[0]?.payload as { t: number; n: number; total: number; label: string } | undefined;
+                  if (!p) return null;
+                  return (
+                    <div style={TOOLTIP} className="min-w-44 px-3 py-2">
+                      <div className="mb-1 text-dim">{new Date(p.t).toLocaleDateString(locale, { weekday: "short", day: "numeric", month: "short", year: "numeric" })}</div>
+                      <div className="flex justify-between gap-4"><span className="text-mist">{p.label}</span><span className="num text-frost">{p.n}</span></div>
+                      <div className="mt-1 flex justify-between gap-4 border-t border-line pt-1"><span className="text-frost">{labels.total}</span><span className="num text-frost">{p.total}</span></div>
+                    </div>
+                  );
+                }} />
+              {shown.map((s, i) => <ReferenceLine key={`lane-${s.key}`} y={i + 0.5} stroke="#20252b" />)}
+              {shown.map((s, i) => (
+                <Scatter key={s.key} name={s.label} data={timelinePoints.filter((p) => p.key === s.key)} fill={s.color}
+                  isAnimationActive={false} shape="circle" />
+              ))}
+            </ScatterChart>
+          </ResponsiveContainer>
+        ) : (
+          <ResponsiveContainer width="100%" height={height}>
+            <ComposedChart data={points} margin={{ top: 4, right: 12, bottom: 0, left: -14 }} barCategoryGap={1}>
+              <CartesianGrid stroke="#16191d" vertical={false} />
+              <XAxis dataKey="t" tickFormatter={day} {...AXIS} minTickGap={36} />
+              <YAxis {...AXIS} axisLine={false} allowDecimals={false} width={40} />
+              <Tooltip
+                cursor={{ fill: "#9fd8ff", fillOpacity: 0.06 }}
+                content={({ payload, label }) => {
+                  const p = payload?.[0]?.payload as Record<string, number> | undefined;
+                  if (!p) return null;
+                  return (
+                    <div style={TOOLTIP} className="min-w-48 px-3 py-2">
+                      <div className="mb-1 text-dim">{new Date(label as number).toLocaleDateString(locale, { weekday: "short", day: "numeric", month: "short", year: "numeric" })}</div>
+                      {shown.filter((s) => p[s.key]).map((s) => (
+                        <div key={s.key} className="flex justify-between gap-4">
+                          <span className="flex items-center gap-1.5 text-mist"><span className="h-2 w-2 rounded-sm" style={{ background: s.color }} />{s.label}</span>
+                          <span className="num text-frost">{p[s.key]}</span>
+                        </div>
+                      ))}
+                      <div className="mt-1 flex justify-between gap-4 border-t border-line pt-1">
+                        <span className="text-frost">{labels.total}</span><span className="num text-frost">{p.total}</span>
                       </div>
-                    ))}
-                    <div className="mt-1 flex justify-between gap-4 border-t border-line pt-1">
-                      <span className="text-frost">{labels.total}</span><span className="num text-frost">{p.total}</span>
+                      {showTrend && <div className="flex justify-between gap-4"><span className="text-warn">{labels.trend}</span><span className="num text-frost">{p.avg}</span></div>}
                     </div>
-                    <div className="flex justify-between gap-4">
-                      <span className="text-warn">{labels.avg}</span><span className="num text-frost">{p.avg}</span>
-                    </div>
-                  </div>
-                );
-              }}
-            />
-            {shown.map((s, i) => (
-              <Bar key={s.key} dataKey={s.key} stackId="r" fill={s.color} fillOpacity={0.85} isAnimationActive={false}
-                radius={i === shown.length - 1 ? [2, 2, 0, 0] : undefined} />
-            ))}
-            <Line dataKey="avg" stroke="#f2b84b" strokeWidth={1.6} dot={false} type="monotone" isAnimationActive={false} />
-            {points.length > 14 && (
-              <Brush dataKey="t" height={26} travellerWidth={8} stroke="#23282f" fill="#07080a" tickFormatter={day}>
-                <AreaChart data={points}>
-                  <Area dataKey="total" stroke="#9fd8ff" fill="#9fd8ff" fillOpacity={0.15} dot={false} isAnimationActive={false} />
-                </AreaChart>
-              </Brush>
-            )}
-          </ComposedChart>
-        </ResponsiveContainer>
+                  );
+                }}
+              />
+              {mean > 0 && <ReferenceLine y={mean} stroke="#6b7079" strokeDasharray="3 4" label={{ value: labels.mean, position: "insideTopRight", fill: "#6b7079", fontSize: 10 }} />}
+              {shown.map((s, i) => (
+                <Bar key={s.key} dataKey={s.key} stackId="r" fill={s.color} fillOpacity={0.85} isAnimationActive={false}
+                  radius={i === shown.length - 1 ? [2, 2, 0, 0] : undefined} />
+              ))}
+              {showTrend && <Line dataKey="avg" name={labels.trend} stroke="#f2b84b" strokeWidth={1.6} strokeDasharray="5 3" dot={false} type="linear" isAnimationActive={false} />}
+              {points.length > 14 && (
+                <Brush dataKey="t" height={26} travellerWidth={8} stroke="#23282f" fill="#07080a" tickFormatter={day}>
+                  <AreaChart data={points}>
+                    <Area dataKey="total" stroke="#9fd8ff" fill="#9fd8ff" fillOpacity={0.15} dot={false} isAnimationActive={false} />
+                  </AreaChart>
+                </Brush>
+              )}
+            </ComposedChart>
+          </ResponsiveContainer>
+        )}
       </div>
     </div>
   );
+}
+
+export interface SensorMetricPanel {
+  key: string;
+  label: string;
+  unit: string;
+  rows: Record<string, number | null>[];
+  series: StackSeries[];
+  thresholds: { value: number; op: ">" | ">=" | "<" | "<="; severity: "warn" | "alarm"; label: string }[];
+  thresholdNote?: string;
+  note?: string;
+}
+
+function SensorMetricChart({ panel, locale, minMaxLabel, emptyLabel }: { panel: SensorMetricPanel; locale: string; minMaxLabel: string; emptyLabel: string }) {
+  const [off, setOff] = useState<Set<string>>(new Set());
+  const shown = panel.series.filter((s) => !off.has(s.key));
+  const values = panel.rows.flatMap((row) => shown.map((s) => row[s.key]).filter((v): v is number => typeof v === "number" && Number.isFinite(v)));
+  const low = values.length ? Math.min(...values) : 0;
+  const high = values.length ? Math.max(...values) : 1;
+  const pad = Math.max((high - low) * 0.12, Math.abs(high || low) * 0.04, 0.1);
+  const domain: [number, number] = [low - pad, high + pad];
+  const fmt = (v: number) => v.toLocaleString(locale, { maximumFractionDigits: 2 });
+  const time = (v: number) => new Date(v).toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit" });
+  const palette: Record<string, string> = { warn: "#f2b84b", alarm: "#ff6b6b" };
+  return (
+    <section className="card min-w-0 overflow-hidden">
+      <header className="flex flex-wrap items-start justify-between gap-2 border-b border-line-soft px-4 py-3">
+        <div>
+          <h3 className="text-sm font-medium text-frost">{panel.label} <span className="ml-1 text-xs font-normal text-dim">{panel.unit}</span></h3>
+          {panel.note && <p className="mt-1 text-[10px] text-dim">{panel.note}</p>}
+        </div>
+        <div className="flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-dim">
+          {panel.thresholds.map((threshold, i) => (
+            <span key={`${threshold.op}-${threshold.value}-${i}`} className="inline-flex items-center gap-1">
+              <span className="h-2 w-2 rounded-full" style={{ background: palette[threshold.severity] }} />
+              {threshold.label} {threshold.op} {fmt(threshold.value)}{panel.unit}
+            </span>
+          ))}
+          {panel.thresholdNote && <span>{panel.thresholdNote}</span>}
+        </div>
+      </header>
+      <div className="h-[190px] px-2 pt-2">
+        {values.length ? (
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart data={panel.rows} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
+              <CartesianGrid stroke="#16191d" vertical={false} />
+              {panel.thresholds.map((threshold, i) => {
+                const below = threshold.op.startsWith("<");
+                const visible = threshold.value > domain[0] && threshold.value < domain[1];
+                const y1 = below ? domain[0] : threshold.value;
+                const y2 = below ? threshold.value : domain[1];
+                return visible && y2 > y1 ? <ReferenceArea key={`${threshold.op}-${threshold.value}-${i}`} y1={y1} y2={y2}
+                  fill={palette[threshold.severity]} fillOpacity={threshold.severity === "alarm" ? 0.08 : 0.045} /> : null;
+              })}
+              <XAxis dataKey="t" type="number" domain={[panel.rows[0]?.t ?? 0, panel.rows.at(-1)?.t ?? 1]} scale="time"
+                tickFormatter={time} stroke="#6b7079" fontSize={10} tickLine={false} minTickGap={38} />
+              <YAxis domain={domain} stroke="#6b7079" fontSize={10} tickLine={false} axisLine={false} width={46} />
+              <Tooltip contentStyle={TOOLTIP} cursor={{ stroke: "#39414b", strokeDasharray: "3 3" }}
+                content={({ active, payload, label }) => {
+                  const row = payload?.[0]?.payload as Record<string, number | null> | undefined;
+                  if (!active || !row) return null;
+                  return (
+                    <div style={TOOLTIP} className="min-w-44 px-3 py-2">
+                      <div className="mb-1 text-dim">{new Date(label as number).toLocaleString(locale)}</div>
+                      {shown.map((s) => {
+                        const value = row[s.key];
+                        if (typeof value !== "number") return null;
+                        const min = row[`${s.key}__min`], max = row[`${s.key}__max`];
+                        const range = typeof min === "number" && typeof max === "number" && min !== max ? ` · ${minMaxLabel} ${fmt(min)}–${fmt(max)}` : "";
+                        return <div key={s.key} className="flex justify-between gap-4"><span className="flex items-center gap-1.5 text-mist"><span className="h-2 w-2 rounded-full" style={{ background: s.color }} />{s.label}</span><span className="num text-frost">{fmt(value)}{panel.unit}{range}</span></div>;
+                      })}
+                    </div>
+                  );
+                }} />
+              {panel.thresholds.map((threshold, i) => threshold.value > domain[0] && threshold.value < domain[1]
+                ? <ReferenceLine key={`threshold-${i}`} y={threshold.value}
+                    stroke={palette[threshold.severity]} strokeDasharray="4 3" strokeOpacity={0.75} />
+                : null)}
+              {shown.map((s) => <Line key={s.key} type="linear" dataKey={s.key} name={s.label} stroke={s.color}
+                strokeWidth={1.6} dot={false} activeDot={{ r: 3 }} connectNulls={false} isAnimationActive={false} />)}
+            </LineChart>
+          </ResponsiveContainer>
+        ) : <div className="flex h-full items-center justify-center text-xs text-dim">{emptyLabel}</div>}
+      </div>
+      <div className="flex max-h-16 flex-wrap gap-1.5 overflow-y-auto border-t border-line-soft px-3 py-2">
+        {panel.series.map((s) => (
+          <button key={s.key} onClick={() => setOff((old) => { const next = new Set(old); if (next.has(s.key)) next.delete(s.key); else next.add(s.key); return next; })}
+            aria-pressed={!off.has(s.key)} className={`inline-flex items-center gap-1.5 rounded px-1.5 py-0.5 text-[10px] ${off.has(s.key) ? "text-dim opacity-50" : "text-mist"}`}>
+            <span className="h-1.5 w-3 rounded-full" style={{ background: s.color }} />{s.label}
+          </button>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+/** Comparative, five-minute sensor history with visible gaps and configured threshold bands. */
+export function SensorMetricGrid({ panels, locale, minMaxLabel, emptyLabel }: { panels: SensorMetricPanel[]; locale: string; minMaxLabel: string; emptyLabel: string }) {
+  if (!panels.length) return null;
+  return <div className="grid gap-4 xl:grid-cols-2">
+    {panels.map((panel) => <SensorMetricChart key={panel.key} panel={panel} locale={locale} minMaxLabel={minMaxLabel} emptyLabel={emptyLabel} />)}
+  </div>;
 }

@@ -122,8 +122,16 @@ export async function listAlerts(
 }
 
 export async function countOpenAlerts(db: TenantDb) {
-  const { rows } = await db.query<{ n: number }>(
-    `select count(*)::int n from object_alerts where tenant_id = $1 and status = 'open'`, [db.tenantId],
+  return (await countOpenAlertSummary(db)).open;
+}
+
+export async function countOpenAlertSummary(db: TenantDb) {
+  const { rows } = await db.query<{ open: number; alarms: number; warnings: number }>(
+    `select count(*)::int open,
+            count(*) filter (where severity = 'alarm')::int alarms,
+            count(*) filter (where severity = 'warn')::int warnings
+       from object_alerts where tenant_id = $1 and status = 'open'`,
+    [db.tenantId],
   );
-  return rows[0].n;
+  return rows[0];
 }

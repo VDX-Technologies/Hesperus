@@ -4,7 +4,8 @@ import { redirect } from "next/navigation";
 import { requireOrg } from "@/lib/auth";
 import { crossTenantDb, tenantDb } from "@/lib/engine/db";
 import { ConnectorError } from "@/lib/engine/connectors";
-import { extract, type FileFormat } from "@/lib/engine/extract";
+import { extract, ExtractLimitError, type FileFormat } from "@/lib/engine/extract";
+import { getSettings, num } from "@/lib/engine/settings";
 import { storeFromEnv } from "@/lib/engine/store";
 import { deleteUpload, ingestUpload, knownSubjects, reprocessUpload, saveUploadConfig, uploadConfig, uploadSources, type UploadResult } from "@/lib/engine/upload";
 import { readMemory, recognize, type Recognition } from "@/lib/packages/records/recognize";
@@ -24,6 +25,9 @@ export async function uploadFile(_prev: UploadState, formData: FormData): Promis
   if (!source || !pkg) return { error: "uploadErr_403" };
   const file = formData.get("file");
   if (!(file instanceof File) || !file.size) return { error: "uploadErr_400" };
+  const settings = await getSettings(crossTenantDb("settings"));
+  const maxBytes = num(settings, "upload.max_bytes", 5 * 1024 ** 2);
+  if (file.size > maxBytes) return { error: "uploadErr_413" };
 
   const mapping: Record<string, string> = {};
   for (const [k, v] of formData) if (k.startsWith("map_") && typeof v === "string" && v) mapping[k.slice(4)] = v;
@@ -60,8 +64,19 @@ export async function previewFile(formData: FormData): Promise<Preview> {
   const file = formData.get("file");
   if (!(file instanceof File) || !file.size) return { error: "uploadErr_400" };
   const tdb = tenantDb(org.id);
+  const settings = await getSettings(crossTenantDb("settings"));
+  const maxBytes = num(settings, "upload.max_bytes", 5 * 1024 ** 2);
+  const maxRows = num(settings, "upload.max_rows", 5000);
+  if (file.size > maxBytes) return { error: "uploadErr_413" };
   const source = (await uploadSources(tdb)).find((s) => s.id === formData.get("source"));
-  const { format, table } = await extract(file.name, file.type, new Uint8Array(await file.arrayBuffer()));
+  let found: Awaited<ReturnType<typeof extract>>;
+  try {
+    found = await extract(file.name, file.type, new Uint8Array(await file.arrayBuffer()), { maxBytes, maxRows });
+  } catch (e) {
+    if (e instanceof ExtractLimitError) return { error: "uploadErr_413" };
+    throw e;
+  }
+  const { format, table } = found;
   if (!table) return { format, headers: [], rows: 0, sample: [], recognition: null };
   const recognition = recognize(table, {
     memory: readMemory(source?.config.memory),

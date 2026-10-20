@@ -1,7 +1,8 @@
 // Push ingestion: archive every message as received, then normalize it through the source's
 // module package into objects, metrics and events. A bad message is kept in the raw archive
 // and reported; it never blocks the rest of the batch.
-import { forTenant, type Db } from "./db";
+import { createHash } from "node:crypto";
+import { forTenant, inTransaction, type Db } from "./db";
 import type { ModulePackage, Normalized } from "./package";
 import { ValidationError } from "./package";
 import type { RawMessage } from "./connectors";
@@ -25,6 +26,16 @@ export interface IngestResult {
 
 type Registry = { types: Map<string, string>; metrics: Map<string, number> };
 const registries = new WeakMap<Db, Map<string, Registry>>();
+
+function canonical(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
+  if (value && typeof value === "object") {
+    return `{${Object.entries(value as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b)).map(([k, v]) => `${JSON.stringify(k)}:${canonical(v)}`).join(",")}}`;
+  }
+  return JSON.stringify(value) ?? "null";
+}
+
+const hash = (value: string) => createHash("sha256").update(value).digest("hex");
 
 /** Upserts the package's object types, event types and metric keys once per process and database. */
 export async function registerPackage(db: Db, pkg: ModulePackage): Promise<Registry> {
@@ -93,10 +104,12 @@ export async function ingestPush(
   );
 
   const reg = await registerPackage(db, pkg);
+  const committed = await inTransaction(db, async (db) => {
   const result: IngestResult = {
     accepted: 0, rejected: [], metrics: 0, events: 0, alerts: { opened: 0, resolved: 0 }, configs: [], objectIds: [],
   };
-  const items: Normalized[] = [];
+  const items: { n: Normalized; messageKey: string }[] = [];
+  const occurrences = new Map<string, number>();
 
   messages.forEach((m, index) => {
     try {
@@ -107,7 +120,10 @@ export async function ingestPush(
         if (n.ts && !(n.ts instanceof Date && Number.isFinite(n.ts.getTime()))) throw new ValidationError("invalid ts");
         if (n.ts && n.ts.getTime() - now.getTime() > maxFuture) throw new ValidationError("ts is in the future");
       }
-      items.push(...list);
+      const fingerprint = hash(`${source.id}\u0000${canonical(m)}`);
+      const occurrence = occurrences.get(fingerprint) ?? 0;
+      occurrences.set(fingerprint, occurrence + 1);
+      list.forEach((n, normalizedIndex) => items.push({ n, messageKey: `${fingerprint}:${occurrence}:${normalizedIndex}` }));
       result.accepted++;
     } catch (e) {
       if (!(e instanceof ValidationError)) throw e;
@@ -120,7 +136,7 @@ export async function ingestPush(
     type: string; typeId: string; externalId: string; name?: string; properties: object; ts: Date; configAck?: number;
   };
   const objects = new Map<string, Obj>();
-  for (const n of items) {
+  for (const { n } of items) {
     const k = `${n.object.type}\u0000${n.object.externalId}`;
     const prev = objects.get(k);
     objects.set(k, {
@@ -136,44 +152,60 @@ export async function ingestPush(
   const objectIds = new Map<string, string>();
   const derivedState = new Map<string, DerivedState>();
   const pkgState = new Map<string, Record<string, unknown>>();
-  for (const [k, o] of objects) {
-    const { rows } = await db.query<{ id: string; state: { derived?: DerivedState; pkg?: Record<string, unknown> } }>(
+  if (objects.size) {
+    const entries = [...objects.entries()];
+    const { rows } = await db.query<{ id: string; type_id: string; external_id: string; state: { derived?: DerivedState; pkg?: Record<string, unknown> } }>(
       `insert into objects (tenant_id, type_id, external_id, name, properties, last_seen)
-       values ($1, $2, $3, $4, $5, $6)
+       select $1, x.type_id, x.external_id, x.name, x.properties, x.last_seen
+         from unnest($2::uuid[], $3::text[], $4::text[], $5::jsonb[], $6::timestamptz[])
+              as x(type_id, external_id, name, properties, last_seen)
        on conflict (tenant_id, type_id, external_id) do update set
          name = coalesce(excluded.name, objects.name),
          properties = objects.properties || excluded.properties,
          last_seen = greatest(objects.last_seen, excluded.last_seen)
-       returning id, state`,
-      [source.tenant_id, o.typeId, o.externalId, o.name ?? null, o.properties, o.ts],
+       returning id, type_id, external_id, state`,
+      [source.tenant_id, entries.map(([, o]) => o.typeId), entries.map(([, o]) => o.externalId), entries.map(([, o]) => o.name ?? null),
+        entries.map(([, o]) => o.properties), entries.map(([, o]) => o.ts)],
     );
-    objectIds.set(k, rows[0].id);
-    derivedState.set(k, rows[0].state.derived ?? {});
-    pkgState.set(k, rows[0].state.pkg ?? {});
+    const typeNames = new Map(entries.map(([, o]) => [o.typeId, o.type]));
+    for (const row of rows) {
+      const k = `${typeNames.get(row.type_id)}\u0000${row.external_id}`;
+      objectIds.set(k, row.id);
+      derivedState.set(k, row.state.derived ?? {});
+      pkgState.set(k, row.state.pkg ?? {});
+    }
   }
   result.objectIds = [...objectIds.values()];
 
   // Derived metrics and the package step, in time order so they see the previous point.
   if (pkg.derived?.length || pkg.step) {
-    const ordered = [...items].sort((a, b) => (a.ts ?? now).getTime() - (b.ts ?? now).getTime());
-    for (const n of ordered) {
+    const ordered = [...items].sort((a, b) => (a.n.ts ?? now).getTime() - (b.n.ts ?? now).getTime());
+    for (const { n } of ordered) {
       const k = `${n.object.type}\u0000${n.object.externalId}`;
       n.metrics = { ...n.metrics };
       if (pkg.derived?.length) applyDerived(pkg.derived, n.metrics, n.ts ?? now, derivedState.get(k)!);
       pkg.step?.(n.metrics, n.ts ?? now, pkgState.get(k)!);
     }
+    const stateIds: string[] = [], stateValues: Record<string, unknown>[] = [];
     for (const k of objects.keys()) {
       const st = { derived: derivedState.get(k)!, pkg: pkgState.get(k)! };
-      if (Object.keys(st.derived).length || Object.keys(st.pkg).length) await db.query(
-        `update objects set state = state || $2::jsonb where id = $1 and tenant_id = $3`, [objectIds.get(k), st, source.tenant_id],
-      );
+      if (Object.keys(st.derived).length || Object.keys(st.pkg).length) {
+        stateIds.push(objectIds.get(k)!);
+        stateValues.push(st);
+      }
     }
+    if (stateIds.length) await db.query(
+      `update objects o set state = o.state || x.state
+         from unnest($2::uuid[], $3::jsonb[]) as x(id, state)
+        where o.tenant_id = $1 and o.id = x.id`,
+      [source.tenant_id, stateIds, stateValues],
+    );
   }
 
   // 3. Metrics in one statement; replays of the same (object, metric, ts) are ignored.
   const mObj: string[] = [], mKey: number[] = [], mTs: Date[] = [], mVal: number[] = [];
   const points: Point[] = [];
-  for (const n of items) {
+  for (const { n } of items) {
     const objectId = objectIds.get(`${n.object.type}\u0000${n.object.externalId}`)!;
     for (const [key, value] of Object.entries(n.metrics)) {
       if (typeof value !== "number" || !Number.isFinite(value)) continue;
@@ -195,23 +227,44 @@ export async function ingestPush(
 
   // 4. Events, linked to their object.
   const withEvents = opts.events ?? !opts.replay;
-  for (const n of withEvents ? items : []) {
-    for (const ev of n.events ?? []) {
-      const { rows } = await db.query<{ id: string }>(
-        `insert into events (tenant_id, ts, type, severity, payload, source_id, document_id) values ($1, $2, $3, $4, $5, $6, $7) returning id`,
-        [source.tenant_id, n.ts ?? now, `${pkg.id}.${ev.type}`, ev.severity, ev.payload ?? {}, source.id, opts.documentId ?? null],
+  if (withEvents) {
+    const idempotencyKeys: string[] = [], timestamps: Date[] = [], eventTypes: string[] = [];
+    const severities: string[] = [], payloads: Record<string, unknown>[] = [], eventObjectIds: string[] = [];
+    for (const { n, messageKey } of items) for (const [eventIndex, ev] of (n.events ?? []).entries()) {
+      idempotencyKeys.push(hash(`${messageKey}:${eventIndex}`));
+      timestamps.push(n.ts ?? now);
+      eventTypes.push(`${pkg.id}.${ev.type}`);
+      severities.push(ev.severity);
+      payloads.push(ev.payload ?? {});
+      eventObjectIds.push(objectIds.get(`${n.object.type}\u0000${n.object.externalId}`)!);
+    }
+    if (idempotencyKeys.length) {
+      const { rows } = await db.query<{ count: number }>(
+        `with input as (
+           select * from unnest($2::text[], $3::timestamptz[], $4::text[], $5::text[], $6::jsonb[], $7::uuid[])
+             as x(idempotency_key, ts, type, severity, payload, object_id)
+         ), inserted as (
+           insert into events (tenant_id, ts, type, severity, payload, source_id, document_id, idempotency_key)
+           select $1, x.ts, x.type, x.severity, x.payload, $8, $9, x.idempotency_key from input x
+           on conflict (tenant_id, source_id, idempotency_key) where idempotency_key is not null do nothing
+           returning id, idempotency_key
+         ), linked as (
+           insert into event_objects (tenant_id, event_id, object_id)
+           select $1, i.id, x.object_id from inserted i join input x using (idempotency_key)
+           on conflict (event_id, object_id) do nothing
+           returning event_id
+         )
+         select count(*)::int count from inserted`,
+        [source.tenant_id, idempotencyKeys, timestamps, eventTypes, severities, payloads, eventObjectIds, source.id, opts.documentId ?? null],
       );
-      await db.query(`insert into event_objects (tenant_id, event_id, object_id) values ($1, $2, $3)`, [
-        source.tenant_id, rows[0].id, objectIds.get(`${n.object.type}\u0000${n.object.externalId}`),
-      ]);
-      result.events++;
+      result.events = rows[0]?.count ?? 0;
     }
   }
 
   // 5. Rules and device configs. Replays rebuild data only: they never raise alerts.
+  let transitions: AlertTransition[] = [];
   if (!opts.replay) {
     const rules = await loadRules(forTenant(db, source.tenant_id), pkg.id);
-    let transitions: AlertTransition[] = [];
     if (rules.length) {
       transitions = await evaluateRules(db, source.tenant_id, rules, points);
       for (const t of transitions) result.alerts[t.kind]++;
@@ -221,11 +274,13 @@ export async function ingestPush(
       const cfg = deviceConfig(rules, o.type, objectIds.get(k)!);
       if (cfg && cfg.version !== o.configAck) result.configs.push({ type: o.type, externalId: o.externalId, ...cfg });
     }
-    await runAlertHooks(transitions, db);
   }
 
   if (!opts.replay) await db.query(`update sources set last_seen = $2, last_error = $3 where id = $1 and tenant_id = $4`, [
     source.id, now, result.rejected.length ? `${result.rejected.length} rejected: ${result.rejected[0].error}` : null, source.tenant_id,
   ]);
-  return result;
+  return { result, transitions };
+  });
+  if (!opts.replay) await runAlertHooks(committed.transitions, db);
+  return committed.result;
 }
