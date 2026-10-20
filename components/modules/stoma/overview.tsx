@@ -56,8 +56,10 @@ export async function StomaOverview({ orgId, slug, t, locale, cards: providedCar
   const sensorPanels: SensorMetricPanel[] = HISTORY_METRICS.map((key) => {
     const ruleMetric = key === "rh" ? "rh_ctl" : key;
     const perSensor = chartCards.map((d) => (effective.get(d.id) ?? [])
-      .filter((r) => r.metric === ruleMetric && r.severity !== "info")
-      .map((r) => ({ value: r.threshold, op: r.op, severity: r.severity, label: r.severity === "alarm" ? t.chart_alarm : t.chart_warning }))
+      .flatMap((r) => {
+        if (r.metric !== ruleMetric || r.severity === "info") return [];
+        return [{ value: r.threshold, op: r.op, severity: r.severity, label: r.severity === "alarm" ? t.chart_alarm : t.chart_warning }];
+      })
       .sort((a, b) => a.value - b.value || a.op.localeCompare(b.op)));
     const signatures = new Set(perSensor.map((items) => JSON.stringify(items.map(({ value, op, severity }) => [value, op, severity]))));
     const thresholdsDiffer = signatures.size > 1 && perSensor.some((items) => items.length > 0);
