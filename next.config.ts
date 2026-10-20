@@ -7,22 +7,6 @@ const security = [
   { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
   { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=(), payment=(), usb=()" },
   { key: "Cross-Origin-Opener-Policy", value: "same-origin" },
-  {
-    key: "Content-Security-Policy",
-    value: [
-      "default-src 'self'",
-      // Next injects inline bootstrap scripts; no third-party script origins are allowed
-      `script-src 'self' 'unsafe-inline'${process.env.NODE_ENV === "development" ? " 'unsafe-eval'" : ""}`,
-      "style-src 'self' 'unsafe-inline'",
-      "img-src 'self' data: blob:",
-      "font-src 'self'",
-      `connect-src 'self' ${process.env.NEXT_PUBLIC_SUPABASE_URL ?? ""} ${(process.env.NEXT_PUBLIC_SUPABASE_URL ?? "").replace(/^https/, "wss")}`,
-      "frame-ancestors 'none'",
-      "form-action 'self'",
-      "base-uri 'self'",
-      "object-src 'none'",
-    ].join("; "),
-  },
 ];
 
 const nextConfig: NextConfig = {

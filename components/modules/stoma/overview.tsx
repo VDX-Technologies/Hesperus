@@ -109,7 +109,8 @@ export async function StomaOverview({ orgId, slug, t, locale, cards: providedCar
             {chartCards.length < cards.length ? ` · ${cards.length - chartCards.length} ${t.chart_moreSensors}` : ""}
           </span>
         </div>
-        <SensorMetricGrid panels={sensorPanels} locale={locale} minMaxLabel={t.chart_minMax} emptyLabel={t.chart_noHistory} />
+        <SensorMetricGrid panels={sensorPanels} locale={locale} minMaxLabel={t.chart_minMax} emptyLabel={t.chart_noHistory}
+          labels={{ timeWindow: t.chart_timeWindow, showAll: t.chart_showAll, isolate: t.chart_isolate, zoom: t.chart_zoom }} />
       </div>
       {[...groups].map(([place, list]) => (
         <div key={place} className="mb-6">

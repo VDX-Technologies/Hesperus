@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { revalidatePath } from "next/cache";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { requireAdmin } from "@/lib/auth";
 import { getT, timeAgo, type Dict } from "@/lib/i18n";
 import type { Locale } from "@/lib/packages/types";
@@ -16,8 +16,17 @@ import { SettingsForm } from "@/components/settings-form";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { SectionTitle } from "@/components/ui";
 import { ConfirmButton } from "@/components/confirm-button";
+import { countryCodeForWeatherPoint, geocodeWeatherAddress, listWeatherLocations, siteMapUrl, type WeatherLocation } from "@/lib/engine/weather";
 
 const path = (id: string) => `/admin/orgs/${id}`;
+const weatherPrecisionKeys = {
+  building: "weatherPrecisionBuilding",
+  street: "weatherPrecisionStreet",
+  postcode: "weatherPrecisionPostcode",
+  locality: "weatherPrecisionLocality",
+  region: "weatherPrecisionRegion",
+  manual: "weatherPrecisionManual",
+} as const;
 
 async function toggleModule(formData: FormData) {
   "use server";
@@ -69,6 +78,89 @@ async function updatePlace(formData: FormData) {
   if (parent) await movePlace(db, id, parent);
   if (name || parent) await record(db, user, "place.update", { objectId: id, subject: name || null, data: { parent: parent || null } });
   revalidatePath(path(org));
+}
+
+async function saveSiteWeather(formData: FormData) {
+  "use server";
+  const { user } = await requireAdmin();
+  const org = String(formData.get("org") ?? "");
+  const id = String(formData.get("site") ?? "");
+  const address = String(formData.get("address") ?? "").trim();
+  let result: "saved" | "error" = "saved";
+  try {
+    const db = tenantDb(org);
+    const site = await db.query(
+      `select o.id from objects o join object_types t on t.id = o.type_id
+        where o.tenant_id = $1 and o.id = $2 and t.module = 'core' and t.key = 'site'`,
+      [org, id],
+    );
+    if (!site.rowCount || address.length < 5 || address.length > 300) throw new Error("invalid site or address");
+    const previous = await db.query<{ latitude: number; longitude: number; country_code: string }>(
+      `select latitude, longitude, country_code from weather_locations where tenant_id = $1 and site_id = $2`,
+      [org, id],
+    );
+    const geocoded = await geocodeWeatherAddress(address);
+    const latInput = String(formData.get("latitude") ?? "").trim();
+    const lonInput = String(formData.get("longitude") ?? "").trim();
+    if (!!latInput !== !!lonInput) throw new Error("both coordinates are required");
+    const latitude = latInput ? Number(latInput) : geocoded.latitude;
+    const longitude = lonInput ? Number(lonInput) : geocoded.longitude;
+    if (!Number.isFinite(latitude) || latitude < -90 || latitude > 90 || !Number.isFinite(longitude) || longitude < -180 || longitude > 180)
+      throw new Error("invalid coordinates");
+    const precision = latInput ? "manual" : geocoded.precision;
+    const countryCode = latInput ? await countryCodeForWeatherPoint(latitude, longitude) : geocoded.countryCode;
+    await db.query(
+      `insert into weather_locations (
+         tenant_id, site_id, address, normalized_address, latitude, longitude, country_code,
+         geocode_source, geocode_precision, geocoded_at, enabled, updated_at
+       ) values ($1, $2, $3, $4, $5, $6, $7, 'OpenStreetMap Nominatim', $8, now(), true, now())
+       on conflict (tenant_id, site_id) do update set address = excluded.address,
+         normalized_address = excluded.normalized_address, latitude = excluded.latitude,
+         longitude = excluded.longitude, country_code = excluded.country_code,
+         geocode_source = excluded.geocode_source, geocode_precision = excluded.geocode_precision,
+         geocoded_at = now(), enabled = true, last_error = null, updated_at = now()`,
+      [org, id, address, geocoded.normalizedAddress, latitude, longitude, countryCode, precision],
+    );
+    const priorLocation = previous.rows[0];
+    if (priorLocation && (
+      Number(priorLocation.latitude) !== latitude || Number(priorLocation.longitude) !== longitude ||
+      priorLocation.country_code !== countryCode
+    )) {
+      await db.query(
+        `update weather_alerts set status = 'resolved', resolved_at = now()
+          where tenant_id = $1 and site_id = $2 and source = 'meteogate_meteoalarm' and status <> 'resolved'`,
+        [org, id],
+      );
+    }
+    await record(db, user, "weather.location.update", {
+      objectId: id,
+      subject: geocoded.normalizedAddress,
+      data: { latitude, longitude, countryCode, precision },
+    });
+  } catch {
+    result = "error";
+  }
+  revalidatePath(path(org));
+  redirect(`${path(org)}?tab=sites&weather=${result}`);
+}
+
+async function disableSiteWeather(formData: FormData) {
+  "use server";
+  const { user } = await requireAdmin();
+  const org = String(formData.get("org") ?? "");
+  const id = String(formData.get("site") ?? "");
+  const db = tenantDb(org);
+  await db.query(
+    `update weather_locations set enabled = false, last_error = null, updated_at = now()
+      where tenant_id = $1 and site_id = $2`, [org, id],
+  );
+  await db.query(
+    `update weather_alerts set status = 'resolved', resolved_at = now()
+      where tenant_id = $1 and site_id = $2 and status <> 'resolved'`, [org, id],
+  );
+  await record(db, user, "weather.location.disable", { objectId: id });
+  revalidatePath(path(org));
+  redirect(`${path(org)}?tab=sites&weather=disabled`);
 }
 
 async function removePlace(formData: FormData) {
@@ -195,7 +287,7 @@ export default async function OrgAdmin(props: PageProps<"/admin/orgs/[id]">) {
             />
           </div>
         ))}
-      {tab === "sites" && <Sites id={id} t={t} locale={locale} />}
+      {tab === "sites" && <Sites id={id} t={t} locale={locale} weatherStatus={String(sp.weather ?? "")} />}
       {tab === "members" && <Members id={id} t={t} />}
       {tab === "activity" && <ActivityList entries={await listAudit(tenantDb(id), { limit: 200 })} t={t} locale={locale} />}
     </div>
@@ -252,7 +344,11 @@ function Overview({
 }
 
 /** One place with its areas below; areas can be renamed, moved under another place, removed. */
-function PlaceNode({ id, place, all, t }: Ctx & { place: Place; all: { place: Place; path: string[] }[] }) {
+function PlaceNode({ id, place, all, t, weatherLocations }: Ctx & {
+  place: Place;
+  all: { place: Place; path: string[] }[];
+  weatherLocations: Map<string, WeatherLocation>;
+}) {
   // a place cannot move under itself or its own areas
   const below = new Set(flattenPlaces([place]).map((p) => p.place.id));
   return (
@@ -282,9 +378,12 @@ function PlaceNode({ id, place, all, t }: Ctx & { place: Place; all: { place: Pl
           <RemoveButton t={t} />
         </form>
       </div>
+      {place.kind === "site" && (
+        <SiteWeatherForm id={id} place={place} location={weatherLocations.get(place.id) ?? null} t={t} />
+      )}
       <ul className="ml-4 border-l border-line-soft pl-3">
         {place.children.map((c) => (
-          <PlaceNode key={c.id} id={id} place={c} all={all} t={t} />
+          <PlaceNode key={c.id} id={id} place={c} all={all} t={t} weatherLocations={weatherLocations} />
         ))}
         <li className="py-1.5">
           <form action={addPlace} className="flex gap-2">
@@ -299,23 +398,76 @@ function PlaceNode({ id, place, all, t }: Ctx & { place: Place; all: { place: Pl
   );
 }
 
-async function Sites({ id, t, locale }: Ctx & { locale: Locale }) {
+function SiteWeatherForm({ id, place, location, t }: Ctx & { place: Place; location: WeatherLocation | null }) {
+  return (
+    <div className="ml-10 mt-2 border-l border-line-soft pl-3">
+      <div className="mb-2 text-[11px] font-medium uppercase tracking-[0.12em] text-dim">{t.weatherLocation}</div>
+      {location && (
+        <div className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-mist">
+          <span>{location.normalizedAddress}</span>
+          <span className="num text-dim">{location.latitude.toFixed(5)}, {location.longitude.toFixed(5)} · {location.countryCode}</span>
+          <span className="text-warn">{t.weatherPrecision}: {t[weatherPrecisionKeys[location.precision]]}</span>
+          <a href={siteMapUrl(location.latitude, location.longitude)} target="_blank" rel="noreferrer" className="text-ice hover:underline">
+            {t.weatherCheckPin} ↗
+          </a>
+          <span className={location.enabled ? "text-ok" : "text-warn"}>{location.enabled ? t.enabled : t.disabled}</span>
+        </div>
+      )}
+      <form action={saveSiteWeather} className="flex flex-wrap items-end gap-2">
+        <input type="hidden" name="org" value={id} />
+        <input type="hidden" name="site" value={place.id} />
+        <label className="grid min-w-64 flex-1 gap-1 text-xs text-dim">
+          <span>{t.address}</span>
+          <input name="address" defaultValue={location?.address ?? ""} placeholder={t.weatherAddressPlaceholder} required maxLength={300} />
+        </label>
+        <label className="grid w-32 gap-1 text-xs text-dim">
+          <span>{t.weatherLatitude}</span>
+          <input name="latitude" inputMode="decimal"
+            defaultValue={location?.precision === "manual" ? location.latitude.toFixed(5) : ""}
+            placeholder="auto" />
+        </label>
+        <label className="grid w-32 gap-1 text-xs text-dim">
+          <span>{t.weatherLongitude}</span>
+          <input name="longitude" inputMode="decimal"
+            defaultValue={location?.precision === "manual" ? location.longitude.toFixed(5) : ""}
+            placeholder="auto" />
+        </label>
+        <button className="btn text-xs">{location ? t.weatherUpdate : t.weatherFindAddress}</button>
+      </form>
+      {location?.enabled && (
+        <form action={disableSiteWeather} className="mt-2">
+          <input type="hidden" name="org" value={id} />
+          <input type="hidden" name="site" value={place.id} />
+          <button className="btn text-xs text-warn">{t.weatherDisable}</button>
+        </form>
+      )}
+      <p className="mt-1 text-xs text-dim">{t.weatherAddressHelp} {t.weatherPrecisionHelp}</p>
+    </div>
+  );
+}
+
+async function Sites({ id, t, locale, weatherStatus }: Ctx & { locale: Locale; weatherStatus?: string }) {
   const db = tenantDb(id);
-  const [tree, devices] = await Promise.all([
+  const [tree, devices, weatherList] = await Promise.all([
     placeTree(db),
     Promise.all(Object.keys(PACKAGES).map((m) => listObjects(db, m))).then((l) => l.flat()),
+    listWeatherLocations(db),
   ]);
   const all = flattenPlaces(tree);
+  const weatherLocations = new Map(weatherList.map((location) => [location.siteId, location]));
 
   return (
     <>
       <SectionTitle>{t.places}</SectionTitle>
+      {weatherStatus && (
+        <p className={`mb-3 text-sm ${weatherStatus === "error" ? "text-alarm" : "text-ok"}`}>
+          {weatherStatus === "error" ? t.weatherAddressError : weatherStatus === "disabled" ? t.weatherDisabled : t.weatherAddressSaved}
+        </p>
+      )}
       <div className="card p-5">
         {!tree.length && <p className="text-sm text-dim">{t.noSites}</p>}
         <ul className="divide-y divide-line-soft text-sm">
-          {tree.map((p) => (
-            <PlaceNode key={p.id} id={id} place={p} all={all} t={t} />
-          ))}
+          {tree.map((p) => <PlaceNode key={p.id} id={id} place={p} all={all} t={t} weatherLocations={weatherLocations} />)}
         </ul>
         <form action={addPlace} className="mt-3 flex gap-2">
           <input type="hidden" name="org" value={id} />

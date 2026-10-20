@@ -19,7 +19,6 @@ const round = (v: number | null, d: number) => (v === null ? null : Math.round(v
 const inMildRange = (t: number | null | undefined) => typeof t === "number" && t >= 10 && t <= 25;
 
 /** Counters need hours of history; these are fixed so step() does not depend on rules. */
-const WET_MARGIN = DEFAULTS.leafDewAlarm;
 const HOTSPOT_DELTA = DEFAULTS.hotspotDelta;
 
 const HELPERS = [
@@ -80,23 +79,37 @@ export const stomaPackage: ModulePackage = {
     };
   },
 
-  step(m, ts, st) {
+  step(m, ts, st, context) {
     const now = ts.getTime();
     const prevTs = num(st.ts);
     if (prevTs !== null && now <= prevTs) return; // late point: no counters, state untouched
     const rh = m.rh ?? null, t = m.temp_c ?? null, margin = m.cond_margin ?? null;
+    const cfg: StomaConfig = { ...DEFAULTS };
+    for (const key of Object.keys(DEFAULTS) as (keyof StomaConfig)[]) {
+      const value = context?.config[key];
+      if (typeof value === "number" && Number.isFinite(value)) cfg[key] = value;
+    }
+
+    const infrared = context?.properties.ir;
+    if (infrared && typeof infrared === "object" && Array.isArray((infrared as { data?: unknown }).data)) {
+      const pixels = ((infrared as { data: unknown[] }).data).filter((value): value is number => typeof value === "number" && Number.isFinite(value));
+      if (pixels.length) {
+        const canopy = median(pixels);
+        m.hot_area = round((100 * pixels.filter((value) => value - canopy >= cfg.hotspotDelta).length) / pixels.length, 1);
+      }
+    }
 
     // A sudden humidity jump is an irrigation boom: humidity and condensation rules pause.
     let until = num(st.irrigation_until) ?? 0;
     const prevRh = num(st.rh);
-    if (rh !== null && prevRh !== null && rh - prevRh >= DEFAULTS.irrigationJump) until = now + DEFAULTS.irrigationHoldS * 1000;
+    if (rh !== null && prevRh !== null && rh - prevRh >= cfg.irrigationJump) until = now + cfg.irrigationHoldS * 1000;
     const irrigating = until > now;
     m.rh_ctl = irrigating ? null : rh;
     m.cond_ctl = irrigating ? null : margin;
 
     // Hours since the previous point, capped so a data gap does not count as hours of risk.
     const dtH = prevTs !== null ? Math.min(1, (now - prevTs) / 3600000) : 0;
-    const wet = (margin !== null && margin <= WET_MARGIN) || (rh !== null && rh >= 97);
+    const wet = (margin !== null && margin <= cfg.leafDewAlarm) || (rh !== null && rh >= 97);
     const wetH = wet ? (num(st.wet_h) ?? 0) + dtH : 0;
     const humidH = rh !== null && rh >= 90 && inMildRange(t) ? (num(st.humid_h) ?? 0) + dtH : 0;
     // Powdery mildew, simplified Gubler-Thomas: a day with >= 6 h at 21-30 °C adds 20, else -10.

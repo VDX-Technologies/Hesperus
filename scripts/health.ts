@@ -3,13 +3,13 @@
  *   npx tsx scripts/health.ts
  */
 import "./env";
-import { crossTenantDb } from "../lib/engine/db";
+import { crossTenantAccess, crossTenantDb } from "../lib/engine/db";
 import { recordUsage, runHealth } from "../lib/engine/health";
 import { mailerFromEnv } from "../lib/engine/mail";
 import { MeteredStore, storeFromEnv } from "../lib/engine/store";
 
 async function main() {
-  const pool = crossTenantDb("maintenance");
+  const pool = crossTenantDb(crossTenantAccess.maintenance);
   const store = new MeteredStore(storeFromEnv());
   const mailer = mailerFromEnv();
   if (!mailer) console.warn("RESEND_API_KEY is not set: problems are recorded but not mailed");

@@ -3,7 +3,7 @@
  * Auth: "Authorization: Bearer <source token>". Body: one message or an array of messages,
  * interpreted by the source's module package.
  */
-import { crossTenantDb } from "@/lib/engine/db";
+import { crossTenantAccess, crossTenantDb } from "@/lib/engine/db";
 import { ConnectorError, pushConnector } from "@/lib/engine/connectors";
 import { ingestPush, takeIngestToken } from "@/lib/engine/ingest";
 import { ValidationError } from "@/lib/engine/package";
@@ -17,7 +17,7 @@ export async function POST(request: Request) {
   const token = auth?.startsWith("Bearer ") ? auth.slice(7) : null;
   if (!token) return Response.json({ error: "missing source token" }, { status: 401 });
 
-  const db = crossTenantDb("ingest");
+  const db = crossTenantDb(crossTenantAccess.ingest);
   const source = await sourceByToken(db, token);
   if (!source) return Response.json({ error: "invalid source token" }, { status: 401 });
   if (source.connector !== "push") return Response.json({ error: "source does not accept push" }, { status: 403 });
@@ -32,9 +32,27 @@ export async function POST(request: Request) {
   if (Number(request.headers.get("content-length") ?? 0) > MAX_BODY) return Response.json({ error: "body too large" }, { status: 413 });
   let body: unknown;
   try {
-    const text = await request.text();
-    if (text.length > MAX_BODY) return Response.json({ error: "body too large" }, { status: 413 });
-    body = JSON.parse(text);
+    const reader = request.body?.getReader();
+    if (!reader) return Response.json({ error: "invalid JSON" }, { status: 400 });
+    const chunks: Uint8Array[] = [];
+    let size = 0;
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > MAX_BODY) {
+        await reader.cancel().catch(() => undefined);
+        return Response.json({ error: "body too large" }, { status: 413 });
+      }
+      chunks.push(value);
+    }
+    const bytes = new Uint8Array(size);
+    let offset = 0;
+    for (const chunk of chunks) {
+      bytes.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    body = JSON.parse(new TextDecoder().decode(bytes));
   } catch {
     return Response.json({ error: "invalid JSON" }, { status: 400 });
   }

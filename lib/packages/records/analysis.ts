@@ -32,6 +32,8 @@ export type Signal =
   | { kind: "twice"; objectId: string; subject: string; product: string; ts: string; days: number };
 
 export interface Analysis {
+  /** True when summaries use only the most recent capped window. */
+  partial: boolean;
   totals: Totals;
   /** Monday of each week (epoch ms) with entries per top product, "other" for the rest, area worked (_area) and its running total (_cum). */
   weeks: Record<string, number>[];
@@ -60,25 +62,38 @@ const monday = (t: number) => {
 const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : 0);
 const text = (v: unknown) => (typeof v === "string" ? v.trim() : "");
 
-export function analyze(entries: RecordEntry[], now = new Date(), topProducts = 5): Analysis {
+export function analyze(entries: RecordEntry[], now = new Date(), topProducts = 5, partial = false): Analysis {
   const rows = [...entries].sort((a, b) => a.ts.localeCompare(b.ts));
-  const share = (map: Map<string, Share>, key: string, e: RecordEntry, objectId?: string) => {
-    const s = map.get(key) ?? { key, objectId, entries: 0, area: 0, quantity: 0, last: e.ts };
+  const share = (map: Map<string, Share>, key: string, e: RecordEntry, objectId?: string, identity = key) => {
+    const s = map.get(identity) ?? { key, objectId, entries: 0, area: 0, quantity: 0, last: e.ts };
     s.entries++;
     s.area += num(e.payload.area);
     s.quantity += num(e.payload.quantity);
     if (e.ts > s.last) s.last = e.ts;
-    map.set(key, s);
+    map.set(identity, s);
   };
   const subjects = new Map<string, Share>(), products = new Map<string, Share>();
+  const subjectTimes = new Map<string, number[]>();
+  const productDoses = new Map<string, RecordEntry[]>();
   const totals: Totals = { entries: rows.length, subjects: 0, products: 0, dose: 0, area: 0, quantity: 0, first: rows[0]?.ts ?? null, last: rows.at(-1)?.ts ?? null };
   for (const e of rows) {
     totals.dose += num(e.payload.dose);
     totals.area += num(e.payload.area);
     totals.quantity += num(e.payload.quantity);
-    share(subjects, e.subject, e, e.objectId);
+    const subject = text(e.subject) || e.objectId.slice(0, 8);
+    share(subjects, subject, e, e.objectId, e.objectId);
+    const times = subjectTimes.get(e.objectId) ?? [];
+    times.push(Date.parse(e.ts));
+    subjectTimes.set(e.objectId, times);
     const p = text(e.payload.product);
-    if (p) share(products, p, e);
+    if (p) {
+      share(products, p, e);
+      if (num(e.payload.dose) > 0) {
+        const doses = productDoses.get(p) ?? [];
+        doses.push(e);
+        productDoses.set(p, doses);
+      }
+    }
   }
   totals.subjects = subjects.size;
   totals.products = products.size;
@@ -107,9 +122,9 @@ export function analyze(entries: RecordEntry[], now = new Date(), topProducts = 
   }
   const weekIndex = new Map(weeks.map((w, i) => [w.t, i]));
   const matrix = bySubject.slice(0, 24).map((s) => ({ key: s.key, objectId: s.objectId!, cells: weeks.map(() => 0) }));
-  const rowOf = new Map(matrix.map((m) => [m.key, m]));
+  const rowOf = new Map(matrix.map((m) => [m.objectId, m]));
   for (const e of rows) {
-    const m = rowOf.get(e.subject);
+    const m = rowOf.get(e.objectId);
     if (m) m.cells[weekIndex.get(monday(Date.parse(e.ts)))!]++;
   }
 
@@ -117,7 +132,7 @@ export function analyze(entries: RecordEntry[], now = new Date(), topProducts = 
   const doses: Analysis["doses"] = [];
   // a subject idle for more than twice its usual gap between entries (at least 3 entries to know it)
   for (const s of bySubject) {
-    const ts = rows.filter((e) => e.subject === s.key).map((e) => Date.parse(e.ts));
+    const ts = subjectTimes.get(s.objectId!) ?? [];
     if (ts.length < 3) continue;
     const usual = median(ts.slice(1).map((t, i) => (t - ts[i]) / DAY));
     const days = (now.getTime() - ts.at(-1)!) / DAY;
@@ -125,7 +140,7 @@ export function analyze(entries: RecordEntry[], now = new Date(), topProducts = 
   }
   // a dose far from the same product's median: beyond 3 MADs and at least half again or half less
   for (const p of byProduct) {
-    const withDose = rows.filter((e) => text(e.payload.product) === p.key && num(e.payload.dose) > 0);
+    const withDose = productDoses.get(p.key) ?? [];
     if (withDose.length < 3) continue;
     const values = withDose.map((e) => num(e.payload.dose));
     const m = median(values);
@@ -155,5 +170,5 @@ export function analyze(entries: RecordEntry[], now = new Date(), topProducts = 
   const rank = { dose: 0, twice: 1, idle: 2 };
   signals.sort((a, b) => rank[a.kind] - rank[b.kind] || (a.kind === "idle" && b.kind === "idle" ? b.days - a.days : 0));
 
-  return { totals, weeks, products: [...top, ...(weeks.some((w) => w.other) ? ["other"] : [])], bySubject, byProduct, signals, matrix, doses };
+  return { partial, totals, weeks, products: [...top, ...(weeks.some((w) => w.other) ? ["other"] : [])], bySubject, byProduct, signals, matrix, doses };
 }

@@ -65,6 +65,13 @@ export interface DerivedDef extends MetricDef {
   inputs: string[];
 }
 
+export interface PackageStepContext {
+  /** Effective organization and object settings for this object. */
+  config: Record<string, unknown>;
+  /** Properties emitted by the current normalized message. */
+  properties: Record<string, unknown>;
+}
+
 export class ValidationError extends Error {}
 
 export interface ModulePackage {
@@ -81,5 +88,5 @@ export interface ModulePackage {
    * metrics that need history (counters, accumulated hours, ...). `state` is the package's own
    * state for the object (objects.state.pkg), updated in place.
    */
-  step?(metrics: Record<string, number | null | undefined>, ts: Date, state: Record<string, unknown>): void;
+  step?(metrics: Record<string, number | null | undefined>, ts: Date, state: Record<string, unknown>, context?: PackageStepContext): void;
 }

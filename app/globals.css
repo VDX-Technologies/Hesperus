@@ -7,14 +7,14 @@
 
 /* VDX brand palette (same as vdxtechnologies.com): Black · Steel · Frost · Ice */
 @theme {
-  --color-ink-950: #050608;
-  --color-ink-900: #07080a;
-  --color-ink-800: #111317;
-  --color-steel: #1c1f24;
-  --color-line: #23282f;
-  --color-line-soft: #16191d;
+  --color-ink-950: #07090d;
+  --color-ink-900: #0b0e12;
+  --color-ink-800: #12171d;
+  --color-steel: #1b232c;
+  --color-line: #29323c;
+  --color-line-soft: #1d252e;
   --color-mist: #a3a9b2;
-  --color-dim: #6b7079;
+  --color-dim: #89919b;
   --color-frost: #e9ebee;
   --color-ice: #9fd8ff;
   --color-ok: #3ddc84;
@@ -30,6 +30,7 @@
   html,
   body {
     background: var(--color-ink-900);
+    background-image: radial-gradient(ellipse at 52% -18%, rgb(64 117 155 / 0.1), transparent 58%);
     color: var(--color-frost);
     font-family: var(--font-sans);
     -webkit-font-smoothing: antialiased;

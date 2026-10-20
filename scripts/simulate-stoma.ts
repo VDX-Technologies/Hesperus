@@ -4,7 +4,7 @@
  *   npx tsx scripts/simulate-stoma.ts <org-slug> [--nodes 3] [--hours 48] [--live]
  */
 import "./env";
-import { crossTenantDb } from "../lib/engine/db";
+import { crossTenantAccess, crossTenantDb } from "../lib/engine/db";
 import { ingestPush } from "../lib/engine/ingest";
 import { createSource, type Source } from "../lib/engine/sources";
 import { getPackage } from "../lib/packages";
@@ -52,7 +52,7 @@ function reading(n: number, ts: Date) {
 }
 
 async function main() {
-  const pool = crossTenantDb("maintenance");
+  const pool = crossTenantDb(crossTenantAccess.maintenance);
   const pkg = getPackage("stoma");
   if (!pkg) throw new Error(`module "stoma" is not installed`);
   const { rows: orgs } = await pool.query<{ id: string }>(`select id from organizations where slug = $1`, [slug]);

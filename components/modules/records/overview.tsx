@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { tenantDb } from "@/lib/engine/db";
-import { loadEntries } from "@/lib/packages/records/console";
+import { ANALYSIS_ENTRY_LIMIT, loadEntries } from "@/lib/packages/records/console";
 import { analyze } from "@/lib/packages/records/analysis";
 import { records } from "@/lib/packages/records/model";
 import type { Locale } from "@/lib/packages/types";
@@ -14,7 +14,8 @@ export async function RecordsOverview({ orgId, slug, t, locale }: { orgId: strin
   const entries = await loadEntries(tenantDb(orgId));
   // files about agronomy work go to their own registers: nothing left here, nothing to show
   if (!entries.length) return null;
-  const a = analyze(entries);
+  const partial = entries.length > ANALYSIS_ENTRY_LIMIT;
+  const a = analyze(partial ? entries.slice(0, ANALYSIS_ENTRY_LIMIT) : entries, new Date(), 5, partial);
   return (
     <section className="space-y-4">
       <SectionTitle right={<Link href={`/o/${slug}/upload`} className="text-xs text-mist hover:text-frost">{t.upload} →</Link>}>
@@ -22,6 +23,7 @@ export async function RecordsOverview({ orgId, slug, t, locale }: { orgId: strin
       </SectionTitle>
       {entries.length > 0 && (
         <>
+          {a.partial && <p role="note" className="rounded-lg border border-warn/30 bg-warn/5 px-3 py-2 text-xs text-warn">{t.an_partial}</p>}
           <Kpis a={a} t={t} locale={locale} />
           <div className="grid gap-4 lg:grid-cols-3">
             <div className="lg:col-span-2">

@@ -114,6 +114,16 @@ const SETTINGS: SettingDef[] = [
     max: 120,
   },
   {
+    key: "irrigationJump",
+    group: OTHER,
+    label: { en: "Irrigation humidity rise", it: "Aumento umidità da irrigazione" },
+    help: { en: "Humidity rise that starts the alarm pause", it: "Aumento di umidità che avvia la pausa degli allarmi" },
+    unit: "% RH",
+    step: 1,
+    min: 1,
+    max: 50,
+  },
+  {
     key: "botrytisHours",
     group: DISEASE,
     label: { en: "Botrytis after", it: "Botrite dopo" },

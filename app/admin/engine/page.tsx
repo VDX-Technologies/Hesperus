@@ -3,7 +3,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requireAdmin } from "@/lib/auth";
 import { getT, timeAgo } from "@/lib/i18n";
-import { crossTenantDb } from "@/lib/engine/db";
+import { crossTenantAccess, crossTenantDb } from "@/lib/engine/db";
 import { dbBytes, monthUsage, type HealthReport } from "@/lib/engine/health";
 import { getSettings, num } from "@/lib/engine/settings";
 import { createSource, rotateToken } from "@/lib/engine/sources";
@@ -23,7 +23,7 @@ async function addSource(formData: FormData) {
   await requireAdmin();
   const upload = formData.get("connector") === "upload";
   const kind = String(formData.get("kind") ?? "").trim();
-  const { token } = await createSource(crossTenantDb("admin"), {
+  const { token } = await createSource(crossTenantDb(crossTenantAccess.admin), {
     tenantId: String(formData.get("org")),
     module: String(formData.get("module")),
     name: String(formData.get("name")).trim(),
@@ -38,14 +38,14 @@ async function addSource(formData: FormData) {
 async function newToken(formData: FormData) {
   "use server";
   await requireAdmin();
-  await showToken(await rotateToken(crossTenantDb("admin"), String(formData.get("id"))));
+  await showToken(await rotateToken(crossTenantDb(crossTenantAccess.admin), String(formData.get("id"))));
 }
 
 async function setStatus(formData: FormData) {
   "use server";
   await requireAdmin();
   const status = formData.get("status") === "paused" ? "paused" : "active";
-  await crossTenantDb("admin").query(`update sources set status = $2 where id = $1`, [String(formData.get("id")), status]);
+  await crossTenantDb(crossTenantAccess.admin).query(`update sources set status = $2 where id = $1`, [String(formData.get("id")), status]);
   revalidatePath(PATH);
 }
 
@@ -79,7 +79,7 @@ function QuotaBar({ label, used, limit, ratio, bytes }: { label: string; used: n
 export default async function EnginePage() {
   await requireAdmin();
   const { t, locale } = await getT();
-  const db = crossTenantDb("admin");
+  const db = crossTenantDb(crossTenantAccess.admin);
   const s = await getSettings(db);
   const [usage, dbSize, sources, jobs, notices, orgs] = await Promise.all([
     monthUsage(db),

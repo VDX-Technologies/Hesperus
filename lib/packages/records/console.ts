@@ -24,4 +24,8 @@ export async function listEntries(db: TenantDb, opts: { objectId?: string; limit
 }
 
 /** Entries for the analysis: the most recent ones up to a high cap, in any order. */
-export const loadEntries = (db: TenantDb, opts: { objectId?: string } = {}) => listEntries(db, { ...opts, limit: 20000 });
+export const ANALYSIS_ENTRY_LIMIT = 20_000;
+
+// Fetch one extra row so analysis screens can disclose that their summary is sampled.
+export const loadEntries = (db: TenantDb, opts: { objectId?: string } = {}) =>
+  listEntries(db, { ...opts, limit: ANALYSIS_ENTRY_LIMIT + 1 });

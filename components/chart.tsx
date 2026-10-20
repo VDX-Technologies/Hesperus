@@ -1,5 +1,6 @@
 "use client";
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   Area, AreaChart, Bar, Brush, CartesianGrid, ComposedChart, Legend, Line, LineChart, ReferenceArea, ReferenceLine, ResponsiveContainer, Scatter, ScatterChart, Tooltip, XAxis, YAxis, ZAxis,
 } from "recharts";
@@ -267,7 +268,7 @@ export function OpsChart({
   );
 }
 
-export interface StackSeries { key: string; label: string; color: string }
+export interface StackSeries { key: string; label: string; color: string; href?: string }
 
 /**
  * Every register on one timeline: a bar per day stacked by register, the weekly trend of all of
@@ -275,7 +276,8 @@ export interface StackSeries { key: string; label: string; color: string }
  */
 export function StackChart({
   points, series, labels, locale, height = 320,
-}: { points: Record<string, number>[]; series: StackSeries[]; labels: { total: string; timeline: string; volume: string; trend: string; mean: string }; locale: string; height?: number }) {
+}: { points: Record<string, number>[]; series: StackSeries[]; labels: { total: string; timeline: string; volume: string; trend: string; mean: string; showAll: string; drillDown: string }; locale: string; height?: number }) {
+  const router = useRouter();
   const [off, setOff] = useState<Set<string>>(new Set());
   const shown = series.filter((s) => !off.has(s.key));
   const long = points.length > 120;
@@ -296,7 +298,7 @@ export function StackChart({
   return (
     <div>
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line-soft px-4 py-2.5">
-        <div className="flex min-w-0 flex-wrap gap-1.5">
+        <div className="flex min-w-0 flex-wrap items-center gap-1.5">
           {series.map((s) => (
             <button key={s.key} onClick={() => toggle(s.key)} aria-pressed={!off.has(s.key)}
               className={`flex items-center gap-1.5 rounded border px-2 py-0.5 text-[11px] transition-opacity ${off.has(s.key) ? "border-line-soft text-dim opacity-50" : "border-line text-mist"}`}>
@@ -304,8 +306,10 @@ export function StackChart({
               {s.label} <span className="num text-frost">{totals[s.key]}</span>
             </button>
           ))}
+          {off.size > 0 && <button onClick={() => setOff(new Set())} className="rounded px-2 py-1 text-[10px] text-ice hover:bg-ink-800">{labels.showAll}</button>}
         </div>
         <div className="flex shrink-0 items-center gap-2">
+          <span className="hidden text-[10px] text-dim 2xl:inline">{labels.drillDown}</span>
           <div className="flex gap-1 rounded-md border border-line-soft bg-ink-900 p-0.5">
             {(["timeline", "volume"] as const).map((mode) => (
               <button key={mode} aria-pressed={view === mode} onClick={() => setViewChoice(mode)}
@@ -383,7 +387,13 @@ export function StackChart({
               {mean > 0 && <ReferenceLine y={mean} stroke="#6b7079" strokeDasharray="3 4" label={{ value: labels.mean, position: "insideTopRight", fill: "#6b7079", fontSize: 10 }} />}
               {shown.map((s, i) => (
                 <Bar key={s.key} dataKey={s.key} stackId="r" fill={s.color} fillOpacity={0.85} isAnimationActive={false}
-                  radius={i === shown.length - 1 ? [2, 2, 0, 0] : undefined} />
+                  radius={i === shown.length - 1 ? [2, 2, 0, 0] : undefined} cursor="pointer"
+                  onClick={(bar) => {
+                    const point = bar.payload as Record<string, number> | undefined;
+                    if (!s.href || typeof point?.t !== "number") return;
+                    const date = new Date(point.t).toISOString().slice(0, 10);
+                    router.push(`${s.href}?from=${date}&to=${date}`);
+                  }} />
               ))}
               {showTrend && <Line dataKey="avg" name={labels.trend} stroke="#f2b84b" strokeWidth={1.6} strokeDasharray="5 3" dot={false} type="linear" isAnimationActive={false} />}
               {points.length > 14 && (
@@ -412,9 +422,9 @@ export interface SensorMetricPanel {
   note?: string;
 }
 
-function SensorMetricChart({ panel, locale, minMaxLabel, emptyLabel }: { panel: SensorMetricPanel; locale: string; minMaxLabel: string; emptyLabel: string }) {
-  const [off, setOff] = useState<Set<string>>(new Set());
-  const shown = panel.series.filter((s) => !off.has(s.key));
+function SensorMetricChart({ panel, locale, minMaxLabel, emptyLabel, shown, showBrush, brushLabel }: {
+  panel: SensorMetricPanel; locale: string; minMaxLabel: string; emptyLabel: string; shown: StackSeries[]; showBrush: boolean; brushLabel: string;
+}) {
   const values = panel.rows.flatMap((row) => shown.map((s) => row[s.key]).filter((v): v is number => typeof v === "number" && Number.isFinite(v)));
   const low = values.length ? Math.min(...values) : 0;
   const high = values.length ? Math.max(...values) : 1;
@@ -440,10 +450,10 @@ function SensorMetricChart({ panel, locale, minMaxLabel, emptyLabel }: { panel: 
           {panel.thresholdNote && <span>{panel.thresholdNote}</span>}
         </div>
       </header>
-      <div className="h-[190px] px-2 pt-2">
+      <div className="h-[236px] px-2 pt-2">
         {values.length ? (
           <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={panel.rows} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
+            <LineChart data={panel.rows} syncId="sensor-history" syncMethod="value" margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
               <CartesianGrid stroke="#16191d" vertical={false} />
               {panel.thresholds.map((threshold, i) => {
                 const below = threshold.op.startsWith("<");
@@ -479,26 +489,67 @@ function SensorMetricChart({ panel, locale, minMaxLabel, emptyLabel }: { panel: 
                 : null)}
               {shown.map((s) => <Line key={s.key} type="linear" dataKey={s.key} name={s.label} stroke={s.color}
                 strokeWidth={1.6} dot={false} activeDot={{ r: 3 }} connectNulls={false} isAnimationActive={false} />)}
+              {showBrush && <Brush dataKey="t" height={22} travellerWidth={7} gap={3} stroke="#29323c" fill="#0b0e12" tickFormatter={time} ariaLabel={brushLabel} />}
             </LineChart>
           </ResponsiveContainer>
         ) : <div className="flex h-full items-center justify-center text-xs text-dim">{emptyLabel}</div>}
-      </div>
-      <div className="flex max-h-16 flex-wrap gap-1.5 overflow-y-auto border-t border-line-soft px-3 py-2">
-        {panel.series.map((s) => (
-          <button key={s.key} onClick={() => setOff((old) => { const next = new Set(old); if (next.has(s.key)) next.delete(s.key); else next.add(s.key); return next; })}
-            aria-pressed={!off.has(s.key)} className={`inline-flex items-center gap-1.5 rounded px-1.5 py-0.5 text-[10px] ${off.has(s.key) ? "text-dim opacity-50" : "text-mist"}`}>
-            <span className="h-1.5 w-3 rounded-full" style={{ background: s.color }} />{s.label}
-          </button>
-        ))}
       </div>
     </section>
   );
 }
 
 /** Comparative, five-minute sensor history with visible gaps and configured threshold bands. */
-export function SensorMetricGrid({ panels, locale, minMaxLabel, emptyLabel }: { panels: SensorMetricPanel[]; locale: string; minMaxLabel: string; emptyLabel: string }) {
+export function SensorMetricGrid({ panels, locale, minMaxLabel, emptyLabel, labels }: {
+  panels: SensorMetricPanel[]; locale: string; minMaxLabel: string; emptyLabel: string;
+  labels: { timeWindow: string; showAll: string; isolate: string; zoom: string };
+}) {
+  const [off, setOff] = useState<Set<string>>(new Set());
+  const [hours, setHours] = useState<1 | 6 | 24>(24);
   if (!panels.length) return null;
-  return <div className="grid gap-4 xl:grid-cols-2">
-    {panels.map((panel) => <SensorMetricChart key={panel.key} panel={panel} locale={locale} minMaxLabel={minMaxLabel} emptyLabel={emptyLabel} />)}
-  </div>;
+  const series = panels[0].series;
+  const shown = series.filter((s) => !off.has(s.key));
+  const allRows = panels[0].rows;
+  const lastRow = allRows[allRows.length - 1];
+  const end = typeof lastRow?.t === "number" ? lastRow.t : Date.now();
+  const from = end - hours * 60 * 60_000;
+  const visiblePanels = panels.map((panel) => ({
+    ...panel,
+    rows: panel.rows.filter((row) => typeof row.t === "number" && row.t >= from && row.t <= end),
+  }));
+  const toggle = (key: string) => setOff((old) => { const next = new Set(old); if (next.has(key)) next.delete(key); else next.add(key); return next; });
+  const isolate = (key: string) => setOff(new Set(series.filter((s) => s.key !== key).map((s) => s.key)));
+  return (
+    <div className="space-y-3">
+      <div className="card flex flex-wrap items-center justify-between gap-3 px-3 py-2.5">
+        <div className="flex min-w-0 flex-wrap items-center gap-1.5" role="group" aria-label={labels.timeWindow}>
+          {series.map((s) => (
+            <div key={s.key} className={`flex items-center rounded-md border ${off.has(s.key) ? "border-line-soft opacity-50" : "border-line"}`}>
+              <button onClick={() => toggle(s.key)} aria-pressed={!off.has(s.key)}
+                className="inline-flex items-center gap-1.5 px-2 py-1 text-[11px] text-mist hover:text-frost">
+                <span className="h-2 w-2 rounded-full" style={{ background: s.color }} />{s.label}
+              </button>
+              <button onClick={() => isolate(s.key)} aria-label={`${labels.isolate}: ${s.label}`} title={`${labels.isolate}: ${s.label}`}
+                className="border-l border-line-soft px-1.5 py-1 text-xs text-dim hover:text-ice">◎</button>
+            </div>
+          ))}
+          {off.size > 0 && <button onClick={() => setOff(new Set())} className="px-2 py-1 text-[11px] text-ice hover:text-frost">{labels.showAll}</button>}
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          <span className="hidden text-[10px] uppercase tracking-wider text-dim sm:inline">{labels.timeWindow}</span>
+          <div className="flex rounded-md border border-line-soft bg-ink-900 p-0.5">
+            {([1, 6, 24] as const).map((value) => (
+              <button key={value} onClick={() => setHours(value)} aria-pressed={hours === value}
+                className={`num rounded px-2 py-1 text-[11px] ${hours === value ? "bg-steel text-frost" : "text-dim hover:text-mist"}`}>{value}h</button>
+            ))}
+          </div>
+        </div>
+      </div>
+      <div className="grid gap-4 xl:grid-cols-2">
+        {visiblePanels.map((panel, i) => (
+          <SensorMetricChart key={`${hours}-${panel.key}`} panel={panel} locale={locale} minMaxLabel={minMaxLabel} emptyLabel={emptyLabel}
+            shown={shown} showBrush={i === 0} brushLabel={labels.zoom} />
+        ))}
+      </div>
+    </div>
+  );
 }

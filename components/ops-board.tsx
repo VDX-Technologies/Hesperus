@@ -102,16 +102,46 @@ export async function OpsBoard({
   const used = o.registers.filter((r) => r.n.value || r.n.prev || r.last !== null);
   const harvest = f.yieldKg.value >= 10_000 ? `${fmt(f.yieldKg.value / 1000)} t` : `${fmt(f.yieldKg.value, 0)} kg`;
 
-  const kpis: { k: string; v: string; f?: Figure; sub?: string; href?: string; tone?: string }[] = [
-    { k: t.ops_entries, v: fmt(f.entries.value, 0), f: f.entries },
-    { k: t.ops_area, v: `${fmt(f.area.value)} ha`, f: f.area, sub: f.hectares ? `${t.ops_areaHelp} ${fmt(f.hectares)} ha` : undefined },
-    { k: t.ops_objects, v: fmt(f.objects.value, 0), f: f.objects },
-    { k: t.ops_yield, v: harvest, f: f.yieldKg },
-    { k: t.ops_inputs, v: `${fmt(f.liters.value)} L`, sub: `${fmt(f.kilos.value)} kg`, f: f.liters },
-    { k: t.db_due, v: String(f.due), sub: t.db_dueHelp, tone: f.due ? "text-warn" : "text-ok", href: "#cycle" },
-    { k: t.ops_alerts, v: String(alertCount), sub: alarms ? `${alarms} ${t.ops_alarm}` : undefined, tone: alarms ? "text-alarm" : alertCount ? "text-warn" : "text-ok", href: `/o/${slug}/alerts` },
-    { k: t.ops_files, v: String(uploadSummary.files), sub: `${rejected} ${t.ops_rejected}`, tone: rejected ? "text-warn" : undefined, href: `/o/${slug}/upload` },
+  const kpis: { k: string; v: string; f?: Figure; sub?: string; href?: string; tone?: string; primary: boolean }[] = [
+    { k: t.ops_entries, v: fmt(f.entries.value, 0), f: f.entries, primary: true },
+    { k: t.ops_area, v: `${fmt(f.area.value)} ha`, f: f.area, sub: f.hectares ? `${t.ops_areaHelp} ${fmt(f.hectares)} ha` : undefined, primary: true },
+    { k: t.ops_objects, v: fmt(f.objects.value, 0), f: f.objects, primary: false },
+    { k: t.ops_yield, v: harvest, f: f.yieldKg, primary: true },
+    { k: t.ops_inputs, v: `${fmt(f.liters.value)} L`, sub: `${fmt(f.kilos.value)} kg`, f: f.liters, primary: false },
+    { k: t.db_due, v: String(f.due), sub: t.db_dueHelp, tone: f.due ? "text-warn" : "text-ok", href: "#cycle", primary: true },
+    { k: t.ops_alerts, v: String(alertCount), sub: alarms ? `${alarms} ${t.ops_alarm}` : undefined, tone: alarms ? "text-alarm" : alertCount ? "text-warn" : "text-ok", href: `/o/${slug}/alerts`, primary: true },
+    { k: t.ops_files, v: String(uploadSummary.files), sub: `${rejected} ${t.ops_rejected}`, tone: rejected ? "text-warn" : undefined, href: `/o/${slug}/upload`, primary: false },
   ];
+  const renderKpi = (x: typeof kpis[number], compact = false) => {
+    const content = compact ? (
+      <div className="flex min-w-0 items-center justify-between gap-3">
+        <div className="min-w-0">
+          <div className="truncate text-xs text-dim">{x.k}</div>
+          {x.sub && <div className="mt-0.5 truncate text-[10px] text-dim">{x.sub}</div>}
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          <span className={`num text-sm font-medium ${x.tone ?? "text-frost"}`}>{x.v}</span>
+          {x.f && <Delta f={x.f} />}
+        </div>
+      </div>
+    ) : (
+      <>
+        <div className="text-xs font-medium text-dim">{x.k}</div>
+        <div className={`num mt-2 text-2xl font-semibold tracking-tight ${x.tone ?? "text-frost"}`}>{x.v}</div>
+        <div className="mt-1 flex min-h-4 items-center gap-2">
+          {x.f && <Delta f={x.f} />}
+          {x.sub && <span className="truncate text-[11px] text-dim">{x.sub}</span>}
+          {x.f && x.f.prev !== null && !x.sub && <span className="text-[11px] text-dim">{t.db_vsPrev}</span>}
+        </div>
+      </>
+    );
+    const className = compact
+      ? "card min-w-0 px-3 py-2.5 transition-colors hover:border-line"
+      : "card min-w-0 px-4 py-4 transition-colors hover:border-line";
+    return x.href
+      ? <Link key={x.k} href={x.href} className={className}>{content}</Link>
+      : <div key={x.k} className={className}>{content}</div>;
+  };
 
   // registrations, files and alerts as one stream, newest first
   type Item = { ts: number; tone: string; title: string; text: string; href: string };
@@ -173,26 +203,8 @@ export async function OpsBoard({
 
   return (
     <section className="space-y-4">
-      <div className="grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-line bg-line sm:grid-cols-4 xl:grid-cols-8">
-        {kpis.map((x) => {
-          const body = (
-            <>
-              <div className={label}>{x.k}</div>
-              <div className={`num mt-1.5 text-2xl font-semibold ${x.tone ?? "text-frost"}`}>{x.v}</div>
-              <div className="mt-1 flex items-center gap-2">
-                {x.f && <Delta f={x.f} />}
-                {x.sub && <span className="truncate text-[11px] text-dim">{x.sub}</span>}
-                {x.f && x.f.prev !== null && !x.sub && <span className="text-[11px] text-dim">{t.db_vsPrev}</span>}
-              </div>
-            </>
-          );
-          return x.href ? (
-            <Link key={x.k} href={x.href} className="bg-ink-900 px-4 py-3 hover:bg-ink-800">{body}</Link>
-          ) : (
-            <div key={x.k} className="bg-ink-900 px-4 py-3">{body}</div>
-          );
-        })}
-      </div>
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-5">{kpis.filter((x) => x.primary).map((x) => renderKpi(x))}</div>
+      <div className="grid gap-2 sm:grid-cols-3">{kpis.filter((x) => !x.primary).map((x) => renderKpi(x, true))}</div>
 
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
         <div className={panel}>
@@ -202,8 +214,8 @@ export async function OpsBoard({
           </div>
           <StackChart
             points={o.days}
-            series={used.map((r) => ({ key: r.type, label: typeName(r.type), color: color.get(r.type)! }))}
-            labels={{ total: t.ops_total, timeline: t.ops_viewTimeline, volume: t.ops_viewVolume, trend: t.ops_trend7d, mean: t.db_mean }}
+            series={used.map((r) => ({ key: r.type, label: typeName(r.type), color: color.get(r.type)!, href: reg(r.type) }))}
+            labels={{ total: t.ops_total, timeline: t.ops_viewTimeline, volume: t.ops_viewVolume, trend: t.ops_trend7d, mean: t.db_mean, showAll: t.chart_showAll, drillDown: t.chart_drillDown }}
             locale={locale}
           />
         </div>

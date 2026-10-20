@@ -14,7 +14,7 @@ export const metadata: Metadata = {
   appleWebApp: { capable: true, title: "VDX Core", statusBarStyle: "black-translucent" },
 };
 
-export const viewport: Viewport = { themeColor: "#050608", viewportFit: "cover" };
+export const viewport: Viewport = { themeColor: "#0b0e12", viewportFit: "cover" };
 
 export default async function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (

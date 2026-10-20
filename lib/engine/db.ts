@@ -3,7 +3,9 @@
 // The pool bypasses RLS, so application scoping is defense in depth, not a database boundary.
 // It is only handed out two ways:
 //   tenantDb(id)          every query must name tenant_id and bind that tenant as $1
-//   crossTenantDb(reason) a named, deliberate query across tenants (admin, jobs, auth by token)
+//   crossTenantDb(capability) an explicit capability for a reviewed cross-tenant call site
+// The tenant SQL guard is a heuristic; this privileged pool bypasses RLS and neither helper is
+// a database security boundary. Keep crossTenantAccess use audited and validate authorization first.
 import { Pool, type PoolClient } from "pg";
 
 export type Db = { query: Pool["query"] };
@@ -56,15 +58,34 @@ function getPool(): Pool {
 
 export const tenantDb = (tenantId: string): TenantDb => forTenant(getPool(), tenantId);
 
-/** Why a query may span tenants. Keep the list short: each reason is a reviewed exception. */
-export type CrossTenantReason =
-  | "admin"        // platform staff pages, behind requireAdmin
-  | "ingest"       // source lookup by token, then writes for that source's tenant
-  | "maintenance"  // archive, rollups, health, scripts
-  | "settings";    // engine_settings
+/** Explicit capabilities for the small set of reviewed cross-tenant call sites. */
+const adminCapability = Symbol("cross-tenant:admin");
+const ingestCapability = Symbol("cross-tenant:ingest");
+const maintenanceCapability = Symbol("cross-tenant:maintenance");
+const settingsCapability = Symbol("cross-tenant:settings");
 
-export const crossTenantDb = (reason: CrossTenantReason): Pool => {
-  void reason;
+export const crossTenantAccess = Object.freeze({
+  admin: adminCapability,
+  ingest: ingestCapability,
+  maintenance: maintenanceCapability,
+  settings: settingsCapability,
+});
+
+type CrossTenantCapability =
+  | typeof adminCapability
+  | typeof ingestCapability
+  | typeof maintenanceCapability
+  | typeof settingsCapability;
+
+const crossTenantReasons = new Map<CrossTenantCapability, string>([
+  [adminCapability, "admin"],
+  [ingestCapability, "ingest"],
+  [maintenanceCapability, "maintenance"],
+  [settingsCapability, "settings"],
+]);
+
+export const crossTenantDb = (capability: CrossTenantCapability): Pool => {
+  if (!crossTenantReasons.has(capability)) throw new Error("invalid cross-tenant database capability");
   return getPool();
 };
 

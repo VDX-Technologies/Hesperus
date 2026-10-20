@@ -2,7 +2,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requireOrg } from "@/lib/auth";
-import { crossTenantDb, tenantDb } from "@/lib/engine/db";
+import { crossTenantAccess, crossTenantDb, tenantDb } from "@/lib/engine/db";
 import { ConnectorError } from "@/lib/engine/connectors";
 import { extract, ExtractLimitError, type FileFormat } from "@/lib/engine/extract";
 import { getSettings, num } from "@/lib/engine/settings";
@@ -25,7 +25,7 @@ export async function uploadFile(_prev: UploadState, formData: FormData): Promis
   if (!source || !pkg) return { error: "uploadErr_403" };
   const file = formData.get("file");
   if (!(file instanceof File) || !file.size) return { error: "uploadErr_400" };
-  const settings = await getSettings(crossTenantDb("settings"));
+  const settings = await getSettings(crossTenantDb(crossTenantAccess.settings));
   const maxBytes = num(settings, "upload.max_bytes", 5 * 1024 ** 2);
   if (file.size > maxBytes) return { error: "uploadErr_413" };
 
@@ -34,7 +34,7 @@ export async function uploadFile(_prev: UploadState, formData: FormData): Promis
   try {
     await saveUploadConfig(tdb, source.id, { mapping }, user);
     const r = await ingestUpload(
-      crossTenantDb("ingest"),
+      crossTenantDb(crossTenantAccess.ingest),
       storeFromEnv(),
       { ...source, config: { ...source.config, mapping } },
       { name: file.name, type: file.type, bytes: new Uint8Array(await file.arrayBuffer()) },
@@ -64,7 +64,7 @@ export async function previewFile(formData: FormData): Promise<Preview> {
   const file = formData.get("file");
   if (!(file instanceof File) || !file.size) return { error: "uploadErr_400" };
   const tdb = tenantDb(org.id);
-  const settings = await getSettings(crossTenantDb("settings"));
+  const settings = await getSettings(crossTenantDb(crossTenantAccess.settings));
   const maxBytes = num(settings, "upload.max_bytes", 5 * 1024 ** 2);
   const maxRows = num(settings, "upload.max_rows", 5000);
   if (file.size > maxBytes) return { error: "uploadErr_413" };
@@ -106,7 +106,7 @@ export async function reprocessDocument(formData: FormData) {
   const { user, org, slug, back } = await owner(formData);
   let to: string;
   try {
-    const r = await reprocessUpload(crossTenantDb("ingest"), storeFromEnv(), org.id, String(formData.get("id")), getPackage, user);
+    const r = await reprocessUpload(crossTenantDb(crossTenantAccess.ingest), storeFromEnv(), org.id, String(formData.get("id")), getPackage, user);
     to = `${back}?done=reprocessed&n=${r.events}`;
   } catch (e) {
     if (!(e instanceof ConnectorError)) console.error("reprocess failed", e);
@@ -118,7 +118,7 @@ export async function reprocessDocument(formData: FormData) {
 
 export async function moveLegacy(formData: FormData) {
   const { user, org, slug, back } = await owner(formData);
-  const r = await moveLegacyEntries(crossTenantDb("ingest"), org.id, user);
+  const r = await moveLegacyEntries(crossTenantDb(crossTenantAccess.ingest), org.id, user);
   revalidatePath(`/o/${slug}`, "layout");
   redirect(`${back}?done=moved&n=${r.moved}`);
 }

@@ -2,7 +2,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { requireAdmin } from "@/lib/auth";
 import { getT } from "@/lib/i18n";
-import { crossTenantDb } from "@/lib/engine/db";
+import { crossTenantAccess, crossTenantDb } from "@/lib/engine/db";
 import { recordPlatform } from "@/lib/engine/audit";
 import { alertRecipients } from "@/lib/engine/health";
 import { mailerFromEnv } from "@/lib/engine/mail";
@@ -18,7 +18,7 @@ async function flash(msg: string) {
 }
 
 const put = (key: string, value: unknown) =>
-  crossTenantDb("settings").query(`update engine_settings set value = $2 where key = $1`, [key, JSON.stringify(value)]);
+  crossTenantDb(crossTenantAccess.settings).query(`update engine_settings set value = $2 where key = $1`, [key, JSON.stringify(value)]);
 
 async function saveAlerts(formData: FormData) {
   "use server";
@@ -28,7 +28,7 @@ async function saveAlerts(formData: FormData) {
   await put("alerts.email_from", String(formData.get("from")).trim());
   const h = Number(formData.get("repeat"));
   if (h > 0) await put("alerts.repeat_h", h);
-  await recordPlatform(crossTenantDb("settings"), user, "settings.update", { "alerts.email_to": to });
+  await recordPlatform(crossTenantDb(crossTenantAccess.settings), user, "settings.update", { "alerts.email_to": to });
   await flash("ok");
 }
 
@@ -37,7 +37,7 @@ async function sendTest() {
   await requireAdmin();
   const mailer = mailerFromEnv();
   if (!mailer) return flash("error: RESEND_API_KEY");
-  const db = crossTenantDb("settings");
+  const db = crossTenantDb(crossTenantAccess.settings);
   const to = await alertRecipients(db);
   try {
     await mailer.send({
@@ -61,7 +61,7 @@ async function saveGroup(formData: FormData) {
   const bad = values.find(([, v]) => v instanceof Error);
   if (bad) return flash(`error: ${bad[0]}`);
   for (const [key, v] of values) await put(key, v);
-  await recordPlatform(crossTenantDb("settings"), user, "settings.update", Object.fromEntries(values));
+  await recordPlatform(crossTenantDb(crossTenantAccess.settings), user, "settings.update", Object.fromEntries(values));
   await flash("ok");
 }
 
@@ -72,7 +72,7 @@ async function saveSetting(formData: FormData) {
   try {
     const value = JSON.parse(String(formData.get("value")));
     await put(key, value);
-    await recordPlatform(crossTenantDb("settings"), user, "settings.update", { [key]: value });
+  await recordPlatform(crossTenantDb(crossTenantAccess.settings), user, "settings.update", { [key]: value });
   } catch (e) {
     return flash(`error: ${key}: ${(e as Error).message}`);
   }
@@ -82,7 +82,7 @@ async function saveSetting(formData: FormData) {
 export default async function SettingsPage() {
   await requireAdmin();
   const { t, locale } = await getT();
-  const db = crossTenantDb("settings");
+  const db = crossTenantDb(crossTenantAccess.settings);
   const s = await getSettings(db, true);
   const { rows } = await db.query<{ key: string; value: unknown; description: string | null }>(
     `select key, value, description from engine_settings order by key`,

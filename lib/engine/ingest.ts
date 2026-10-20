@@ -38,10 +38,10 @@ function canonical(value: unknown): string {
 const hash = (value: string) => createHash("sha256").update(value).digest("hex");
 
 /** Upserts the package's object types, event types and metric keys once per process and database. */
-export async function registerPackage(db: Db, pkg: ModulePackage): Promise<Registry> {
+export async function registerPackage(db: Db, pkg: ModulePackage, cache = true): Promise<Registry> {
   let byPkg = registries.get(db);
-  if (!byPkg) registries.set(db, (byPkg = new Map()));
-  const cached = byPkg.get(pkg.id);
+  if (cache && !byPkg) registries.set(db, (byPkg = new Map()));
+  const cached = cache ? byPkg?.get(pkg.id) : undefined;
   if (cached) return cached;
 
   const reg: Registry = { types: new Map(), metrics: new Map() };
@@ -72,7 +72,7 @@ export async function registerPackage(db: Db, pkg: ModulePackage): Promise<Regis
     );
     reg.metrics.set(m.key, rows[0].id);
   }
-  byPkg.set(pkg.id, reg);
+  if (cache) byPkg?.set(pkg.id, reg);
   return reg;
 }
 
@@ -82,29 +82,18 @@ export async function takeIngestToken(db: Db, sourceId: string, now = new Date()
   return Number(rows[0].wait);
 }
 
-export async function ingestPush(
+export type IngestCommit = { result: IngestResult; transitions: AlertTransition[] };
+
+async function ingestPushWork(
   db: Db,
   source: Source,
   messages: RawMessage[],
   pkg: ModulePackage,
-  now = new Date(),
-  opts: { replay?: boolean; events?: boolean; documentId?: string } = {},
-): Promise<IngestResult> {
-  const settings = await getSettings(db);
-  const maxBatch = num(settings, "ingest.max_batch", 500);
-  if (messages.length > maxBatch) throw new ValidationError(`batch too large (max ${maxBatch})`);
-  const maxFuture = num(settings, "ingest.max_future_s", 300) * 1000;
-
-  // 1. Immutable copy first: whatever happens next, the raw message is kept. A replay reads
-  // from the archive, so it does not write it again.
-  if (!opts.replay) await db.query(
-    `insert into raw_inbox (tenant_id, source_id, received_at, body)
-     select $1, $2, $3, b from jsonb_array_elements($4::jsonb) b`,
-    [source.tenant_id, source.id, now, JSON.stringify(messages)],
-  );
-
-  const reg = await registerPackage(db, pkg);
-  const committed = await inTransaction(db, async (db) => {
+  now: Date,
+  opts: { replay?: boolean; events?: boolean; documentId?: string },
+  maxFuture: number,
+  reg: Registry,
+): Promise<IngestCommit> {
   const result: IngestResult = {
     accepted: 0, rejected: [], metrics: 0, events: 0, alerts: { opened: 0, resolved: 0 }, configs: [], objectIds: [],
   };
@@ -152,9 +141,19 @@ export async function ingestPush(
   const objectIds = new Map<string, string>();
   const derivedState = new Map<string, DerivedState>();
   const pkgState = new Map<string, Record<string, unknown>>();
+  const stepConfig = new Map<string, Record<string, unknown>>();
   if (objects.size) {
     const entries = [...objects.entries()];
-    const { rows } = await db.query<{ id: string; type_id: string; external_id: string; state: { derived?: DerivedState; pkg?: Record<string, unknown> } }>(
+    const { rows: moduleRows } = await db.query<{ config: Record<string, unknown> | null }>(
+      `select config from org_modules where org_id = $1 and module = $2 and enabled`,
+      [source.tenant_id, pkg.id],
+    );
+    const organizationConfig = moduleRows[0]?.config ?? {};
+    const { rows } = await db.query<{
+      id: string; type_id: string; external_id: string;
+      state: { derived?: DerivedState; pkg?: Record<string, unknown> };
+      properties: Record<string, unknown>;
+    }>(
       `insert into objects (tenant_id, type_id, external_id, name, properties, last_seen)
        select $1, x.type_id, x.external_id, x.name, x.properties, x.last_seen
          from unnest($2::uuid[], $3::text[], $4::text[], $5::jsonb[], $6::timestamptz[])
@@ -163,7 +162,7 @@ export async function ingestPush(
          name = coalesce(excluded.name, objects.name),
          properties = objects.properties || excluded.properties,
          last_seen = greatest(objects.last_seen, excluded.last_seen)
-       returning id, type_id, external_id, state`,
+       returning id, type_id, external_id, state, properties`,
       [source.tenant_id, entries.map(([, o]) => o.typeId), entries.map(([, o]) => o.externalId), entries.map(([, o]) => o.name ?? null),
         entries.map(([, o]) => o.properties), entries.map(([, o]) => o.ts)],
     );
@@ -173,6 +172,13 @@ export async function ingestPush(
       objectIds.set(k, row.id);
       derivedState.set(k, row.state.derived ?? {});
       pkgState.set(k, row.state.pkg ?? {});
+      const objectConfig = row.properties?.config;
+      stepConfig.set(k, {
+        ...organizationConfig,
+        ...(objectConfig && typeof objectConfig === "object" && !Array.isArray(objectConfig)
+          ? objectConfig as Record<string, unknown>
+          : {}),
+      });
     }
   }
   result.objectIds = [...objectIds.values()];
@@ -184,7 +190,10 @@ export async function ingestPush(
       const k = `${n.object.type}\u0000${n.object.externalId}`;
       n.metrics = { ...n.metrics };
       if (pkg.derived?.length) applyDerived(pkg.derived, n.metrics, n.ts ?? now, derivedState.get(k)!);
-      pkg.step?.(n.metrics, n.ts ?? now, pkgState.get(k)!);
+      pkg.step?.(n.metrics, n.ts ?? now, pkgState.get(k)!, {
+        config: stepConfig.get(k) ?? {},
+        properties: n.object.properties ?? {},
+      });
     }
     const stateIds: string[] = [], stateValues: Record<string, unknown>[] = [];
     for (const k of objects.keys()) {
@@ -217,10 +226,11 @@ export async function ingestPush(
   }
   if (mObj.length) {
     const r = await db.query(
-      `insert into metrics (tenant_id, object_id, metric_id, ts, value)
-       select $1, * from unnest($2::uuid[], $3::smallint[], $4::timestamptz[], $5::float8[])
+      `insert into metrics (tenant_id, object_id, metric_id, ts, value, document_id)
+       select $1, x.*, $6 from unnest($2::uuid[], $3::smallint[], $4::timestamptz[], $5::float8[])
+         as x(object_id, metric_id, ts, value)
        on conflict do nothing`,
-      [source.tenant_id, mObj, mKey, mTs, mVal],
+      [source.tenant_id, mObj, mKey, mTs, mVal, opts.documentId ?? null],
     );
     result.metrics = r.rowCount ?? 0;
   }
@@ -280,7 +290,55 @@ export async function ingestPush(
     source.id, now, result.rejected.length ? `${result.rejected.length} rejected: ${result.rejected[0].error}` : null, source.tenant_id,
   ]);
   return { result, transitions };
-  });
+}
+
+/** Ingests a bounded batch inside the caller's already-open transaction. */
+export async function ingestPushInTransaction(
+  db: Db,
+  source: Source,
+  messages: RawMessage[],
+  pkg: ModulePackage,
+  now = new Date(),
+  opts: { replay?: boolean; events?: boolean; documentId?: string } = {},
+): Promise<IngestCommit> {
+  const settings = await getSettings(db);
+  const maxBatch = num(settings, "ingest.max_batch", 500);
+  if (messages.length > maxBatch) throw new ValidationError(`batch too large (max ${maxBatch})`);
+  const maxFuture = num(settings, "ingest.max_future_s", 300) * 1000;
+  if (!opts.replay) await db.query(
+    `insert into raw_inbox (tenant_id, source_id, received_at, body)
+     select $1, $2, $3, b from jsonb_array_elements($4::jsonb) b`,
+    [source.tenant_id, source.id, now, JSON.stringify(messages)],
+  );
+  const reg = await registerPackage(db, pkg, false);
+  return ingestPushWork(db, source, messages, pkg, now, opts, maxFuture, reg);
+}
+
+export async function dispatchIngestHooks(db: Db, transitions: AlertTransition[]) {
+  await runAlertHooks(transitions, db);
+}
+
+export async function ingestPush(
+  db: Db,
+  source: Source,
+  messages: RawMessage[],
+  pkg: ModulePackage,
+  now = new Date(),
+  opts: { replay?: boolean; events?: boolean; documentId?: string } = {},
+): Promise<IngestResult> {
+  const settings = await getSettings(db);
+  const maxBatch = num(settings, "ingest.max_batch", 500);
+  if (messages.length > maxBatch) throw new ValidationError(`batch too large (max ${maxBatch})`);
+  const maxFuture = num(settings, "ingest.max_future_s", 300) * 1000;
+  // Keep normal push payloads in the durable inbox even if their transaction later rolls back.
+  if (!opts.replay) await db.query(
+    `insert into raw_inbox (tenant_id, source_id, received_at, body)
+     select $1, $2, $3, b from jsonb_array_elements($4::jsonb) b`,
+    [source.tenant_id, source.id, now, JSON.stringify(messages)],
+  );
+  const reg = await registerPackage(db, pkg);
+  const committed = await inTransaction(db, (connection) =>
+    ingestPushWork(connection, source, messages, pkg, now, opts, maxFuture, reg));
   if (!opts.replay) await runAlertHooks(committed.transitions, db);
   return committed.result;
 }

@@ -10,13 +10,14 @@ export default async function OrgLayout(props: LayoutProps<"/o/[slug]">) {
   const { org, isAdmin, modules } = await requireOrg(slug);
   const { t, locale } = await getT();
   const db = tenantDb(org.id);
-  const [count, uploads] = await Promise.all([
+  const [count, uploads, weatherAlerts] = await Promise.all([
     countOpenAlerts(db),
     db.query(`select 1 from sources where tenant_id = $1 and connector = 'upload' limit 1`, [org.id]),
+    db.query<{ open: number }>(`select count(*)::int open from weather_alerts where tenant_id = $1 and status <> 'resolved'`, [org.id]),
   ]);
   const hasUpload = uploads.rowCount! > 0;
   return (
-    <>
+    <div className="min-h-screen lg:pl-64">
       <Header
         title={org.name}
         t={t}
@@ -25,6 +26,7 @@ export default async function OrgLayout(props: LayoutProps<"/o/[slug]">) {
         isAdmin={isAdmin}
         nav={[
           { href: `/o/${slug}`, label: t.overview },
+          { href: `/o/${slug}/weather`, label: t.weather, badge: weatherAlerts.rows[0]?.open ?? 0 },
           { href: `/o/${slug}/alerts`, label: t.alerts, badge: count },
           { href: `/o/${slug}/registers`, label: t.registers },
           ...(modules.some((m) => m.module === "agronomy") ? [{ href: `/o/${slug}/crops`, label: t.crops }] : []),
@@ -34,7 +36,7 @@ export default async function OrgLayout(props: LayoutProps<"/o/[slug]">) {
         ]}
       />
       <LiveRefresh orgId={org.id} />
-      <main className="mx-auto max-w-7xl px-4 pb-16 pt-6 sm:px-6">{props.children}</main>
-    </>
+      <main className="mx-auto max-w-7xl px-4 pb-16 pt-5 sm:px-6 lg:px-8 lg:pt-7">{props.children}</main>
+    </div>
   );
 }
