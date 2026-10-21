@@ -6,11 +6,16 @@ import { onAlert } from "./hooks";
 import { getPackageDef } from "../packages/ui";
 import type { Locale } from "../packages/types";
 
-const pub = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
-const priv = process.env.VAPID_PRIVATE_KEY;
+// env values pasted into a dashboard often carry quotes, spaces or a newline: web-push rejects them and
+// the whole build fails, so clean them and fall back to the default contact
+const clean = (v: string | undefined) => v?.trim().replace(/^["']|["']$/g, "") || undefined;
+const pub = clean(process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY);
+const priv = clean(process.env.VAPID_PRIVATE_KEY);
+const sub = clean(process.env.VAPID_SUBJECT);
+const subject = sub && /^(mailto:\S+@\S+|https:\/\/\S+)$/.test(sub) ? sub : "mailto:info@vdxtechnologies.com";
 
 if (pub && priv) {
-  webpush.setVapidDetails(process.env.VAPID_SUBJECT || "mailto:info@vdxtechnologies.com", pub, priv);
+  webpush.setVapidDetails(subject, pub, priv);
 
   onAlert(async (t, raw) => {
     if (t.kind !== "opened" || (t.severity !== "warn" && t.severity !== "alarm")) return;
