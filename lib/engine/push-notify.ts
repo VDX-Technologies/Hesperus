@@ -6,17 +6,34 @@ import { onAlert } from "./hooks";
 import { getPackageDef } from "../packages/ui";
 import type { Locale } from "../packages/types";
 
-// env values pasted into a dashboard often carry quotes, spaces or a newline: web-push rejects them and
-// the whole build fails, so clean them and fall back to the default contact
+// Dashboard values may include surrounding quotes or standard Base64 padding. Normalize those before
+// setup, and keep an invalid optional push configuration from failing route collection during build.
 const clean = (v: string | undefined) => v?.trim().replace(/^["']|["']$/g, "") || undefined;
-const pub = clean(process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY);
-const priv = clean(process.env.VAPID_PRIVATE_KEY);
+const vapidKey = (value: string | undefined, byteLength: number) => {
+  const key = clean(value);
+  if (!key || !/^(?:[A-Za-z0-9_-]+|[A-Za-z0-9+/]+)={0,2}$/.test(key)) return undefined;
+  const normalized = key.replace(/=+$/, "").replace(/\+/g, "-").replace(/\//g, "_");
+  const bytes = Buffer.from(normalized, "base64url");
+  return bytes.length === byteLength && bytes.toString("base64url") === normalized ? normalized : undefined;
+};
+const rawPub = clean(process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY);
+const rawPriv = clean(process.env.VAPID_PRIVATE_KEY);
+const pub = vapidKey(rawPub, 65);
+const priv = vapidKey(rawPriv, 32);
 const sub = clean(process.env.VAPID_SUBJECT);
 const subject = sub && /^(mailto:\S+@\S+|https:\/\/\S+)$/.test(sub) ? sub : "mailto:info@vdxtechnologies.com";
 
+let pushEnabled = false;
 if (pub && priv) {
-  webpush.setVapidDetails(subject, pub, priv);
+  try {
+    webpush.setVapidDetails(subject, pub, priv);
+    pushEnabled = true;
+  } catch (error) {
+    console.warn("Web push disabled: invalid VAPID configuration", error);
+  }
+}
 
+if (pushEnabled) {
   onAlert(async (t, raw) => {
     if (t.kind !== "opened" || (t.severity !== "warn" && t.severity !== "alarm")) return;
     const db = forTenant(raw, t.tenantId);
@@ -60,4 +77,6 @@ if (pub && priv) {
       }),
     );
   });
+} else if ((rawPub || rawPriv) && (!pub || !priv)) {
+  console.warn("Web push disabled: VAPID keys must be valid Base64 public (65-byte) and private (32-byte) keys");
 }
