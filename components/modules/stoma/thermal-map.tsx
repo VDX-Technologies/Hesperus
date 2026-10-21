@@ -11,7 +11,7 @@ type Mode = "temp" | "dew";
 const SCALE = 24; // canvas pixels per sensor pixel
 
 // "Iron" palette of thermal cameras: black -> purple -> red -> orange -> yellow -> white
-const IRON: [number, number, number, number][] = [
+export const IRON: [number, number, number, number][] = [
   [0, 0, 0, 10],
   [0.2, 70, 0, 140],
   [0.45, 200, 30, 90],
@@ -20,7 +20,7 @@ const IRON: [number, number, number, number][] = [
   [1, 255, 255, 230],
 ];
 // Condensation risk: distance from the dew point. Blue = wet, green = safe, amber = dry/hot.
-const DEW: [number, number, number, number][] = [
+export const DEW: [number, number, number, number][] = [
   [0, 40, 90, 255],
   [0.2, 120, 190, 255],
   [0.35, 61, 220, 132],
@@ -28,7 +28,7 @@ const DEW: [number, number, number, number][] = [
   [1, 242, 184, 75],
 ];
 
-function ramp(stops: [number, number, number, number][], x: number): [number, number, number] {
+export function ramp(stops: [number, number, number, number][], x: number): [number, number, number] {
   const v = Math.min(1, Math.max(0, x));
   for (let i = 1; i < stops.length; i++) {
     const [p1, ...c1] = stops[i];

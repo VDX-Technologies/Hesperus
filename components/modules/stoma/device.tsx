@@ -8,6 +8,7 @@ import { timeAgo, type Dict } from "@/lib/i18n";
 import { fmt, SectionTitle, StatusLabel } from "@/components/ui";
 import { TimeChart } from "@/components/chart";
 import { ThermalMap, type ThermalFrame } from "./thermal-map";
+import { LeafCalendar, type HourlyPoints } from "./leaf-calendar";
 
 /** Progress towards a disease alert: 0..1 of the warning threshold, capped at 2 (alarm). */
 function RiskBar({ label, value, warn, detail }: { label: string; value: number; warn: number; detail: string }) {
@@ -27,6 +28,7 @@ function RiskBar({ label, value, warn, detail }: { label: string; value: number;
 }
 
 const CHART_KEYS = ["temp_c", "leaf_c", "dew_c", "rh", "vpd_kpa", "co2", "voc", "par", "uvi", "leaf_air", "ir_spread", "wet_h"];
+const LEAF_DAYS = 14;
 
 /** Stoma object page: live values, today's light, latest IR frame, history charts from the engine series. */
 export async function StomaDevice({
@@ -52,6 +54,12 @@ export async function StomaDevice({
     series(db, { objectId: device.id, module: "stoma", metrics: CHART_KEYS, from: new Date(now.getTime() - (range === "7d" ? 7 : 1) * 86400000), to: now }),
     series(db, { objectId: device.id, module: "stoma", metrics: ["par"], from: midnight, to: now }),
   ]);
+  // no IR frame (single-point sensor): leaf temperature hour by hour instead
+  const ir = (device.properties.ir ?? null) as ThermalFrame | null;
+  const leafHours = ir
+    ? null
+    : await series(db, { objectId: device.id, module: "stoma", metrics: ["leaf_c", "dew_c"], from: new Date(now.getTime() - LEAF_DAYS * 86400000), to: now, level: "1h" });
+  const pairs = (k: string): HourlyPoints => (leafHours?.series[k] ?? []).map((p) => [p.ts.getTime(), p.value]);
 
   // one chart row per timestamp with every metric that has a point there
   const byTs = new Map<number, Record<string, number>>();
@@ -71,7 +79,6 @@ export async function StomaDevice({
 
   const status = device.status;
   const v = device.values;
-  const ir = (device.properties.ir ?? null) as ThermalFrame | null;
   const pkgState = (device.state.pkg ?? {}) as Record<string, unknown>;
   const irrigating = typeof pkgState.irrigation_until === "number" && pkgState.irrigation_until > now.getTime();
   const cfg = { ...stoma.defaults, ...((device.properties.config ?? {}) as object) };
@@ -121,7 +128,7 @@ export async function StomaDevice({
 
       <div className="mt-3 grid gap-3 lg:grid-cols-3">
         <div className="card p-4 lg:col-span-2">
-          <div className="mb-3 text-[11px] uppercase tracking-[0.14em] text-dim">{t.thermalMap}</div>
+          <div className="mb-3 text-[11px] uppercase tracking-[0.14em] text-dim">{ir ? t.thermalMap : t.leafCalendar}</div>
           {ir ? (
             <ThermalMap
               frame={ir}
@@ -140,7 +147,13 @@ export async function StomaDevice({
             }}
             />
           ) : (
-            <p className="text-xs text-dim">{t.thermalNone}</p>
+            <LeafCalendar
+              leaf={pairs("leaf_c")}
+              dew={pairs("dew_c")}
+              days={LEAF_DAYS}
+              locale={locale}
+              labels={{ temp: t.ir_temp, dew: t.ir_dew, wet: t.ir_wet, dry: t.ir_dry, empty: t.leafCalendarEmpty, fromDew: t.ir_fromDew }}
+            />
           )}
         </div>
         <div className="card flex flex-col gap-5 p-4">

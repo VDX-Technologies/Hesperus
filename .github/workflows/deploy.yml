@@ -25,7 +25,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-      - run: npm install --global vercel@64.7.0
+      - run: npm install --global vercel@65.0.0
       - name: Production
         if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
         run: |
