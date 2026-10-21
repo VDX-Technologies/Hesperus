@@ -11,6 +11,7 @@ import { getSettings, num } from "./settings";
 import { applyDerived, type DerivedState } from "./derived";
 import { deviceConfig, evaluateRules, loadRules, type DeviceConfig, type Point } from "./rules";
 import { runAlertHooks, type AlertTransition } from "./hooks";
+import "./push-notify";
 
 export interface IngestResult {
   accepted: number;

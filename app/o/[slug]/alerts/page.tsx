@@ -4,6 +4,7 @@ import { getT, timeAgo } from "@/lib/i18n";
 import { tenantDb } from "@/lib/engine/db";
 import { listAlerts, type ConsoleAlert } from "@/lib/packages/console";
 import { SectionTitle, StatusDot } from "@/components/ui";
+import { PushToggle } from "@/components/push-toggle";
 
 /** Acknowledging only marks the alert as seen; the engine resolves it when the value recovers. */
 async function ackAlert(formData: FormData) {
@@ -50,6 +51,21 @@ export default async function Alerts(props: PageProps<"/o/[slug]/alerts">) {
   return (
     <div>
       <h1 className="text-2xl font-semibold tracking-tight">{t.alerts}</h1>
+      <div className="mt-4">
+        <PushToggle
+          slug={slug}
+          labels={{
+            title: t.push_title,
+            on: t.push_on,
+            off: t.push_off,
+            enable: t.push_enable,
+            disable: t.push_disable,
+            denied: t.push_denied,
+            unsupported: t.push_unsupported,
+            install: t.push_install,
+          }}
+        />
+      </div>
       <SectionTitle>{t.openAlerts}</SectionTitle>
       {open.length ? (
         <ul className="card divide-y divide-line-soft">{open.map((a) => <Row key={a.id} a={a} />)}</ul>

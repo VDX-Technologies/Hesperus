@@ -83,5 +83,5 @@ export async function proxy(request: NextRequest) {
 
 export const config = {
   // everything except the API (token auth / public health), static files and PWA assets
-  matcher: ["/((?!api/|_next/static|_next/image|favicon.ico|icon|apple-icon|manifest.webmanifest|.*\\.(?:png|svg|jpg|webp)$).*)"],
+  matcher: ["/((?!api/|_next/static|_next/image|favicon.ico|icon|apple-icon|manifest.webmanifest|sw.js|.*\\.(?:png|svg|jpg|webp)$).*)"],
 };
