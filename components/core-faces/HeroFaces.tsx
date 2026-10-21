@@ -3,14 +3,14 @@
 import { useEffect, useRef, useState } from "react";
 import { DefenseFace } from "./faces/DefenseFace";
 import { EnterpriseFace } from "./faces/EnterpriseFace";
-import { StomaFace } from "./faces/StomaFace";
+import { LoraFace } from "./faces/LoraFace";
 import { Stage } from "./Stage";
 
 const HOLD = 4000;
 
 /** Where each face keeps its most readable part when cropped: desktop, then phone. */
 const FACES: { el: () => React.ReactNode; focus: [number, number]; phone: [number, number] }[] = [
-  { el: () => <StomaFace />, focus: [0.55, 0.3], phone: [0.3, 0.3] },
+  { el: () => <LoraFace />, focus: [0.55, 0.3], phone: [0.3, 0.3] },
   { el: () => <DefenseFace />, focus: [0.62, 0.3], phone: [0.45, 0.5] },
   { el: () => <EnterpriseFace />, focus: [0.6, 0.3], phone: [0.82, 0.35] },
 ];

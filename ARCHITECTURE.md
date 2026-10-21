@@ -11,7 +11,7 @@ Il Core è una **piattaforma che riceve dati da dispositivi sul campo, li conser
 Il Core è diviso in due parti:
 
 - **Engine**: il motore generico (`lib/engine/`). Non sa nulla di serre, sensori o settori specifici. Sa solo gestire "oggetti", "metriche", "eventi", "regole" e "allarmi".
-- **Moduli (package)**: la conoscenza di settore (`lib/packages/`). Oggi esiste **Stoma**, per il monitoraggio del clima in serra. Un modulo dice all'engine che tipi di oggetti esistono, come interpretare i messaggi grezzi e quali calcoli fare.
+- **Moduli (package)**: la conoscenza di settore (`lib/packages/`). Oggi esiste **LoRa**, per il monitoraggio del clima in serra. Un modulo dice all'engine che tipi di oggetti esistono, come interpretare i messaggi grezzi e quali calcoli fare.
 
 Così l'engine resta uguale per ogni settore e per aggiungere un prodotto basta scrivere un nuovo modulo.
 
@@ -24,7 +24,7 @@ Così l'engine resta uguale per ogni settore e per aggiungere un prodotto basta 
 | **Organizzazione (org / tenant)** | Un cliente. Tutti i dati appartengono a un'organizzazione e sono separati da quelli degli altri clienti. |
 | **Membership** | Un utente che fa parte di un'org con un ruolo: `owner`, `member` o `viewer`. |
 | **Platform admin** | Una persona dello staff VDX che vede tutti i clienti. |
-| **Modulo** | Un prodotto (es. `stoma`) attivato per un'org (`org_modules`), con la sua configurazione (le soglie del cliente). |
+| **Modulo** | Un prodotto (es. `lora`) attivato per un'org (`org_modules`), con la sua configurazione (le soglie del cliente). |
 | **Source** | Un canale da cui arrivano dati (es. un gateway LoRa). Ha un token segreto. |
 | **Oggetto** | Una "cosa" nel mondo reale: un nodo sensore, una serra… Ha un tipo (`object_type`), delle proprietà e uno stato. |
 | **Metrica** | Un numero nel tempo legato a un oggetto (es. temperatura alle 10:05 = 24,3). |
@@ -113,7 +113,7 @@ L'engine descrive il mondo con pochi concetti generici (migrazione `supabase/mig
 
 | Tabella | Cosa contiene |
 |---|---|
-| `object_types` | I tipi di oggetto, ciascuno di proprietà di un modulo (es. `stoma.node`), con lo schema delle proprietà. Un trigger (`validate_properties`) verifica che le proprietà rispettino lo schema. |
+| `object_types` | I tipi di oggetto, ciascuno di proprietà di un modulo (es. `lora.node`), con lo schema delle proprietà. Un trigger (`validate_properties`) verifica che le proprietà rispettino lo schema. |
 | `objects` | Gli oggetti concreti. `properties` contiene i dati descrittivi (nome, config, ultimo frame IR…). `state` contiene lo stato di calcolo: `state.derived` per l'engine e `state.pkg` per il modulo. `last_seen` indica quando l'oggetto ha inviato dati l'ultima volta. |
 | `links` | Relazioni tra oggetti. |
 | `metrics` | Una riga per ogni (oggetto, metrica, istante, valore). È **partizionata per giorno**, così cancellare dati vecchi significa eliminare una partizione intera, che è velocissimo. |
@@ -168,7 +168,7 @@ Se un messaggio non è valido (`ValidationError`), viene scartato **solo quel me
 ### 6.5 Scrittura
 
 - **Metriche**: vengono inserite tutte insieme con `on conflict do nothing`. Se lo stesso dato arriva due volte, non viene duplicato: l'operazione è *idempotente*. Le metriche **non dichiarate** dal modulo non vanno in `metrics` e restano solo nell'archivio grezzo.
-- **Eventi**: salvati con tipo `<modulo>.<tipo>`, ad esempio `stoma.irrigation`.
+- **Eventi**: salvati con tipo `<modulo>.<tipo>`, ad esempio `lora.irrigation`.
 
 ### 6.6 Regole, allarmi e risposta
 
@@ -324,15 +324,15 @@ Il risultato viene salvato in `engine_jobs` (job `health`). Agli amministratori 
 
 ---
 
-## 11. I moduli e Stoma
+## 11. I moduli e LoRa
 
 ### 11.1 Come è fatto un modulo
 
 Ogni modulo ha **due facce**:
 
-**Lato engine**: `ModulePackage`, registrato in `lib/packages/index.ts`, che oggi contiene solo `[stomaPackage]`. Definisce:
+**Lato engine**: `ModulePackage`, registrato in `lib/packages/index.ts`, che oggi contiene solo `[loraPackage]`. Definisce:
 
-- `id`: es. `"stoma"`;
+- `id`: es. `"lora"`;
 - `objectTypes`: i tipi di oggetto e lo schema delle proprietà;
 - `metrics`: le metriche dichiarate;
 - `derived`: le metriche calcolate dall'engine;
@@ -352,9 +352,9 @@ Ogni modulo ha **due facce**:
 
 In più, `components/modules/registry.tsx` collega ogni modulo ai suoi componenti React: la vista panoramica (Overview) e la pagina del dispositivo (Device).
 
-### 11.2 Stoma: clima in serra
+### 11.2 LoRa: clima in serra
 
-Stoma usa nodi sensore in serra collegati a un gateway LoRa.
+Il modulo LoRa usa nodi sensore in serra collegati a un gateway LoRa.
 
 **`normalize`** riceve le letture del nodo e calcola:
 
@@ -393,7 +393,7 @@ Il modulo `agronomy` (`lib/packages/agronomy/`) tiene tutta la conoscenza agrono
   - `fromSubject`: la scelta della coltura compila superficie e fase;
   - l'export JSON con i campi del registro ufficiale (`exports.ts`, registrato in `lib/packages/exports.ts`).
 - `/o/[slug]/treatments` reindirizza a `/o/[slug]/registers/agronomy.treatment` (anche `?crop=` → `?obj=`).
-- **Pagina coltura** (`/o/[slug]/devices/[id]`): dati, timeline degli eventi e, se nell'area della coltura c'è un sensore Stoma, grafici di `rh` e `wet_h` sugli ultimi 30 giorni.
+- **Pagina coltura** (`/o/[slug]/devices/[id]`): dati, timeline degli eventi e, se nell'area della coltura c'è un sensore LoRa, grafici di `rh` e `wet_h` sugli ultimi 30 giorni.
 
 ### 11.5 Registri generici (`lib/engine/registers.ts`)
 
@@ -483,7 +483,7 @@ Lo schema vive in `supabase/migrations/` (file SQL in ordine di data). Ogni modi
 Si eseguono con `npm test` (vitest).
 
 - `tests/engine/`: ingest, regole, archivio, health, rollup e upload CSV.
-- `tests/packages/stoma/`: i calcoli di Stoma.
+- `tests/packages/lora.test.ts`: i calcoli del modulo LoRa.
 - `tests/packages/agronomy.test.ts`: colture, permessi, registro, correzioni, isolamento tra tenant, export e limiti.
 - `tests/db/`: l'harness che crea un **database usa-e-getta** per ogni file di test, applicando tutte le migrazioni. Richiede un Postgres locale (`npx supabase start`) oppure `TEST_DATABASE_URL`.
 

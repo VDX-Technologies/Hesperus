@@ -1,7 +1,7 @@
 /**
- * Fake Stoma nodes for demos: backfills plausible history, then optionally keeps sending live.
- * Goes through the same ingest as POST /api/push, from a source named "Simulatore Stoma".
- *   npx tsx scripts/simulate-stoma.ts <org-slug> [--nodes 3] [--hours 48] [--live]
+ * Fake LoRa nodes for demos: backfills plausible history, then optionally keeps sending live.
+ * Goes through the same ingest as POST /api/push, from a source named "Simulatore LoRa".
+ *   npx tsx scripts/simulate-lora.ts <org-slug> [--nodes 3] [--hours 48] [--live]
  */
 import "./env";
 import { crossTenantAccess, crossTenantDb } from "../lib/engine/db";
@@ -16,9 +16,9 @@ const nodes = opt("--nodes", 3);
 const hours = opt("--hours", 48);
 const live = args.includes("--live");
 const STEP_MIN = 10;
-const SOURCE_NAME = "Simulatore Stoma";
+const SOURCE_NAME = "Simulatore LoRa";
 if (!slug || slug.startsWith("--")) {
-  console.error("usage: simulate-stoma.ts <org-slug> [--nodes 3] [--hours 48] [--live]");
+  console.error("usage: simulate-lora.ts <org-slug> [--nodes 3] [--hours 48] [--live]");
   process.exit(1);
 }
 
@@ -53,16 +53,16 @@ function reading(n: number, ts: Date) {
 
 async function main() {
   const pool = crossTenantDb(crossTenantAccess.maintenance);
-  const pkg = getPackage("stoma");
-  if (!pkg) throw new Error(`module "stoma" is not installed`);
+  const pkg = getPackage("lora");
+  if (!pkg) throw new Error(`module "lora" is not installed`);
   const { rows: orgs } = await pool.query<{ id: string }>(`select id from organizations where slug = $1`, [slug]);
   if (!orgs[0]) throw new Error(`no organization "${slug}"`);
   const tenantId = orgs[0].id;
   const cols = `id, tenant_id, name, connector, module, config, status`;
   let { rows: [source] } = await pool.query<Source>(
-    `select ${cols} from sources where tenant_id = $1 and module = 'stoma' and name = $2`, [tenantId, SOURCE_NAME],
+    `select ${cols} from sources where tenant_id = $1 and module = 'lora' and name = $2`, [tenantId, SOURCE_NAME],
   );
-  source ??= (await createSource(pool, { tenantId, module: "stoma", name: SOURCE_NAME })).source;
+  source ??= (await createSource(pool, { tenantId, module: "lora", name: SOURCE_NAME })).source;
 
   const send = (ts: Date) => ingestPush(pool, source, Array.from({ length: nodes }, (_, n) => reading(n, ts)), pkg, ts);
 

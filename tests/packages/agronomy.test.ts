@@ -1,5 +1,5 @@
 // Agronomy: crops as manual objects in an area, the treatments register (validation, filters,
-// corrections, exports) and the Stoma sensors seen from a crop, all within one tenant.
+// corrections, exports) and the LoRa sensors seen from a crop, all within one tenant.
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { Client } from "pg";
 vi.mock("server-only", () => ({}));
@@ -13,7 +13,7 @@ import { lastEventBy } from "../../lib/engine/events";
 import { listAudit } from "../../lib/engine/audit";
 import { payloadFromForm } from "../../lib/engine/schema";
 import { agronomyPackage } from "../../lib/packages/agronomy";
-import { stomaPackage } from "../../lib/packages/stoma";
+import { loraPackage } from "../../lib/packages/lora";
 import { TREATMENT_FORM, treatmentValues } from "../../lib/packages/agronomy/form";
 import { listCrops, listTreatments, sensorsInPlace, suggestions } from "../../lib/packages/agronomy/console";
 import { CSV_FIELDS, registerCsv, registerJson } from "../../lib/packages/agronomy/register";
@@ -138,12 +138,12 @@ describe("exports", () => {
 });
 
 describe("sensors and limits", () => {
-  it("finds Stoma sensors in the crop's area and below it", async () => {
-    await registerPackage(db, stomaPackage);
-    const type = (await db.query(`select id from object_types where module = 'stoma' and tenant_id is null limit 1`)).rows[0].id;
-    const s = (await db.query(`insert into objects (tenant_id, type_id, external_id, name) values ($1, $2, 's1', 'Stoma bancale') returning id`, [ORG, type])).rows[0].id;
+  it("finds LoRa sensors in the crop's area and below it", async () => {
+    await registerPackage(db, loraPackage);
+    const type = (await db.query(`select id from object_types where module = 'lora' and tenant_id is null limit 1`)).rows[0].id;
+    const s = (await db.query(`insert into objects (tenant_id, type_id, external_id, name) values ($1, $2, 's1', 'LoRa bancale') returning id`, [ORG, type])).rows[0].id;
     await db.query(`insert into links (tenant_id, type, src_id, dst_id) values ($1, 'located_in', $2, $3)`, [ORG, s, sub]);
-    expect(await sensorsInPlace(A, area)).toEqual([{ id: s, name: "Stoma bancale" }]);
+    expect(await sensorsInPlace(A, area)).toEqual([{ id: s, name: "LoRa bancale" }]);
     expect(await sensorsInPlace(A, null)).toEqual([]);
     expect(await sensorsInPlace(B, area)).toEqual([]);
   });

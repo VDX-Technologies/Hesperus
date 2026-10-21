@@ -3,7 +3,7 @@ import { tenantDb } from "@/lib/engine/db";
 import { listObjects, type ConsoleObject } from "@/lib/packages/console";
 import { multiObjectSeries } from "@/lib/engine/query";
 import { effectiveRules, loadRules } from "@/lib/engine/rules";
-import { stoma } from "@/lib/packages/stoma/model";
+import { lora } from "@/lib/packages/lora/model";
 import type { Locale } from "@/lib/packages/types";
 import { timeAgo, type Dict } from "@/lib/i18n";
 import { fmt, SectionTitle, StatusDot } from "@/components/ui";
@@ -16,20 +16,20 @@ const HISTORY_METRICS = ["temp_c", "rh", "vpd_kpa", "co2"];
 const HISTORY_BUCKET_MS = 5 * 60_000;
 const SENSOR_PALETTE = ["#9fd8ff", "#70d6b3", "#c7a6ff", "#f2b84b", "#ff8e8e", "#67c6d0", "#d9df75", "#f49ac2"];
 
-/** Stoma widget on the organization overview: one card per sensor, grouped by place. */
-export async function StomaOverview({ orgId, slug, t, locale, cards: providedCards }: {
+/** LoRa widget on the organization overview: one card per sensor, grouped by place. */
+export async function LoraOverview({ orgId, slug, t, locale, cards: providedCards }: {
   orgId: string; slug: string; t: Dict; locale: Locale; period?: number; cards?: ConsoleObject[];
 }) {
   const db = tenantDb(orgId);
-  const cards = providedCards ?? await listObjects(db, "stoma");
+  const cards = providedCards ?? await listObjects(db, "lora");
   const priority = { alarm: 0, warn: 1, offline: 2, ok: 3 } as const;
   const chartCards = [...cards].sort((a, b) => priority[a.status] - priority[b.status]
     || (a.lastSeen ?? "").localeCompare(b.lastSeen ?? "") || a.name.localeCompare(b.name)).slice(0, 8);
   const now = new Date();
   const from = new Date(now.getTime() - 24 * 60 * 60_000);
   const [history, rules] = chartCards.length ? await Promise.all([
-    multiObjectSeries(db, { objectIds: chartCards.map((d) => d.id), module: "stoma", metrics: HISTORY_METRICS, from, to: now }),
-    loadRules(db, "stoma"),
+    multiObjectSeries(db, { objectIds: chartCards.map((d) => d.id), module: "lora", metrics: HISTORY_METRICS, from, to: now }),
+    loadRules(db, "lora"),
   ]) : [[], []];
   const firstBucket = Math.floor(from.getTime() / HISTORY_BUCKET_MS) * HISTORY_BUCKET_MS;
   const lastBucket = Math.floor(now.getTime() / HISTORY_BUCKET_MS) * HISTORY_BUCKET_MS;
@@ -52,7 +52,7 @@ export async function StomaOverview({ orgId, slug, t, locale, cards: providedCar
   }
   const sensorSeries = chartCards.map((d, i) => ({ key: d.id, label: d.name, color: SENSOR_PALETTE[i % SENSOR_PALETTE.length] }));
   const effective = new Map(chartCards.map((d) => [d.id, effectiveRules(rules, d.type, d.id)]));
-  const metricInfo = new Map(stoma.metrics.map((m) => [m.key, m]));
+  const metricInfo = new Map(lora.metrics.map((m) => [m.key, m]));
   const sensorPanels: SensorMetricPanel[] = HISTORY_METRICS.map((key) => {
     const ruleMetric = key === "rh" ? "rh_ctl" : key;
     const perSensor = chartCards.map((d) => (effective.get(d.id) ?? [])
@@ -76,7 +76,7 @@ export async function StomaOverview({ orgId, slug, t, locale, cards: providedCar
       note: key === "rh" && thresholds.length ? t.chart_rhPause : undefined,
     };
   });
-  const metrics = new Map(stoma.metrics.map((m) => [m.key, m]));
+  const metrics = new Map(lora.metrics.map((m) => [m.key, m]));
   const counts = { ok: 0, warn: 0, alarm: 0, offline: 0 };
   for (const d of cards) counts[d.status]++;
   // one group per place, in path order; objects without a place come last
@@ -87,7 +87,7 @@ export async function StomaOverview({ orgId, slug, t, locale, cards: providedCar
   groups.delete("");
   if (unassigned) groups.set("", unassigned);
   return (
-    <section id="module-stoma">
+    <section id="module-lora">
       <SectionTitle
         right={
           <div className="flex gap-4 text-xs text-mist">
@@ -101,7 +101,7 @@ export async function StomaOverview({ orgId, slug, t, locale, cards: providedCar
           </div>
         }
       >
-        Stoma · {stoma.tagline[locale]}
+        LoRa · {lora.tagline[locale]}
       </SectionTitle>
       <div className="space-y-2">
         <div className="flex flex-wrap items-center justify-between gap-2">

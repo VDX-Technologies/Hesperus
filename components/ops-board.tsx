@@ -182,7 +182,7 @@ export async function OpsBoard({
     ...open.filter((a) => a.severity === "alarm" || a.severity === "warn").map((a) => ({
       who: a.object, what: a.text, href: `/o/${slug}/devices/${a.objectId}`, tone: a.severity === "alarm" ? "bg-alarm" : "bg-warn",
     })),
-    ...(health?.offline ? [{ who: String(health.offline), what: t.ops_offlineSensors, href: "#module-stoma", tone: "bg-warn" }] : []),
+    ...(health?.offline ? [{ who: String(health.offline), what: t.ops_offlineSensors, href: "#module-lora", tone: "bg-warn" }] : []),
     ...(rejected ? [{ who: t.ops_files, what: `${rejected} ${t.ops_rejected}`, href: `/o/${slug}/upload`, tone: "bg-warn" }] : []),
     ...o.signals.map(say),
   ];

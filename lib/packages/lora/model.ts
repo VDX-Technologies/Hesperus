@@ -1,10 +1,10 @@
-// Stoma model shared by the engine package (normalize, step, rules) and the console
+// LoRa model shared by the engine package (normalize, step, rules) and the console
 // (settings, presets, metrics, alert texts). Thermal frames come from the node's infrared
 // array (row-major °C, ir_w x ir_h); only the latest one is kept, in the node's properties.
 import type { Locale, PackageDef, SettingDef } from "../types";
 import type { RuleSpec } from "../../engine/rules";
 
-export interface StomaConfig {
+export interface LoraConfig {
   tMin: number;
   tMax: number;
   tMargin: number;
@@ -23,7 +23,7 @@ export interface StomaConfig {
   hotspotDelta: number; // pixel above the canopy median by this much = hot spot
 }
 
-export const DEFAULTS: StomaConfig = {
+export const DEFAULTS: LoraConfig = {
   tMin: 5,
   tMax: 32,
   tMargin: 2,
@@ -222,7 +222,7 @@ const TEXTS: Record<string, Record<Locale, (p: P) => string>> = {
  * The customer's thresholds as engine rules. Warning and alarm levels are separate families
  * (`<code>_warn` and `<code>`); the climate ones are also pushed to the node's status ring.
  */
-export function rulesFromConfig(c: Partial<StomaConfig>): RuleSpec[] {
+export function rulesFromConfig(c: Partial<LoraConfig>): RuleSpec[] {
   const k = { ...DEFAULTS, ...c };
   const r = (key: string, metric: string, op: RuleSpec["op"], threshold: number, severity: RuleSpec["severity"], push = false): RuleSpec =>
     ({ key, name: key, metric, object_type: "node", op, threshold, severity, push_to_device: push });
@@ -252,9 +252,9 @@ export function rulesFromConfig(c: Partial<StomaConfig>): RuleSpec[] {
   ];
 }
 
-export const stoma: PackageDef<StomaConfig> = {
-  id: "stoma",
-  name: "Stoma",
+export const lora: PackageDef<LoraConfig> = {
+  id: "lora",
+  name: "LoRa",
   tagline: { en: "Greenhouse climate, leaf and air", it: "Clima della serra, foglia e aria" },
   offlineAfterS: 5 * 60,
   defaults: DEFAULTS,

@@ -1,27 +1,27 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULTS, rulesFromConfig, stomaPackage } from "../../lib/packages/stoma";
+import { DEFAULTS, rulesFromConfig, loraPackage } from "../../lib/packages/lora";
 
 const at = (min: number) => new Date(Date.UTC(2026, 9, 17, 10, min));
 const run = (points: [number, Record<string, number>][]) => {
   const st: Record<string, unknown> = {};
   return points.map(([min, m]) => {
     const metrics: Record<string, number | null | undefined> = { ...m };
-    stomaPackage.step!(metrics, at(min), st);
+    loraPackage.step!(metrics, at(min), st);
     return metrics;
   });
 };
 
-describe("stoma package", () => {
+describe("lora package", () => {
   it("normalizes a payload with an infrared frame", () => {
     const data = Array.from({ length: 64 }, (_, i) => (i < 4 ? 30 : 20));
-    const n = stomaPackage.normalize({ node_id: 7, temp_c: 20, rh: 80, ir_w: 8, ir_h: 8, ir: data, cfg_ver: 3 });
+    const n = loraPackage.normalize({ node_id: 7, temp_c: 20, rh: 80, ir_w: 8, ir_h: 8, ir: data, cfg_ver: 3 });
     if (Array.isArray(n)) throw new Error("one object expected");
     expect(n.object).toMatchObject({ type: "node", externalId: "7" });
     expect(n.metrics.leaf_c).toBe(20);
     expect(n.metrics.dew_c).toBeCloseTo(16.4, 1);
     expect(n.metrics.hot_area).toBe(6.3);
     expect(n.configAck).toBe(3);
-    expect(() => stomaPackage.normalize({ temp_c: 1 })).toThrow(/node_id/);
+    expect(() => loraPackage.normalize({ temp_c: 1 })).toThrow(/node_id/);
   });
 
   it("accumulates humid hours and resets them", () => {
@@ -34,7 +34,7 @@ describe("stoma package", () => {
     const st: Record<string, unknown> = {};
     const step = (min: number, rh: number) => {
       const m: Record<string, number | null | undefined> = { rh, cond_margin: 0 };
-      stomaPackage.step!(m, at(min), st);
+      loraPackage.step!(m, at(min), st);
       return m;
     };
     expect(step(0, 60).rh_ctl).toBe(60);

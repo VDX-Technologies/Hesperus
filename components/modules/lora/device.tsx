@@ -2,7 +2,7 @@ import Link from "next/link";
 import { tenantDb } from "@/lib/engine/db";
 import { series } from "@/lib/engine/query";
 import type { ConsoleObject } from "@/lib/packages/console";
-import { stoma } from "@/lib/packages/stoma/model";
+import { lora } from "@/lib/packages/lora/model";
 import type { Locale } from "@/lib/packages/types";
 import { timeAgo, type Dict } from "@/lib/i18n";
 import { fmt, SectionTitle, StatusLabel } from "@/components/ui";
@@ -30,8 +30,8 @@ function RiskBar({ label, value, warn, detail }: { label: string; value: number;
 const CHART_KEYS = ["temp_c", "leaf_c", "dew_c", "rh", "vpd_kpa", "co2", "voc", "par", "uvi", "leaf_air", "ir_spread", "wet_h"];
 const LEAF_DAYS = 14;
 
-/** Stoma object page: live values, today's light, latest IR frame, history charts from the engine series. */
-export async function StomaDevice({
+/** LoRa object page: live values, today's light, latest IR frame, history charts from the engine series. */
+export async function LoraDevice({
   orgId,
   device,
   range,
@@ -51,14 +51,14 @@ export async function StomaDevice({
   const midnight = new Date(now);
   midnight.setHours(0, 0, 0, 0);
   const [hist, light] = await Promise.all([
-    series(db, { objectId: device.id, module: "stoma", metrics: CHART_KEYS, from: new Date(now.getTime() - (range === "7d" ? 7 : 1) * 86400000), to: now }),
-    series(db, { objectId: device.id, module: "stoma", metrics: ["par"], from: midnight, to: now }),
+    series(db, { objectId: device.id, module: "lora", metrics: CHART_KEYS, from: new Date(now.getTime() - (range === "7d" ? 7 : 1) * 86400000), to: now }),
+    series(db, { objectId: device.id, module: "lora", metrics: ["par"], from: midnight, to: now }),
   ]);
   // no IR frame (single-point sensor): leaf temperature hour by hour instead
   const ir = (device.properties.ir ?? null) as ThermalFrame | null;
   const leafHours = ir
     ? null
-    : await series(db, { objectId: device.id, module: "stoma", metrics: ["leaf_c", "dew_c"], from: new Date(now.getTime() - LEAF_DAYS * 86400000), to: now, level: "1h" });
+    : await series(db, { objectId: device.id, module: "lora", metrics: ["leaf_c", "dew_c"], from: new Date(now.getTime() - LEAF_DAYS * 86400000), to: now, level: "1h" });
   const pairs = (k: string): HourlyPoints => (leafHours?.series[k] ?? []).map((p) => [p.ts.getTime(), p.value]);
 
   // one chart row per timestamp with every metric that has a point there
@@ -81,14 +81,14 @@ export async function StomaDevice({
   const v = device.values;
   const pkgState = (device.state.pkg ?? {}) as Record<string, unknown>;
   const irrigating = typeof pkgState.irrigation_until === "number" && pkgState.irrigation_until > now.getTime();
-  const cfg = { ...stoma.defaults, ...((device.properties.config ?? {}) as object) };
-  const L = (k: string) => stoma.metrics.find((m) => m.key === k)!.label[locale];
+  const cfg = { ...lora.defaults, ...((device.properties.config ?? {}) as object) };
+  const L = (k: string) => lora.metrics.find((m) => m.key === k)!.label[locale];
 
   return (
     <div>
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <div className="text-xs text-dim">Stoma{device.externalId && ` · #${device.externalId}`}</div>
+          <div className="text-xs text-dim">LoRa{device.externalId && ` · #${device.externalId}`}</div>
           <h1 className="text-2xl font-semibold tracking-tight">{device.name}</h1>
           <div className="mt-2 flex flex-wrap items-center gap-4 text-sm text-mist">
             <StatusLabel status={status} t={t} />
@@ -108,7 +108,7 @@ export async function StomaDevice({
       </div>
 
       <div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
-        {stoma.metrics.map((m) => (
+        {lora.metrics.map((m) => (
           <div key={m.key} className="card p-4">
             <div className="text-[11px] text-dim">{m.label[locale]}</div>
             <div className="num mt-1 text-xl">

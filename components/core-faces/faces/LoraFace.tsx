@@ -2,7 +2,7 @@ import { CoreShell } from "../CoreShell";
 import { hourLabels, noise, series, sun } from "../data";
 import { CORE, Card, Chart, Dot, Metric, SectionLabel } from "../ui";
 
-/** 24 h of a Stoma unit ending at 14:30, sampled every 15 minutes. */
+/** 24 h of a LoRa unit ending at 14:30, sampled every 15 minutes. */
 const END = 14.5 / 24;
 const N = 96;
 const air = series(N, END, (t, i) => 15 + 12.5 * sun(t) + noise(i, 1) * 0.25);
@@ -33,16 +33,16 @@ const METRICS = [
 
 const CHART = { width: 716, height: 300 };
 
-/** Face 1: the Stoma module, a sensor in a greenhouse on a clear afternoon. */
-export function StomaFace() {
+/** Face 1: the LoRa module, a sensor in a greenhouse on a clear afternoon. */
+export function LoraFace() {
   return (
     <CoreShell workspace="Vivai Demo" nav={["Overview", "Alerts", "Settings"]}>
       <div className="px-[72px] pt-8">
         <p className="text-[15px] text-mist">← Overview</p>
         <div className="mt-6 flex items-end justify-between">
           <div>
-            <p className="text-[14px] text-mist">Stoma · #3</p>
-            <h3 className="mt-1 text-[32px] font-semibold tracking-[-0.01em]">Stoma 3</h3>
+            <p className="text-[14px] text-mist">LoRa · #3</p>
+            <h3 className="mt-1 text-[32px] font-semibold tracking-[-0.01em]">LoRa 3</h3>
             <p className="mt-3 flex items-center gap-3 text-[15px]">
               <Dot tone="ok" pulse />
               <span style={{ color: CORE.ok }}>Normal</span>

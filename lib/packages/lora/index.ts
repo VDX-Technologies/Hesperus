@@ -1,13 +1,13 @@
-// Stoma as a module package: greenhouse climate nodes behind a LoRa gateway.
+// LoRa module package: greenhouse climate nodes behind a LoRa gateway.
 // normalize() turns one gateway payload into node metrics (the physics lives in
 // model.ts); step() carries the counters that need hours of history (leaf wetness,
 // botrytis and mildew risk, irrigation pauses) in the node's package state. Alarms are plain
 // engine rules over these metrics, built from the customer's thresholds by rulesFromConfig().
 import { ValidationError, type ModulePackage } from "../../engine/package";
-import { DEFAULTS, dewPoint, irFrame, luxToPar, rulesFromConfig, stoma, vpd, type StomaConfig } from "./model";
+import { DEFAULTS, dewPoint, irFrame, luxToPar, rulesFromConfig, lora, vpd, type LoraConfig } from "./model";
 
-export { DEFAULTS, rulesFromConfig, stoma };
-export type { StomaConfig };
+export { DEFAULTS, rulesFromConfig, lora };
+export type { LoraConfig };
 
 const num = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
 const median = (a: number[]) => [...a].sort((x, y) => x - y)[Math.floor(a.length / 2)];
@@ -30,14 +30,14 @@ const HELPERS = [
   { key: "hot_area", unit: "%", label: { en: "Infrared hot area", it: "Area calda infrarossa" } },
 ];
 
-export const stomaPackage: ModulePackage = {
-  id: "stoma",
+export const loraPackage: ModulePackage = {
+  id: "lora",
   objectTypes: [{
     key: "node",
-    name: { en: "Stoma node", it: "Nodo Stoma" },
+    name: { en: "LoRa node", it: "Nodo LoRa" },
     properties: { ir: { type: "object" }, config: { type: "object" } },
   }],
-  metrics: [...stoma.metrics.map((m) => ({ key: m.key, unit: m.unit, label: m.label })), ...HELPERS],
+  metrics: [...lora.metrics.map((m) => ({ key: m.key, unit: m.unit, label: m.label })), ...HELPERS],
 
   normalize(p) {
     const id = p.node_id;
@@ -84,8 +84,8 @@ export const stomaPackage: ModulePackage = {
     const prevTs = num(st.ts);
     if (prevTs !== null && now <= prevTs) return; // late point: no counters, state untouched
     const rh = m.rh ?? null, t = m.temp_c ?? null, margin = m.cond_margin ?? null;
-    const cfg: StomaConfig = { ...DEFAULTS };
-    for (const key of Object.keys(DEFAULTS) as (keyof StomaConfig)[]) {
+    const cfg: LoraConfig = { ...DEFAULTS };
+    for (const key of Object.keys(DEFAULTS) as (keyof LoraConfig)[]) {
       const value = context?.config[key];
       if (typeof value === "number" && Number.isFinite(value)) cfg[key] = value;
     }

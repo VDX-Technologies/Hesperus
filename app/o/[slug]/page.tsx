@@ -27,16 +27,16 @@ export default async function Overview(props: PageProps<"/o/[slug]">) {
   const period = periodFrom(sp.p);
   const agronomy = modules.some((m) => m.module === "agronomy");
   const pkgs = modules.map((m) => getPackage(m.module)).filter((p): p is NonNullable<typeof p> => !!p);
-  const [legacy, types, uploads, allAlerts, alertCounts, stomaCards] = await Promise.all([
+  const [legacy, types, uploads, allAlerts, alertCounts, loraCards] = await Promise.all([
     role === "owner" ? countLegacyEntries(db, org.id) : Promise.resolve(0),
     listEventTypes(db, pkgs),
     listUploads(db, 200),
     listAlerts(db, locale, { limit: 500 }),
     countOpenAlertSummary(db),
-    modules.some((m) => m.module === "stoma") ? listObjects(db, "stoma") : Promise.resolve([]),
+    modules.some((m) => m.module === "lora") ? listObjects(db, "lora") : Promise.resolve([]),
   ]);
-  const offlineCount = stomaCards.filter((d) => d.status === "offline").length;
-  const freshest = stomaCards.map((d) => d.lastSeen).filter((x): x is string => !!x).sort().at(-1) ?? null;
+  const offlineCount = loraCards.filter((d) => d.status === "offline").length;
+  const freshest = loraCards.map((d) => d.lastSeen).filter((x): x is string => !!x).sort().at(-1) ?? null;
   const headerStatus = alertCounts.alarms ? "alarm" : alertCounts.open || offlineCount ? "warn" : "ok";
   const now = new Date();
   const day = (t: number) => new Date(t).toISOString().slice(0, 10);
@@ -124,7 +124,7 @@ export default async function Overview(props: PageProps<"/o/[slug]">) {
       <div className="min-w-0 space-y-8">
         <OpsBoard
           db={db} slug={slug} t={t} locale={locale} period={period} types={types} alerts={allAlerts} uploads={uploads}
-          health={{ total: stomaCards.length, offline: offlineCount, warn: stomaCards.filter((d) => d.status === "warn").length, alarm: stomaCards.filter((d) => d.status === "alarm").length }}
+          health={{ total: loraCards.length, offline: offlineCount, warn: loraCards.filter((d) => d.status === "warn").length, alarm: loraCards.filter((d) => d.status === "alarm").length }}
           openAlertCount={alertCounts.open} openAlarmCount={alertCounts.alarms} now={now}
         />
         {modules.some((m) => hasUi(m.module)) && (
@@ -133,19 +133,19 @@ export default async function Overview(props: PageProps<"/o/[slug]">) {
             <div className="space-y-3">
               {modules.map((m) => {
                 if (!hasUi(m.module)) return null;
-                if (m.module === "stoma") {
-                  const W = MODULE_UI.stoma.Overview;
+                if (m.module === "lora") {
+                  const W = MODULE_UI.lora.Overview;
                   return (
                     <details key={m.module} open={offlineCount > 0} className="card overflow-hidden">
                       <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 text-sm text-frost">
-                        <span>Stoma</span>
+                        <span>LoRa</span>
                         <span className="flex items-center gap-3 text-xs text-mist">
                           {offlineCount > 0 && <span className="inline-flex items-center gap-1.5"><StatusDot status="warn" />{offlineCount} {t.ops_offlineSensors}</span>}
-                          <span>{stomaCards.length} {t.devices.toLowerCase()}</span>
+                          <span>{loraCards.length} {t.devices.toLowerCase()}</span>
                         </span>
                       </summary>
                       <div className="border-t border-line-soft p-4">
-                        <W orgId={org.id} slug={slug} t={t} locale={locale} cards={stomaCards} />
+                        <W orgId={org.id} slug={slug} t={t} locale={locale} cards={loraCards} />
                       </div>
                     </details>
                   );

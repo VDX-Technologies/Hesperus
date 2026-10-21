@@ -10,7 +10,7 @@ import { fmt, SectionTitle } from "@/components/ui";
 import { TimeChart } from "@/components/chart";
 import { TreatmentRows } from "./rows";
 
-/** Crop page: its details, the treatments on it, and the climate of the area when a Stoma sensor is there. */
+/** Crop page: its details, the treatments on it, and the climate of the area when a LoRa sensor is there. */
 export async function AgronomyDevice({ orgId, device, baseHref, t, locale }: {
   orgId: string; device: ConsoleObject; range: "24h" | "7d"; baseHref: string; t: Dict; locale: Locale;
 }) {
@@ -23,7 +23,7 @@ export async function AgronomyDevice({ orgId, device, baseHref, t, locale }: {
   const from = new Date(now.getTime() - 30 * 86400000);
   const charts = await Promise.all(
     sensors.map(async (s) => {
-      const h = await series(db, { objectId: s.id, module: "stoma", metrics: ["rh", "wet_h"], from, to: now });
+      const h = await series(db, { objectId: s.id, module: "lora", metrics: ["rh", "wet_h"], from, to: now });
       const byTs = new Map<number, Record<string, number>>();
       for (const [k, pts] of Object.entries(h.series))
         for (const p of pts) {

@@ -56,7 +56,7 @@ function sample(f: ThermalFrame, x: number, y: number) {
 }
 
 /**
- * What the Stoma infrared array sees, as a heat map. "temp" colours by temperature (auto range),
+ * What the LoRa infrared array sees, as a heat map. "temp" colours by temperature (auto range),
  * "dew" colours by distance from the dew point so wet leaves stand out in blue.
  */
 export function ThermalMap({

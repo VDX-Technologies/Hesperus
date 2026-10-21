@@ -1,5 +1,5 @@
 // Reads for the Agronomy console: crops with their place, the treatments register with its
-// filters, autocomplete from what was already written, and the Stoma sensors in a crop's area.
+// filters, autocomplete from what was already written, and the LoRa sensors in a crop's area.
 import "server-only";
 import type { TenantDb } from "../../engine/db";
 import { listEvents, type EventRow } from "../../engine/events";
@@ -75,7 +75,7 @@ export async function suggestions(db: TenantDb): Promise<{ product: string[]; ad
   };
 }
 
-/** Stoma sensors located in the crop's area (or below it); empty when the crop has no place. */
+/** LoRa sensors located in the crop's area (or below it); empty when the crop has no place. */
 export async function sensorsInPlace(db: TenantDb, placeId: string | null): Promise<{ id: string; name: string }[]> {
   if (!placeId) return [];
   const { rows } = await db.query<{ id: string; name: string | null; external_id: string | null }>(
@@ -87,7 +87,7 @@ export async function sensorsInPlace(db: TenantDb, placeId: string | null): Prom
      select o.id, o.name, o.external_id from objects o
        join object_types t on t.id = o.type_id
        join links l on l.tenant_id = o.tenant_id and l.type = 'located_in' and l.src_id = o.id
-      where o.tenant_id = $1 and t.module = 'stoma' and l.dst_id in (select id from scope)
+      where o.tenant_id = $1 and t.module = 'lora' and l.dst_id in (select id from scope)
       order by coalesce(o.name, o.external_id)`,
     [db.tenantId, placeId],
   );

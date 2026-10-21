@@ -1,11 +1,11 @@
 // Console side of the installed packages, and products on the roadmap.
-import { stoma } from "./stoma/model";
+import { lora } from "./lora/model";
 import { records } from "./records/model";
 import { agronomy } from "./agronomy/model";
 import type { PackageDef } from "./types";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export const PACKAGES: Record<string, PackageDef<any>> = { [stoma.id]: stoma, [records.id]: records, [agronomy.id]: agronomy };
+export const PACKAGES: Record<string, PackageDef<any>> = { [lora.id]: lora, [records.id]: records, [agronomy.id]: agronomy };
 
 /** Shown in the vendor console, not yet installable. */
 export const UPCOMING = [
