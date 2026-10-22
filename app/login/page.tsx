@@ -10,7 +10,7 @@ async function signIn(formData: FormData) {
   "use server";
   const supabase = await createClient();
   const { error } = await supabase.auth.signInWithPassword({
-    email: String(formData.get("email")),
+    email: String(formData.get("email") ?? "").trim().toLowerCase(),
     password: String(formData.get("password")),
   });
   redirect(error ? "/login?error=1" : "/");

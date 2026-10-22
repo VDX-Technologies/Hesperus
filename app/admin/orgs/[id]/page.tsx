@@ -189,22 +189,47 @@ async function updateDevice(formData: FormData) {
 async function addMember(formData: FormData) {
   "use server";
   const { user } = await requireAdmin();
-  const org = String(formData.get("org"));
+  const org = String(formData.get("org") ?? "");
   const admin = createAdminClient();
   const email = String(formData.get("email")).trim().toLowerCase();
-  const { data: list } = await admin.auth.admin.listUsers();
-  let userId = list?.users.find((u) => u.email === email)?.id;
+  const password = String(formData.get("password") ?? "");
+  if (!org || !email || password.length < 8) throw new Error("Email and a password of at least 8 characters are required.");
+  const { data: list, error: listError } = await admin.auth.admin.listUsers({ page: 1, perPage: 1000 });
+  if (listError) throw new Error(listError.message);
+  let userId = list.users.find((u) => u.email?.toLowerCase() === email)?.id;
   if (!userId) {
     const { data, error } = await admin.auth.admin.createUser({
       email,
-      password: String(formData.get("password")),
+      password,
       email_confirm: true,
     });
     if (error) throw new Error(error.message);
     userId = data.user.id;
+  } else {
+    // The password field is explicitly labeled as temporary: apply it to existing accounts too.
+    const { error } = await admin.auth.admin.updateUserById(userId, { password });
+    if (error) throw new Error(error.message);
   }
-  await admin.from("memberships").upsert({ org_id: org, user_id: userId, role: String(formData.get("role")) });
+  const { error: membershipError } = await admin.from("memberships").upsert({ org_id: org, user_id: userId, role: String(formData.get("role")) });
+  if (membershipError) throw new Error(membershipError.message);
   await record(tenantDb(org), user, "member.add", { subject: email, data: { role: String(formData.get("role")) } });
+  revalidatePath(path(org));
+}
+
+async function changeMemberPassword(formData: FormData) {
+  "use server";
+  const { user } = await requireAdmin();
+  const org = String(formData.get("org") ?? "");
+  const userId = String(formData.get("user") ?? "");
+  const password = String(formData.get("password") ?? "");
+  if (!org || !userId || password.length < 8) throw new Error("A password of at least 8 characters is required.");
+  const admin = createAdminClient();
+  const { data: membership, error: membershipError } = await admin.from("memberships").select("user_id").eq("org_id", org).eq("user_id", userId).maybeSingle();
+  if (membershipError) throw new Error(membershipError.message);
+  if (!membership) throw new Error("User is not a member of this organization.");
+  const { error } = await admin.auth.admin.updateUserById(userId, { password });
+  if (error) throw new Error(error.message);
+  await record(tenantDb(org), user, "member.password", { data: { user: userId } });
   revalidatePath(path(org));
 }
 
@@ -518,7 +543,8 @@ async function Sites({ id, t, locale, weatherStatus }: Ctx & { locale: Locale; w
 
 async function Members({ id, t }: Ctx) {
   const admin = createAdminClient();
-  const { data: members } = await admin.from("memberships").select("user_id, role").eq("org_id", id);
+  const { data: members, error } = await admin.from("memberships").select("user_id, role").eq("org_id", id);
+  if (error) throw new Error(error.message);
   // one lookup per member instead of listing every user of the platform
   const users = await Promise.all((members ?? []).map((m) => admin.auth.admin.getUserById(m.user_id)));
 
@@ -527,10 +553,16 @@ async function Members({ id, t }: Ctx) {
       <SectionTitle>{t.members}</SectionTitle>
       <div className="card divide-y divide-line-soft">
         {(members ?? []).map((m, i) => (
-          <div key={m.user_id} className="flex items-center justify-between gap-3 px-5 py-3 text-sm">
+          <div key={m.user_id} className="flex flex-wrap items-center justify-between gap-3 px-5 py-3 text-sm">
             <span className="truncate">{users[i].data.user?.email ?? m.user_id}</span>
             <span className="flex items-center gap-4">
               <span className="text-dim">{t[`role_${m.role as "owner" | "member" | "viewer"}`]}</span>
+              <form action={changeMemberPassword} className="flex items-center gap-2">
+                <input type="hidden" name="org" value={id} />
+                <input type="hidden" name="user" value={m.user_id} />
+                <input name="password" type="password" placeholder={t.newPassword} minLength={8} required autoComplete="new-password" className="h-8 w-40 text-xs" />
+                <button className="btn text-xs">{t.changePassword}</button>
+              </form>
               <form action={removeMember}>
                 <input type="hidden" name="org" value={id} />
                 <input type="hidden" name="user" value={m.user_id} />
