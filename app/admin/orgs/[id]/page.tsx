@@ -6,6 +6,7 @@ import { getT, timeAgo, type Dict } from "@/lib/i18n";
 import type { Locale } from "@/lib/packages/types";
 import { tenantDb } from "@/lib/engine/db";
 import { upsertRules } from "@/lib/engine/rules";
+import { revokeTokens } from "@/lib/engine/sources";
 import { listAudit, record } from "@/lib/engine/audit";
 import { ActivityList } from "@/components/activity-list";
 import { listObjects } from "@/lib/packages/console";
@@ -43,6 +44,17 @@ async function saveThresholds(formData: FormData) {
     await upsertRules(tenantDb(org), mod.id, mod.rules(config), null);
     await record(tenantDb(org), user, "thresholds.org", { subject: mod.id, data: config });
   }
+  revalidatePath(path(org));
+}
+
+/** Deletes one push token, or all of the organization's when no source id is sent. */
+async function deleteTokens(formData: FormData) {
+  "use server";
+  const { user } = await requireAdmin();
+  const org = String(formData.get("org"));
+  const source = String(formData.get("id") ?? "") || undefined;
+  const n = await revokeTokens(tenantDb(org), org, source);
+  if (n) await record(tenantDb(org), user, "token.delete", { objectId: source ?? null, subject: String(formData.get("name") ?? "") || null, data: { count: n } });
   revalidatePath(path(org));
 }
 
@@ -245,6 +257,7 @@ function Overview({
 }: Ctx & { enabled: Map<string, { enabled: boolean }>; locale: Locale }) {
   return (
     <>
+      <Tokens id={id} t={t} locale={locale} />
       <SectionTitle>{t.modules}</SectionTitle>
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         {Object.values(PACKAGES).map((m) => {
@@ -272,6 +285,59 @@ function Overview({
           </div>
         ))}
       </div>
+    </>
+  );
+}
+
+/** The organization's push tokens (one per gateway source): delete one, or all of them at once. */
+async function Tokens({ id, t, locale }: Ctx & { locale: Locale }) {
+  const { rows } = await tenantDb(id).query<{ id: string; name: string; module: string; token_hint: string | null; last_seen: Date | null }>(
+    `select id, name, module, token_hint, last_seen from sources where tenant_id = $1 and connector = 'push' order by name`,
+    [id],
+  );
+  if (!rows.length) return null;
+  const live = rows.filter((r) => r.token_hint).length;
+  return (
+    <>
+      <SectionTitle
+        right={
+          live > 0 && (
+            <form action={deleteTokens}>
+              <input type="hidden" name="org" value={id} />
+              <ConfirmButton message={t.deleteAllTokensConfirm} className="btn text-xs text-alarm">
+                {t.deleteAllTokens} ({live})
+              </ConfirmButton>
+            </form>
+          )
+        }
+      >
+        {t.tokens}
+      </SectionTitle>
+      <div className="card divide-y divide-line-soft">
+        {rows.map((r) => (
+          <div key={r.id} className="flex flex-wrap items-center gap-3 px-5 py-3 text-sm">
+            <span className="min-w-0 flex-1 truncate font-medium">{r.name}</span>
+            <span className="num text-xs text-dim">{r.module}</span>
+            <span className="num w-28 text-xs text-dim">{timeAgo(r.last_seen?.toISOString() ?? null, locale, t)}</span>
+            {r.token_hint ? (
+              <>
+                <span className="num w-16 text-mist">…{r.token_hint}</span>
+                <form action={deleteTokens}>
+                  <input type="hidden" name="org" value={id} />
+                  <input type="hidden" name="id" value={r.id} />
+                  <input type="hidden" name="name" value={r.name} />
+                  <ConfirmButton message={t.deleteTokenConfirm} className="btn text-xs text-alarm">
+                    {t.deleteToken}
+                  </ConfirmButton>
+                </form>
+              </>
+            ) : (
+              <span className="text-xs text-warn">{t.noToken}</span>
+            )}
+          </div>
+        ))}
+      </div>
+      <p className="mt-2 text-xs text-dim">{t.tokensHelp}</p>
     </>
   );
 }

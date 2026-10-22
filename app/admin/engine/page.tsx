@@ -6,7 +6,10 @@ import { getT, timeAgo } from "@/lib/i18n";
 import { crossTenantAccess, crossTenantDb } from "@/lib/engine/db";
 import { dbBytes, monthUsage, type HealthReport } from "@/lib/engine/health";
 import { getSettings, num } from "@/lib/engine/settings";
-import { createSource, rotateToken } from "@/lib/engine/sources";
+import { createSource, revokeTokens, rotateToken } from "@/lib/engine/sources";
+import { record } from "@/lib/engine/audit";
+import { tenantDb } from "@/lib/engine/db";
+import { ConfirmButton } from "@/components/confirm-button";
 import { packageIds } from "@/lib/packages";
 import { SectionTitle } from "@/components/ui";
 
@@ -39,6 +42,15 @@ async function newToken(formData: FormData) {
   "use server";
   await requireAdmin();
   await showToken(await rotateToken(crossTenantDb(crossTenantAccess.admin), String(formData.get("id"))));
+}
+
+async function deleteToken(formData: FormData) {
+  "use server";
+  const { user } = await requireAdmin();
+  const org = String(formData.get("org"));
+  const id = String(formData.get("id"));
+  if (await revokeTokens(tenantDb(org), org, id)) await record(tenantDb(org), user, "token.delete", { objectId: id, subject: String(formData.get("name")), data: { count: 1 } });
+  revalidatePath(PATH);
 }
 
 async function setStatus(formData: FormData) {
@@ -84,8 +96,8 @@ export default async function EnginePage() {
   const [usage, dbSize, sources, jobs, notices, orgs] = await Promise.all([
     monthUsage(db),
     dbBytes(db),
-    db.query<{ id: string; name: string; org: string; module: string; connector: string; status: string; token_hint: string | null; last_seen: Date | null; last_error: string | null }>(
-      `select s.id, s.name, o.name org, s.module, s.connector, s.status, s.token_hint, s.last_seen, s.last_error
+    db.query<{ id: string; tenant_id: string; name: string; org: string; module: string; connector: string; status: string; token_hint: string | null; last_seen: Date | null; last_error: string | null }>(
+      `select s.id, s.tenant_id, s.name, o.name org, s.module, s.connector, s.status, s.token_hint, s.last_seen, s.last_error
        from sources s join organizations o on o.id = s.tenant_id order by o.name, s.name`,
     ),
     db.query<{ name: string; last_run: Date | null; last_ok: Date | null; last_error: string | null; last_duration_ms: number | null; last_result: unknown }>(
@@ -161,7 +173,7 @@ export default async function EnginePage() {
                 <td className="py-2 pr-4">
                   <div className="font-medium">{r.name}</div>
                   <div className="num text-xs text-dim">
-                    {r.module} · {r.connector}{r.connector === "push" && <> · …{r.token_hint}</>}
+                    {r.module} · {r.connector}{r.connector === "push" && (r.token_hint ? <> · …{r.token_hint}</> : <> · <span className="text-warn">{t.noToken}</span></>)}
                   </div>
                 </td>
                 <td className="py-2 pr-4 text-mist">{r.org}</td>
@@ -179,6 +191,16 @@ export default async function EnginePage() {
                       <input type="hidden" name="id" value={r.id} />
                       <button className="btn text-xs">{t.newToken}</button>
                     </form>
+                    {r.token_hint && (
+                      <form action={deleteToken}>
+                        <input type="hidden" name="org" value={r.tenant_id} />
+                        <input type="hidden" name="id" value={r.id} />
+                        <input type="hidden" name="name" value={r.name} />
+                        <ConfirmButton message={t.deleteTokenConfirm} className="btn text-xs text-alarm">
+                          {t.deleteToken}
+                        </ConfirmButton>
+                      </form>
+                    )}
                   </div>
                 </td>
               </tr>

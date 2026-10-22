@@ -49,3 +49,16 @@ export async function rotateToken(db: Db, sourceId: string): Promise<string> {
   if (!rowCount) throw new Error(`no source ${sourceId}`);
   return token;
 }
+
+/**
+ * Deletes the push token of one source, or of every source of the organization when no source is
+ * given: pushes with it are refused at once, the source and its data stay. Returns how many went.
+ */
+export async function revokeTokens(db: Db, tenantId: string, sourceId?: string): Promise<number> {
+  const { rowCount } = await db.query(
+    `update sources set token_hash = null, token_hint = null
+     where tenant_id = $1 and ($2::uuid is null or id = $2) and token_hash is not null`,
+    [tenantId, sourceId ?? null],
+  );
+  return rowCount ?? 0;
+}
