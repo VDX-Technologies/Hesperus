@@ -8,6 +8,9 @@ import { SectionTitle } from "@/components/ui";
 import { Flash } from "@/components/flash";
 import type { SettingDef } from "@/lib/packages/types";
 import { saveDeviceSettings } from "./actions";
+import { setConsent } from "../consent-actions";
+import { getConsent } from "@/lib/consent";
+import { ConfirmButton } from "@/components/confirm-button";
 
 const shown = (v: number | undefined, scale = 1) => (v === undefined ? "" : String(Math.round((v / scale) * 100) / 100));
 
@@ -21,11 +24,14 @@ function groups(settings: SettingDef[]) {
 export default async function Settings(props: PageProps<"/o/[slug]/settings">) {
   const { slug } = await props.params;
   const { saved, error } = await props.searchParams;
-  const { org, modules, role } = await requireOrg(slug);
+  const { supabase, user, org, modules, role, isAdmin } = await requireOrg(slug);
   const editable = role === "owner";
   const back = `/o/${slug}/settings`;
   const { t, locale } = await getT();
-  const lists = await Promise.all(modules.map((m) => listObjects(tenantDb(org.id), m.module)));
+  const [lists, consent] = await Promise.all([
+    Promise.all(modules.map((m) => listObjects(tenantDb(org.id), m.module))),
+    isAdmin ? null : getConsent(supabase, user.id),
+  ]);
   return (
     <div>
       <h1 className="text-2xl font-semibold tracking-tight">{t.settings}</h1>
@@ -151,6 +157,30 @@ export default async function Settings(props: PageProps<"/o/[slug]/settings">) {
           </section>
         );
       })}
+      {consent && (
+        <section>
+          <SectionTitle>{t.consentSettings}</SectionTitle>
+          <form action={setConsent} className="card flex flex-wrap items-center justify-between gap-3 p-4">
+            <input type="hidden" name="slug" value={slug} />
+            <input type="hidden" name="back" value={back} />
+            <input type="hidden" name="granted" value={consent.granted ? "0" : "1"} />
+            <div className="min-w-0">
+              <div className="text-sm font-medium text-ice">{consent.granted ? t.consentGranted : t.consentWithdrawn}</div>
+              <p className="mt-0.5 text-xs text-mist">
+                {t.consentSignedBy} {consent.signed_name} · {new Date(consent.signed_at).toLocaleDateString(locale)} · v{consent.version}
+                {!consent.granted && <> · {t.consentWithdrawnOn} {new Date(consent.changed_at).toLocaleDateString(locale)}</>}
+              </p>
+            </div>
+            {consent.granted ? (
+              <ConfirmButton message={t.consentWithdrawConfirm} className="btn shrink-0 text-xs">
+                {t.consentWithdraw}
+              </ConfirmButton>
+            ) : (
+              <button className="btn shrink-0 border-frost text-xs">{t.consentRegrant}</button>
+            )}
+          </form>
+        </section>
+      )}
     </div>
   );
 }
