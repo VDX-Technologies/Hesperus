@@ -10,10 +10,9 @@ export default async function OrgLayout(props: LayoutProps<"/o/[slug]">) {
   const { org, isAdmin, modules } = await requireOrg(slug);
   const { t, locale } = await getT();
   const db = tenantDb(org.id);
-  const [count, uploads, weatherAlerts] = await Promise.all([
+  const [count, uploads] = await Promise.all([
     countOpenAlerts(db),
     db.query(`select 1 from sources where tenant_id = $1 and connector = 'upload' limit 1`, [org.id]),
-    db.query<{ open: number }>(`select count(*)::int open from weather_alerts where tenant_id = $1 and status <> 'resolved'`, [org.id]),
   ]);
   const hasUpload = uploads.rowCount! > 0;
   return (
@@ -26,7 +25,6 @@ export default async function OrgLayout(props: LayoutProps<"/o/[slug]">) {
         isAdmin={isAdmin}
         nav={[
           { href: `/o/${slug}`, label: t.overview },
-          { href: `/o/${slug}/weather`, label: t.weather, badge: weatherAlerts.rows[0]?.open ?? 0 },
           { href: `/o/${slug}/alerts`, label: t.alerts, badge: count },
           { href: `/o/${slug}/registers`, label: t.registers },
           ...(modules.some((m) => m.module === "agronomy") ? [{ href: `/o/${slug}/crops`, label: t.crops }] : []),

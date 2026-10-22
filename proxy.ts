@@ -1,10 +1,7 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
-import { weatherTileSettings } from "./lib/weather-tiles";
-
 function contentSecurityPolicy(nonce: string) {
   const dev = process.env.NODE_ENV === "development";
-  const tile = weatherTileSettings();
   let supabaseOrigin = "";
   let websocketOrigin = "";
   try {
@@ -20,7 +17,7 @@ function contentSecurityPolicy(nonce: string) {
     `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'${dev ? " 'unsafe-eval'" : ""}`,
     `style-src 'self' 'nonce-${nonce}'`,
     "style-src-attr 'unsafe-inline'",
-    `img-src 'self' data: blob: ${tile.origin}`,
+    "img-src 'self' data: blob:",
     "font-src 'self'",
     `connect-src ${connectSources}`,
     "frame-ancestors 'none'",
