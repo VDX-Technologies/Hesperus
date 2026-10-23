@@ -1,6 +1,5 @@
 import type { MetadataRoute } from "next";
 
-/** PWA: installable on phones and desktops ("Add to Home Screen" / "Install app"). */
 export default function manifest(): MetadataRoute.Manifest {
   return {
     name: "VDX Core",
