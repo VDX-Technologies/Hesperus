@@ -16,6 +16,18 @@ const pct = (a: number[], p: number) => {
   return s[Math.min(s.length - 1, Math.floor((p / 100) * s.length))];
 };
 const round = (v: number | null, d: number) => (v === null ? null : Math.round(v * 10 ** d) / 10 ** d);
+
+/** What the node reports about itself (firmware, signal, sensors it found at boot), for the admin. */
+function deviceInfo(p: Record<string, unknown>) {
+  const fw = typeof p.fw === "string" ? p.fw.slice(0, 20) : null;
+  let sensors: Record<string, boolean> | null = null;
+  if (p.sensors && typeof p.sensors === "object" && !Array.isArray(p.sensors)) {
+    const found = Object.entries(p.sensors).filter(([k, v]) => /^[a-z0-9_]{1,24}$/.test(k) && typeof v === "boolean").slice(0, 12);
+    sensors = Object.fromEntries(found) as Record<string, boolean>;
+  }
+  if (fw === null && sensors === null) return undefined;
+  return { fw, rssi: num(p.rssi), sensors };
+}
 const inMildRange = (t: number | null | undefined) => typeof t === "number" && t >= 10 && t <= 25;
 
 /** Counters need hours of history; these are fixed so step() does not depend on rules. */
@@ -35,7 +47,7 @@ export const loraPackage: ModulePackage = {
   objectTypes: [{
     key: "node",
     name: { en: "LoRa node", it: "Nodo LoRa" },
-    properties: { ir: { type: "object" }, config: { type: "object" } },
+    properties: { ir: { type: "object" }, config: { type: "object" }, device: { type: "object" } },
   }],
   metrics: [...lora.metrics.map((m) => ({ key: m.key, unit: m.unit, label: m.label })), ...HELPERS],
 
@@ -53,11 +65,16 @@ export const loraPackage: ModulePackage = {
       irSpread = pct(frame.data, 95) - pct(frame.data, 5);
       hotArea = (100 * frame.data.filter((x) => x - med >= HOTSPOT_DELTA).length) / frame.data.length;
     }
+    const device = deviceInfo(p);
+    const properties = {
+      ...(frame ? { ir: { w: frame.w, h: frame.h, data: frame.data.map((x) => Math.round(x * 10) / 10) } } : {}),
+      ...(device ? { device } : {}),
+    };
     return {
       object: {
         type: "node",
         externalId: String(id),
-        properties: frame ? { ir: { w: frame.w, h: frame.h, data: frame.data.map((x) => Math.round(x * 10) / 10) } } : undefined,
+        properties: Object.keys(properties).length ? properties : undefined,
       },
       metrics: {
         temp_c: round(t, 2),

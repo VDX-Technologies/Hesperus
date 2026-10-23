@@ -24,6 +24,15 @@ describe("lora package", () => {
     expect(() => loraPackage.normalize({ temp_c: 1 })).toThrow(/node_id/);
   });
 
+  it("keeps what the node reports about its own hardware", () => {
+    const n = loraPackage.normalize({ node_id: "heltec-a1", lux: 900, fw: "1.2.0", rssi: -61, sensors: { bh1750: true, mlx90614: false, "bad key": true, x: 1 } });
+    if (Array.isArray(n)) throw new Error("one object expected");
+    expect(n.object.properties).toEqual({ device: { fw: "1.2.0", rssi: -61, sensors: { bh1750: true, mlx90614: false } } });
+    const old = loraPackage.normalize({ node_id: 7, temp_c: 20 });
+    if (Array.isArray(old)) throw new Error("one object expected");
+    expect(old.object.properties).toBeUndefined();
+  });
+
   it("accumulates humid hours and resets them", () => {
     const hum = { rh: 92, temp_c: 18 };
     const out = run([[0, hum], [30, hum], [60, hum], [90, { rh: 70, temp_c: 18 }]]);

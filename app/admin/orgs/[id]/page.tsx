@@ -258,6 +258,7 @@ function Overview({
   return (
     <>
       <Tokens id={id} t={t} locale={locale} />
+      <NodeSensors id={id} t={t} locale={locale} />
       <SectionTitle>{t.modules}</SectionTitle>
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         {Object.values(PACKAGES).map((m) => {
@@ -338,6 +339,52 @@ async function Tokens({ id, t, locale }: Ctx & { locale: Locale }) {
         ))}
       </div>
       <p className="mt-2 text-xs text-dim">{t.tokensHelp}</p>
+    </>
+  );
+}
+
+const SENSOR_NAMES: Record<string, string> = { bh1750: "Luce BH1750", ldr: "Fotoresistenza", mlx90614: "IR MLX90614" };
+/** Firmware before 1.2.0 does not report its sensors: a reading in the last day means the sensor is there. */
+const INFERRED: Record<string, string> = { lux: "Luce", leaf_c: "IR" };
+
+/** Which sensors each Heltec node finds at every push: green detected, red missing. */
+async function NodeSensors({ id, t, locale }: Ctx & { locale: Locale }) {
+  const nodes = await listObjects(tenantDb(id), "lora");
+  if (!nodes.length) return null;
+  const badge = (label: string, ok: boolean | null) => (
+    <span
+      key={label}
+      className={`rounded border px-2 py-0.5 text-xs ${ok === null ? "text-dim" : ok ? "border-ok/50 text-ok" : "border-alarm/50 text-alarm"}`}
+    >
+      {label}: {ok === null ? t.sensorNoData : ok ? t.sensorDetected : t.sensorMissing}
+    </span>
+  );
+  return (
+    <>
+      <SectionTitle>{t.nodeSensors}</SectionTitle>
+      <div className="card divide-y divide-line-soft">
+        {nodes.map((n) => {
+          const device = (n.properties?.device ?? {}) as { fw?: string | null; rssi?: number | null; sensors?: Record<string, boolean> | null };
+          const sensors = device.sensors ? Object.entries(device.sensors) : null;
+          return (
+            <div key={n.id} className="flex flex-wrap items-center gap-3 px-5 py-3 text-sm">
+              <span className="min-w-0 flex-1 truncate font-medium">
+                {n.name} <span className="num text-xs text-dim">#{n.externalId}</span>
+              </span>
+              <span className="num w-16 text-xs text-dim">{device.fw ? `v${device.fw}` : "—"}</span>
+              <span className="num w-20 text-xs text-dim">{device.rssi != null ? `${device.rssi} dBm` : ""}</span>
+              <span className="flex flex-wrap gap-2">
+                {sensors
+                  ? sensors.map(([k, ok]) => badge(SENSOR_NAMES[k] ?? k, ok))
+                  : Object.entries(INFERRED).map(([k, label]) => badge(label, k in n.values ? true : null))}
+              </span>
+              <span className="num w-28 text-xs text-dim">{timeAgo(n.lastSeen, locale, t)}</span>
+              {!sensors && <span className="w-full text-xs text-warn">{t.sensorInferred}</span>}
+            </div>
+          );
+        })}
+      </div>
+      <p className="mt-2 text-xs text-dim">{t.nodeSensorsHelp}</p>
     </>
   );
 }
