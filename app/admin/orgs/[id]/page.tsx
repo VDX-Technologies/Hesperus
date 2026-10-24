@@ -191,7 +191,7 @@ export default async function OrgAdmin(props: PageProps<"/admin/orgs/[id]">) {
           <h1 className="text-2xl font-semibold tracking-tight">{org.name}</h1>
           <div className="num text-xs text-dim">/{org.slug}</div>
         </div>
-        <Link href={`/o/${org.slug}`} className="btn">
+        <Link href={`/terra/o/${org.slug}`} className="btn">
           {t.openCustomer} →
         </Link>
       </div>

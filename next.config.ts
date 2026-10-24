@@ -16,6 +16,10 @@ const nextConfig: NextConfig = {
   async headers() {
     return [{ source: "/:path*", headers: security }];
   },
+  // the customer console moved under /terra: old bookmarks and already-delivered push notifications still land
+  async redirects() {
+    return [{ source: "/o/:path*", destination: "/terra/o/:path*", permanent: false }];
+  },
 };
 
 export default nextConfig;

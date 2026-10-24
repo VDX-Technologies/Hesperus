@@ -8,7 +8,7 @@ export default async function Home() {
   if (isAdmin) redirect("/admin");
   const { data } = await supabase.from("memberships").select("organizations(slug)").eq("user_id", user.id).limit(1);
   const slug = (data?.[0]?.organizations as unknown as { slug: string } | null)?.slug;
-  if (slug) redirect(`/o/${slug}`);
+  if (slug) redirect(`/terra/o/${slug}`);
   const { t } = await getT();
   return <p className="p-10 text-mist">{t.noOrg}</p>;
 }

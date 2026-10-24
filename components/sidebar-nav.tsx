@@ -22,7 +22,7 @@ function Icon({ name }: { name: string }) {
 }
 
 function iconFor(item: Item) {
-  if (/^\/o\/[^/]+$/.test(item.href)) return "overview";
+  if (/^\/terra\/o\/[^/]+$/.test(item.href)) return "overview";
   const key = item.href.split("/").at(-1) ?? "";
   if (key === "admin") return "customers";
   return key;
@@ -37,7 +37,7 @@ export function SidebarNav({ nav, extra, orientation = "vertical", label }: {
   const pathname = usePathname();
   const horizontal = orientation === "horizontal";
   const renderItem = (item: Item, isExtra = false) => {
-    const exactOnly = /^\/o\/[^/]+$/.test(item.href) || item.href === "/admin";
+    const exactOnly = /^\/terra\/o\/[^/]+$/.test(item.href) || item.href === "/admin";
     const active = pathname === item.href || (!exactOnly && pathname.startsWith(`${item.href}/`));
     return (
       <Link key={item.href} href={item.href} aria-current={active ? "page" : undefined}

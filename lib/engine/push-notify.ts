@@ -64,7 +64,7 @@ if (pushEnabled) {
           body: text(s.locale),
           tag: `alert-${t.alertId}`,
           severity: t.severity,
-          url: `/o/${a.slug}/devices/${t.objectId}`,
+          url: `/terra/o/${a.slug}/devices/${t.objectId}`,
         });
         try {
           await webpush.sendNotification({ endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } }, payload, { TTL: 6 * 3600, urgency: "high" });
