@@ -7,18 +7,18 @@ import { TypeEditorPage } from "@/components/registers/type-editor-page";
 import { saveObjectTypeAction } from "../../actions";
 import { researchContext } from "../../context";
 
-export default async function EditType(props: { params: Promise<{ slug: string }>; searchParams: Promise<{ key?: string | string[] }> }) {
+/** The schema editor of an object type (owner only): `?key=` edits a saved one. */
+export default async function EditType(props: PageProps<"/research/o/[slug]/types/edit">) {
   const { slug } = await props.params;
-  const sp = await props.searchParams;
-  const ctx = await researchContext(slug);
-  if (ctx.author.role !== "owner") notFound();
-  const key = typeof sp.key === "string" ? sp.key : "";
+  const { key } = await props.searchParams;
+  const { db, author } = await researchContext(slug);
+  if (author.role !== "owner") notFound();
+  const { locale } = await getT();
   let draft;
-  if (key) {
-    const type = await getObjectType(ctx.db, `${CUSTOM}.${key}`);
-    if (!type) notFound();
-    const { locale } = await getT();
-    draft = objectTypeDraft(type, locale);
+  if (typeof key === "string" && key) {
+    const o = await getObjectType(db, `${CUSTOM}.${key}`);
+    if (!o) notFound();
+    draft = objectTypeDraft(o, locale);
   }
-  return <TypeEditorPage db={ctx.db} slug={slug} kind="object" draft={draft} action={saveObjectTypeAction} />;
+  return <TypeEditorPage db={db} slug={slug} kind="object" draft={draft} action={saveObjectTypeAction} />;
 }

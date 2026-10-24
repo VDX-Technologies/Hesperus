@@ -364,13 +364,20 @@ export async function listObjects(
 
 export interface ObjectSearch {
   linkedTo?: { key: string; id: string };
+  /** words the name or the external id contains, case insensitive */
+  text?: string;
   /** property → value it must hold (string, number, integer or boolean properties) */
   where?: Record<string, unknown>;
   /** property → lowest / highest value (number or integer properties) */
   min?: Record<string, number>;
   max?: Record<string, number>;
-  /** a number, integer or string property, or "created" (the default, newest first) */
+  /** a number, integer or string property, "name", or "created" (the default, newest first) */
   order?: { by: string; desc?: boolean };
+  /**
+   * The fields inside object properties, which the type does not declare (a schema taken from a
+   * linked object): with them, "extra.tic_id" can be filtered and sorted on like a property.
+   */
+  schemas?: Record<string, Schema>;
   limit?: number;
   offset?: number;
 }
@@ -379,8 +386,9 @@ const numeric = (s: PropertySpec | undefined) => s?.type === "number" || s?.type
 
 /**
  * A page of the objects of one custom type, filtered on their properties, with the number of
- * objects that match. Only properties declared by the type can be filtered or sorted on; others
- * are ignored, so a stale link never breaks the page. Objects missing the sort property come last.
+ * objects that match. Only properties declared by the type (or by `schemas`, one level down) can
+ * be filtered or sorted on; others are ignored, so a stale link never breaks the page. Objects
+ * missing the sort property come last.
  */
 export async function searchObjects(db: TenantDb, type: string, q: ObjectSearch = {}): Promise<{ objects: CustomObject[]; total: number }> {
   const none = { objects: [], total: 0 };
@@ -390,25 +398,41 @@ export async function searchObjects(db: TenantDb, type: string, q: ObjectSearch 
   if (q.linkedTo && !link) return none;
   const params: unknown[] = [db.tenantId, RESERVED_LINKS, CUSTOM, t.key];
   const p = (v: unknown) => `$${params.push(v)}`;
+  // a declared property, or a field of an object property: its spec and its jsonb / text path
+  const at = (k: string) => {
+    const [top, sub, ...rest] = k.split(".");
+    const outer = t.properties[top];
+    if (sub === undefined) return outer ? { spec: outer, json: () => `o.properties->${p(top)}`, text: () => `o.properties->>${p(top)}` } : null;
+    const spec = outer?.type === "object" && !rest.length ? q.schemas?.[top]?.[sub] : undefined;
+    return spec ? { spec, json: () => `o.properties->${p(top)}->${p(sub)}`, text: () => `o.properties->${p(top)}->>${p(sub)}` } : null;
+  };
+  const numberAt = (f: NonNullable<ReturnType<typeof at>>) => `case when jsonb_typeof(${f.json()}) = 'number' then (${f.text()})::numeric end`;
   const conds: string[] = [];
   if (link) conds.push(`exists (select 1 from links l where l.tenant_id = $1 and l.src_id = o.id and l.type = ${p(link.key)} and l.dst_id = ${p(link.id)}::uuid)`);
-  const numberAt = (k: string) => `case when jsonb_typeof(o.properties->${p(k)}) = 'number' then (o.properties->>${p(k)})::numeric end`;
+  const text = q.text?.trim();
+  if (text) {
+    const like = p(`%${text.replace(/[\\%_]/g, (c) => `\\${c}`)}%`);
+    conds.push(`(o.name ilike ${like} or o.external_id ilike ${like})`);
+  }
   for (const [k, v] of Object.entries(q.where ?? {})) {
-    const s = t.properties[k];
-    if (v === undefined || v === null || v === "" || !s || !filterable(s)) continue;
-    conds.push(`o.properties->${p(k)} = ${p(JSON.stringify(v))}::jsonb`);
+    const f = at(k);
+    if (v === undefined || v === null || v === "" || !f || !filterable(f.spec)) continue;
+    conds.push(`${f.json()} = ${p(JSON.stringify(v))}::jsonb`);
   }
   for (const [bound, op] of [[q.min, ">="], [q.max, "<="]] as const) {
     for (const [k, v] of Object.entries(bound ?? {})) {
-      if (Number.isFinite(v) && numeric(t.properties[k])) conds.push(`${numberAt(k)} ${op} ${p(v)}`);
+      const f = at(k);
+      if (Number.isFinite(v) && f && numeric(f.spec)) conds.push(`${numberAt(f)} ${op} ${p(v)}`);
     }
   }
   const where = `${SELECT_OBJECTS} and t.key = $4${conds.map((c) => ` and ${c}`).join("")}`;
   const countParams = [...params];
-  const by = q.order?.by;
+  const by = q.order?.by ?? "";
   const dir = q.order?.desc ? "desc" : "asc";
-  const order = by && numeric(t.properties[by]) ? `${numberAt(by)} ${dir} nulls last, o.created_at desc`
-    : by && t.properties[by]?.type === "string" ? `o.properties->>${p(by)} ${dir} nulls last, o.created_at desc`
+  const f = at(by);
+  const order = f && numeric(f.spec) ? `${numberAt(f)} ${dir} nulls last, o.created_at desc`
+    : f && f.spec.type === "string" ? `${f.text()} ${dir} nulls last, o.created_at desc`
+    : by === "name" ? `coalesce(o.name, o.external_id) ${dir} nulls last, o.created_at desc`
     : `o.created_at ${by === "created" && !q.order?.desc ? "asc" : "desc"}`;
   const limit = Math.max(0, Math.min(q.limit ?? num(await getSettings(db.shared), "objects.page_size", 100), 2000));
   const offset = Math.max(0, Math.floor(q.offset ?? 0));

@@ -3,10 +3,10 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { ManualEventError, canRecord } from "@/lib/engine/manual";
 import { getObject, updateObject } from "@/lib/engine/custom-objects";
-import { RESEARCH, reviewPatch } from "@/lib/research";
+import { batchPatch, RESEARCH, reviewPatch } from "@/lib/research";
 import { deleteObjectForm, saveObjectForm, saveObjectTypeForm } from "@/lib/object-forms";
 import type { EventFormState } from "@/components/event-form";
-import { researchContext } from "./context";
+import { assignees, researchContext } from "./context";
 
 /** Saves a result's review (its state and note); only what changed, in the audit trail. */
 export async function reviewResult(form: FormData): Promise<void> {
@@ -28,6 +28,74 @@ export async function reviewResult(form: FormData): Promise<void> {
   }
   revalidatePath(`/research/o/${slug}`, "layout");
   redirect(base + outcome);
+}
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const BATCH = 500;
+
+/**
+ * Sets the review and / or the assignee of the selected results of a project, one audited change
+ * per result; results already in that state are left alone.
+ */
+export async function reviewMany(form: FormData): Promise<void> {
+  const slug = String(form.get("slug"));
+  const project = String(form.get("project"));
+  const { org, db, author } = await researchContext(slug);
+  const home = `/research/o/${slug}/p/${project}`;
+  const back = String(form.get("back") ?? "");
+  const base = back === home || back.startsWith(`${home}?`) ? back : home;
+  const ids = [...new Set(form.getAll("ids").map(String))].filter((id) => UUID.test(id)).slice(0, BATCH);
+  const review = String(form.get("review") ?? "");
+  const assignee = String(form.get("assignee") ?? "");
+  let outcome = "saved=1";
+  try {
+    if (!canRecord(author.role)) throw new ManualEventError(403, "viewers cannot review");
+    if (!ids.length || (!review && !assignee)) throw new ManualEventError(400, "batchEmpty");
+    if (assignee && assignee !== "-" && !(await assignees(org.id)).includes(assignee)) throw new ManualEventError(400, "not a member");
+    let changed = 0;
+    for (const id of ids) {
+      const o = await getObject(db, id);
+      if (!o || o.type !== RESEARCH.result || o.links[RESEARCH.link] !== project) continue;
+      const patch = batchPatch(o, { review, assignee });
+      if (!patch) continue;
+      await updateObject(db, author, id, { properties: patch });
+      changed++;
+    }
+    if (!changed) outcome = "error=batchUnchanged";
+  } catch (e) {
+    if (!(e instanceof ManualEventError)) throw e;
+    outcome = e.message === "batchEmpty" ? "error=batchEmpty" : `error=manualErr_${e.status}`;
+  }
+  const url = new URL(base, "http://x");
+  url.searchParams.delete("saved");
+  url.searchParams.delete("error");
+  revalidatePath(`/research/o/${slug}`, "layout");
+  redirect(`${url.pathname}?${url.searchParams.size ? `${url.searchParams}&` : ""}${outcome}`);
+}
+
+export type QuickReviewState = { error?: string; ok?: number } | null;
+
+/**
+ * A review from the queue: saved without leaving the page, which then shows the next result
+ * still to review (the one just reviewed has left the queue).
+ */
+export async function quickReview(_prev: QuickReviewState, form: FormData): Promise<QuickReviewState> {
+  const slug = String(form.get("slug"));
+  const id = String(form.get("id"));
+  const { db, author } = await researchContext(slug);
+  try {
+    if (!canRecord(author.role)) throw new ManualEventError(403, "viewers cannot review");
+    const o = await getObject(db, id);
+    if (!o || o.type !== RESEARCH.result) throw new ManualEventError(404, "no such result");
+    const patch = reviewPatch(o, String(form.get("review") ?? ""), String(form.get("note") ?? ""));
+    if (!patch) return { error: "reviewUnchanged" };
+    await updateObject(db, author, id, { properties: patch });
+  } catch (e) {
+    if (!(e instanceof ManualEventError)) throw e;
+    return { error: `manualErr_${e.status}` };
+  }
+  revalidatePath(`/research/o/${slug}`, "layout");
+  return { ok: Date.now() };
 }
 
 /** Creates or replaces a custom object type from the schema editor (owner only). */

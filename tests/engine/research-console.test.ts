@@ -9,11 +9,11 @@ import { forTenant, type TenantDb } from "../../lib/engine/db";
 import type { Author } from "../../lib/engine/manual";
 import { createSource } from "../../lib/engine/sources";
 import { MemoryStore } from "../../lib/engine/store";
-import { countLinked, createObject, getObject, objectDocuments, searchObjects, updateObject } from "../../lib/engine/custom-objects";
+import { countLinked, createObject, getObject, getObjectType, objectDocuments, searchObjects, updateObject } from "../../lib/engine/custom-objects";
 import { pushDocument } from "../../lib/engine/custom-ingest";
 import { listAudit } from "../../lib/engine/audit";
 import { getSettings } from "../../lib/engine/settings";
-import { inlineImage, resultFilters, reviewPatch, RESEARCH } from "../../lib/research";
+import { batchPatch, filterQuery, inlineImage, projectFields, resultFilters, resultsCsv, reviewPatch, RESEARCH } from "../../lib/research";
 import { seedResearch } from "../../scripts/research/types";
 
 let db: Client;
@@ -122,6 +122,45 @@ describe("research console", () => {
     });
     await expect(updateObject(A, { ...owner, role: "viewer" }, ids.a, { properties: { review: "sent" } })).rejects.toMatchObject({ status: 403 });
     await expect(updateObject(B, owner, ids.a, { properties: { review: "sent" } })).rejects.toMatchObject({ status: 404 });
+  });
+
+  it("searches by name, filters and sorts by any field, the project's own ones included", async () => {
+    const type = (await getObjectType(A, RESEARCH.result))!;
+    const c = { result: type.properties, own: projectFields((await getObject(A, tess))!), me: owner.email };
+    const find = async (sp: Record<string, string>) => names(await searchObjects(A, RESEARCH.result, resultFilters(sp, tess, c)));
+    await updateObject(A, owner, ids.c, { properties: { extra: { tic_id: 5 } } });
+    expect(await find({ q: "C" })).toEqual(["c"]);
+    expect(await find({ q: "%" })).toEqual([]);
+    expect(await find({ "f.review": "interesting" })).toEqual(["a", "b"]);
+    expect(await find({ "f.extra.tic_id": "5" })).toEqual(["c"]);
+    expect(await find({ "min.extra.tic_id": "2" })).toEqual(["c"]);
+    expect(await find({ "f.extra.tic_id": "cinque" })).toEqual(["a", "c", "b", "d"]);
+    expect(await find({ sort: "name", order: "asc" })).toEqual(["a", "b", "c", "d"]);
+    expect((await find({ sort: "extra.tic_id" }))[0]).toBe("c");
+    // assigned to me: a batch change touches only what differs, "-" unassigns
+    const b = (await getObject(A, ids.b))!;
+    expect(batchPatch(b, { review: "interesting", assignee: "" })).toBeNull();
+    await updateObject(A, owner, ids.b, { properties: batchPatch(b, { assignee: owner.email! })! });
+    expect(await find({ mine: "1" })).toEqual(["b"]);
+    const assigned = (await getObject(A, ids.b))!;
+    expect(batchPatch(assigned, { assignee: owner.email! })).toBeNull();
+    expect(batchPatch(assigned, { review: "sent", assignee: "-" })).toEqual({ review: "sent", assignee: null });
+    expect(filterQuery({ q: " x ", page: "2", saved: "1", "f.review": "sent", "min.extra.tic_id": "1", "x.y": "z" }).toString())
+      .toBe("q=x&f.review=sent&min.extra.tic_id=1");
+  });
+
+  it("exports results as CSV with keys, comma decimals and the project's fields", async () => {
+    const type = (await getObjectType(A, RESEARCH.result))!;
+    const csv = resultsCsv(type.properties, projectFields((await getObject(A, tess))!));
+    const header = csv.header.replace("\uFEFF", "").trim().split(";");
+    expect(header.slice(0, 3)).toEqual(["id", "external_id", "name"]);
+    expect(header).toContain("score");
+    expect(header).toContain("extra.tic_id");
+    expect(header.at(-1)).toBe("created_at");
+    const cells = csv.line((await getObject(A, ids.c))!).trim().split(";");
+    expect(cells[header.indexOf("score")]).toBe("0,7");
+    expect(cells[header.indexOf("extra.tic_id")]).toBe("5");
+    expect(cells[1]).toBe("c");
   });
 
   it("reads the filters forgivingly and shows only raster images inline", () => {

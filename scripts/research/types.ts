@@ -58,6 +58,8 @@ export const objectTypes: ObjectTypeInput[] = [
         },
       },
       note: { type: "string", label: l("Note", "Notes") },
+      // the email of the member who should look at it
+      assignee: { type: "string", label: l("Assegnato a", "Assigned to") },
       // the id of the run (an event) that produced it
       run: { type: "integer", label: l("Esecuzione", "Run") },
       extra: { type: "object", schemaFrom: "project.result_schema", label: l("Proprietà del progetto", "Project properties") },

@@ -450,7 +450,7 @@ Ogni tipo di evento con uno schema ha un registro, senza codice dedicato:
 
 - L'editor di schema definisce proprietà, collegamenti dichiarati e ordine dei campi (`/terra/o/[slug]/registers/types?kind=object` in Terra, `/research/o/[slug]/types/edit` in Research). `saveObjectType` usa `checkObjectType`, rispetta `registers.object_types_max` e scrive l'audit.
 - Oggetti: `createObject`, `upsertObject`, `updateObject`, `setLink` e `deleteObject`, sempre con filtro tenant e audit `object.*`.
-- Ricerca generica: `searchObjects` (filtro per collegamento, valori `where`, intervalli `min`/`max`, ordinamento su una proprietà, totale, pagine), `countLinked` e `objectDocuments`.
+- Ricerca generica: `searchObjects` (filtro per collegamento, testo su nome e id esterno, valori `where`, intervalli `min`/`max`, ordinamento su una proprietà o sul nome, totale, pagine), `countLinked` e `objectDocuments`. Con `schemas` le chiavi `prop.sub` raggiungono i campi di una proprietà `object` (es. `extra.tic_id`), tipizzati dallo schema dato.
 - Le pagine generiche `/terra/o/[slug]/registers/objects` e `/research/o/[slug]/objects` mostrano, creano e modificano gli oggetti di qualsiasi tipo personalizzato; i form condivisi e le validazioni sono in `lib/object-forms.ts`.
 
 **VDX Research** è configurazione più una console:
@@ -466,12 +466,16 @@ Ogni tipo di evento con uno schema ha un registro, senza codice dedicato:
 - **Tipi** (`scripts/research/types.ts`, caricati all'attivazione o con `scripts/seed-research.ts <org>` tramite le stesse API dell'editor):
   - `custom.project`: area, domanda, ipotesi, stage, protocollo, `result_schema`;
   - `custom.dataset`: fonte, descrizione, dimensione, URL, licenza;
-  - `custom.result`: score, review `to_review|discarded|interesting|sent`, note, run, `extra` che segue `project.result_schema`; collegamento `project` obbligatorio;
+  - `custom.result`: score, review `to_review|discarded|interesting|sent`, note, assegnatario (`assignee`, email di un membro), run, `extra` che segue `project.result_schema`; collegamento `project` obbligatorio;
   - eventi `custom.run` (commit, parametri, elementi, durata, esito; sul progetto e anche sul dataset) e `custom.lab_note`.
 - **Source**: `scripts/create-research-source.ts <org> <progetto>` crea la source push `custom` con scope sul progetto (`also: custom.dataset`) e stampa il token una volta.
 - **Console** (`/research/o/[slug]`):
   - i progetti con stage, numero di risultati e ultima run;
-  - il progetto con lo storico delle run e i risultati filtrabili per score e revisione, con le colonne del suo `result_schema`;
+  - il progetto con lo storico delle run e i risultati, con le colonne del suo `result_schema`:
+    - ricerca `q`, filtri `f.<chiave>`, `min.<chiave>`, `max.<chiave>` generati dallo schema (anche `extra.<campo>`), "assegnati a me" (`mine=1`), ordinamento per colonna (`sort`, `order`). `resultFilters` li legge, `filterQuery` li conserva nei link;
+    - azioni in blocco (`reviewMany`): revisione e assegnatario sui risultati selezionati, un aggiornamento con audit per oggetto, assegnatari limitati ai membri owner/member;
+    - export `/p/[id]/export?format=csv|json` con gli stessi filtri e ordinamento, a pagine e in streaming (CSV con chiavi, `;` e decimali con la virgola, via `resultsCsv`);
+  - la coda di revisione `/p/[id]/review`: un risultato da rivedere alla volta, con i filtri della tabella, e scorciatoie da tastiera (`REVIEW_KEYS`: i, d, s; j/k avanti e indietro, n nota) via `quickReview`;
   - la scheda del risultato con proprietà, allegati (anteprima solo per immagini raster) e storico;
   - la revisione (stato + nota) registrata nell'audit.
   - tipi, oggetti, attività e impostazioni del consenso alle route `/types`, `/types/edit`, `/objects/[type]`, `/activity` e `/settings`; le azioni di scrittura ritornano a percorsi Research. I form condivisi e le validazioni sono in `lib/object-forms.ts`, mentre `lib/type-drafts.ts` prepara i dati per l'editor.
@@ -508,7 +512,9 @@ Ogni tipo di evento con uno schema ha un registro, senza codice dedicato:
 | `/research/o/[slug]/objects/[type]` | membri (viewer in sola lettura) | oggetti e collegamenti del tipo |
 | `/research/o/[slug]/activity` | membri | audit dell'organizzazione |
 | `/research/o/[slug]/settings` | membri | stato e gestione del consenso personale |
-| `/research/o/[slug]/p/[id]` | membri | progetto: run, risultati filtrabili e ordinabili |
+| `/research/o/[slug]/p/[id]` | membri (azioni in blocco: owner e member) | progetto: run, risultati filtrabili e ordinabili |
+| `/research/o/[slug]/p/[id]/review` | membri (revisione: owner e member) | coda di revisione da tastiera |
+| `/research/o/[slug]/p/[id]/export` | membri | risultati filtrati in CSV o JSON |
 | `/research/o/[slug]/r/[id]` | membri (revisione: owner e member) | risultato: proprietà, allegati, storico, revisione |
 | `/research/o/[slug]/doc/[id]` | membri | download o anteprima di un allegato |
 | `/api/push` | gateway, pipeline | ingresso dati (JSON, o CSV per le source `custom`) |
@@ -573,7 +579,7 @@ Si eseguono con `npm test` (vitest).
 - `tests/packages/agronomy.test.ts`: colture, permessi, registro, correzioni, isolamento tra tenant, export e limiti.
 - `tests/engine/custom-objects.test.ts`, `research-seed.test.ts`: tipi oggetto personalizzati, collegamenti, `schemaFrom`, limiti, audit, isolamento; i tipi Research.
 - `tests/engine/custom-ingest.test.ts`: push custom (idempotenza, chiavi degli eventi, scope, CSV, allegati, audit firmato dalla source).
-- `tests/engine/research-console.test.ts`: ricerca, filtri, ordinamento, conteggi, allegati e revisione.
+- `tests/engine/research-console.test.ts`: ricerca, filtri (anche sui campi del progetto), ordinamento, assegnazione, azioni in blocco, export CSV, conteggi, allegati e revisione.
 - `tests/engine/console-setup.test.ts`: attivazione delle console (Terra di default, console d'atterraggio, tipi caricati una volta, modifiche del cliente preservate, isolamento).
 - `clients/python/tests/`: il client Python (`cd clients/python && python3 -m unittest discover -s tests`).
 - `tests/db/`: l'harness che crea un **database usa-e-getta** per ogni file di test, applicando tutte le migrazioni. Richiede un Postgres locale (`npx supabase start`) oppure `TEST_DATABASE_URL`.

@@ -1,14 +1,12 @@
 import { getT } from "@/lib/i18n";
 import { ObjectTypesView } from "@/components/registers/object-types-view";
 import { researchContext } from "../context";
+import { researchPaths } from "../paths";
 
-export default async function Types(props: { params: Promise<{ slug: string }> }) {
+/** The organization's object types (projects, results and any other), with their schemas. */
+export default async function Types(props: PageProps<"/research/o/[slug]/types">) {
   const { slug } = await props.params;
-  const ctx = await researchContext(slug);
+  const { db, author } = await researchContext(slug);
   const { t } = await getT();
-  const base = `/research/o/${slug}`;
-  return <ObjectTypesView db={ctx.db} author={ctx.author} back={{ href: base, label: t.projects }} paths={{
-    types: `${base}/types`, objects: (type) => `${base}/objects/${encodeURIComponent(type)}`,
-    editType: (key) => `${base}/types/edit${key ? `?kind=object&key=${encodeURIComponent(key)}` : ""}`,
-  }} />;
+  return <ObjectTypesView db={db} author={author} back={{ href: `/research/o/${slug}`, label: t.projects }} paths={researchPaths(slug)} />;
 }

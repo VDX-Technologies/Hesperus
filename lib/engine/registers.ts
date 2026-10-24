@@ -215,7 +215,7 @@ export function registerCell(t: EventTypeInfo, e: EventRow, key: string, objects
   return fieldText(t.fields[key], e.payload[key], locale);
 }
 
-const csvCell = (value: string) => {
+export const csvCell = (value: string) => {
   // Text cells that begin with spreadsheet formula characters must stay inert when opened in Excel.
   // Keep plain numeric values (including negative numbers) numeric.
   const numeric = /^-?(?:\d+(?:[.,]\d*)?|[.,]\d+)(?:[eE][-+]?\d+)?$/.test(value.trim());
@@ -223,7 +223,7 @@ const csvCell = (value: string) => {
   const v = formula && !numeric ? `'${value}` : value;
   return /[";\n\r]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v;
 };
-const dec = (v: unknown) => (typeof v === "number" ? String(v).replace(".", ",") : "");
+export const dec = (v: unknown) => (typeof v === "number" ? String(v).replace(".", ",") : "");
 
 /** Header of the CSV (keys, not labels: stable for whoever reads it); a quantity takes two columns. */
 export function csvHeader(t: EventTypeInfo): string {

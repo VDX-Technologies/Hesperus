@@ -465,9 +465,15 @@ const en = {
   research: "Research", projects: "Projects", project: "Project", results: "Results", runs: "Runs",
   noProjects: "No projects yet.", noProjectType: "This organization has no project type yet: create it in the schema editor, or load the research types.",
   noRuns: "No runs yet.", noResults: "No results match.", toReviewCount: "to review", scoreMin: "Score from", scoreMax: "to",
-  allReviews: "Any review", highestFirst: "Highest score first", lowestFirst: "Lowest score first", ofTotal: "of",
+  allReviews: "Any review", ofTotal: "of",
   attachments: "Attachments", noAttachments: "No files attached.", review: "Review", saveReview: "Save review",
   reviewUnchanged: "Nothing changed.", schemaEditor: "Schema editor", openRegister: "Open the register", resultsShown: "results",
+  searchResults: "Search name or id", assignedToMe: "Assigned to me", moreFilters: "More filters", anyValue: "Any",
+  reviewQueue: "Review queue", exportCsv: "CSV", exportJson: "JSON", setReview: "Review", setAssignee: "Assign to",
+  unchanged: "Unchanged", nobody: "Nobody", applyToSelected: "Apply to selected", selectAll: "Select all",
+  batchEmpty: "Select at least one result.", batchUnchanged: "The selected results already had those values.",
+  queueEmpty: "Nothing left to review with these filters.", queueHint: "Keys: i interesting · d discarded · s sent · j skip · k back · n note",
+  skip: "Skip", previous: "Previous",
 };
 export type Dict = typeof en;
 
@@ -933,9 +939,15 @@ const it: Dict = {
   research: "Ricerca", projects: "Progetti", project: "Progetto", results: "Risultati", runs: "Esecuzioni",
   noProjects: "Ancora nessun progetto.", noProjectType: "Questa organizzazione non ha ancora un tipo progetto: crealo nell'editor degli schemi o carica i tipi della ricerca.",
   noRuns: "Ancora nessuna esecuzione.", noResults: "Nessun risultato corrisponde.", toReviewCount: "da rivedere", scoreMin: "Punteggio da", scoreMax: "a",
-  allReviews: "Qualsiasi revisione", highestFirst: "Punteggio più alto prima", lowestFirst: "Punteggio più basso prima", ofTotal: "di",
+  allReviews: "Qualsiasi revisione", ofTotal: "di",
   attachments: "Allegati", noAttachments: "Nessun file allegato.", review: "Revisione", saveReview: "Salva revisione",
   reviewUnchanged: "Nessuna modifica.", schemaEditor: "Editor degli schemi", openRegister: "Apri il registro", resultsShown: "risultati",
+  searchResults: "Cerca nome o id", assignedToMe: "Assegnati a me", moreFilters: "Altri filtri", anyValue: "Qualsiasi",
+  reviewQueue: "Coda di revisione", exportCsv: "CSV", exportJson: "JSON", setReview: "Revisione", setAssignee: "Assegna a",
+  unchanged: "Invariato", nobody: "Nessuno", applyToSelected: "Applica ai selezionati", selectAll: "Seleziona tutti",
+  batchEmpty: "Seleziona almeno un risultato.", batchUnchanged: "I risultati selezionati avevano già quei valori.",
+  queueEmpty: "Niente da rivedere con questi filtri.", queueHint: "Tasti: i interessante · d scartato · s inviato · j salta · k indietro · n nota",
+  skip: "Salta", previous: "Precedente",
 };
 
 const DICTS: Record<Locale, Dict> = { en, it };
