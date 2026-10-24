@@ -1,11 +1,12 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { getT } from "@/lib/i18n";
+import { getT, timeAgo } from "@/lib/i18n";
 import { listEvents } from "@/lib/engine/events";
 import { fieldText, getEventType, label } from "@/lib/engine/registers";
 import { countLinked, getObject, getObjectType, objectHistogram, objectPoints, searchObjects } from "@/lib/engine/custom-objects";
 import { getSettings, num } from "@/lib/engine/settings";
 import { canRecord } from "@/lib/engine/manual";
+import { scopedSources } from "@/lib/engine/sources";
 import type { PropertySpec } from "@/lib/engine/package";
 import { filterQuery, projectFields, RESEARCH, resultFilters, shownColumns } from "@/lib/research";
 import { CheckAll } from "@/components/check-all";
@@ -48,7 +49,7 @@ export default async function Project(props: PageProps<"/research/o/[slug]/p/[id
   const hist = pick("hist", numericKeys.includes(RESEARCH.score) ? RESEARCH.score : numericKeys[0]);
   const x = pick("x", hist);
   const y = pick("y", numericKeys.find((k) => k !== x));
-  const [runs, notes, { objects: results, total }, histogram, scatter, byReview, views] = await Promise.all([
+  const [runs, notes, { objects: results, total }, histogram, scatter, byReview, views, pipelines] = await Promise.all([
     listEvents(db, { types: [RESEARCH.run], objectId: project.id, recursive: false, limit: 50 }),
     listEvents(db, { types: [RESEARCH.labNote], objectId: project.id, recursive: false, limit: 3 }),
     resultType ? searchObjects(db, RESEARCH.result, { ...filters, limit: pageSize, offset: (page - 1) * pageSize }) : { objects: [], total: 0 },
@@ -56,6 +57,7 @@ export default async function Project(props: PageProps<"/research/o/[slug]/p/[id
     resultType && x && y && x !== y ? objectPoints(db, RESEARCH.result, x, y, filters, 1500) : null,
     resultType ? countLinked(db, RESEARCH.result, RESEARCH.link, RESEARCH.review) : [],
     viewType ? searchObjects(db, RESEARCH.view, { linkedTo: { key: RESEARCH.link, id: project.id }, order: { by: "name", desc: false }, limit: 50 }) : null,
+    scopedSources(db, project.id),
   ]);
 
   const members = assignable ? await assignees(org.id) : [];
@@ -160,6 +162,29 @@ export default async function Project(props: PageProps<"/research/o/[slug]/p/[id
           </div>
         ))}
       </dl>
+
+      <section className="mt-8">
+        <h2 className="text-sm font-medium">{t.pipeline}</h2>
+        {pipelines.length ? (
+          <ul className="card mt-3 divide-y divide-line-soft text-sm">
+            {pipelines.map((p) => (
+              <li key={p.id} className="px-3 py-2">
+                <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
+                  <span className="min-w-0 flex-1 truncate font-medium">{p.name}</span>
+                  <span className={`text-xs ${p.status === "active" ? "text-mist" : "text-warn"}`}>{t[`sourceStatus_${p.status}`]}</span>
+                  {p.tokenHint ? <span className="num text-xs text-dim">token …{p.tokenHint}</span> : <span className="text-xs text-warn">{t.noToken}</span>}
+                  <span className="text-xs text-dim" title={p.lastSeen?.toLocaleString(locale)}>
+                    {t.lastPush}: <span className="num">{timeAgo(p.lastSeen?.toISOString() ?? null, locale, t)}</span>
+                  </span>
+                </div>
+                {p.lastError && <p className="mt-1 break-words text-xs text-alarm">{t.lastPushError}: {p.lastError}</p>}
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="mt-3 text-sm text-dim">{t.noPipeline}</p>
+        )}
+      </section>
 
       <section className="mt-8">
         <div className="flex flex-wrap items-baseline justify-between gap-2">

@@ -28,6 +28,10 @@ export const objectTypes: ObjectTypeInput[] = [
       result_links: { type: "string", format: "text", label: l("Link esterni dei risultati", "Result links") },
       // the properties of this project's results (TIC id, gene, enzyme...), set per project
       result_schema: { type: "object", format: "schema", label: l("Proprietà dei risultati", "Result properties") },
+      // who hears of the pipeline: a run that ends, a new result scoring at least notify_score
+      notify_email: { type: "string", label: l("Email per le notifiche (separate da virgola)", "Notification emails (comma separated)") },
+      notify_webhook: { type: "string", label: l("Webhook per le notifiche (https)", "Notification webhook (https)") },
+      notify_score: { type: "number", label: l("Punteggio minimo da notificare", "Score to notify from") },
     },
   },
   {

@@ -1,4 +1,4 @@
-"""The client against a stand-in server: batches, 429 retry, multipart and CSV requests."""
+"""The client against a stand-in server: batches, 429 retry, multipart, CSV and reading results back."""
 import json
 import threading
 import unittest
@@ -31,6 +31,17 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(200, {"accepted": 1, "rejected": [], "results": [{"index": 0, "id": "o1", "status": "created"}]})
         msgs = json.loads(body)
         self.reply(200, {"accepted": len(msgs), "rejected": [], "results": [{"index": i, "id": str(i), "status": "created"} for i in range(len(msgs))]})
+
+    def do_GET(self):
+        from urllib.parse import parse_qs, urlparse
+        u = urlparse(self.path)
+        seen.append((self.path, None, self.headers["Authorization"], b""))
+        if u.path != "/api/research/results":
+            return self.reply(404, {"error": "not found"})
+        q = {k: v[0] for k, v in parse_qs(u.query).items()}
+        rows = [{"id": str(i), "externalId": f"tic-{i}", "properties": {"review": q.get("review", "to_review")}} for i in range(5)]
+        offset, limit = int(q["offset"]), int(q["limit"])
+        self.reply(200, {"total": len(rows), "offset": offset, "limit": limit, "results": rows[offset:offset + limit]})
 
     def reply(self, status, data):
         raw = json.dumps(data).encode()
@@ -84,6 +95,18 @@ class ClientTest(unittest.TestCase):
         with self.assertRaises(CoreError) as e:
             Client(self.url, "bad").send([obj("custom.result", "x")])
         self.assertEqual(e.exception.status, 401)
+
+
+    def test_get_results_pages(self):
+        core = Client(self.url, "t0k")
+        rows = core.get_results({"review": "interesting", "f.extra.gene": "BRCA1"}, page_size=2)
+        self.assertEqual([r["externalId"] for r in rows], [f"tic-{i}" for i in range(5)])
+        self.assertTrue(all(r["properties"]["review"] == "interesting" for r in rows))
+        self.assertEqual(len(seen), 3)
+        self.assertIn("f.extra.gene=BRCA1", seen[0][0])
+        self.assertEqual(seen[0][2], "Bearer t0k")
+        self.assertEqual(len(core.get_results("review=discarded")), 5)
+        self.assertTrue(seen[-1][0].startswith("/api/research/results?review=discarded&offset=0"))
 
 
 if __name__ == "__main__":

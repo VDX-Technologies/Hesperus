@@ -26,3 +26,27 @@ core.send_csv("custom.result", "results.csv")
 
 The source's token only reaches its project: results are linked to it, other projects' objects
 are refused. `send` splits long lists in batches and waits when Core asks to (429).
+
+## Reading the reviews back
+
+The same token reads its project's results, with the reviews people made in the console: what a
+retraining learns from. The filter is the project page's query (`review`, `min` / `max` on the
+score, `f.<key>`, `min.<key>` / `max.<key>`, `q`, `sort`, `order`; `extra.<field>` for the
+project's own fields), as a dict or a string.
+
+```python
+for r in core.iter_results({"review": "interesting"}):
+    print(r["externalId"], r["properties"]["score"])
+
+discarded = core.get_results("review=discarded&min=0.5")  # every page, as a list
+```
+
+Each result is `{id, externalId, name, properties, createdAt}`, read in pages of 1000
+(`page_size`, 2000 at most).
+
+## Notifications
+
+A project can name who hears of its pipeline, in its properties: `notify_email` (comma
+separated), `notify_webhook` (https only) and `notify_score`. A push that creates a run, or a
+result scoring at least `notify_score`, sends one mail and one POST of
+`{project, url, runs, results}`; the same messages sent again send nothing.

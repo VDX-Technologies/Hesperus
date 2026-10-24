@@ -38,6 +38,10 @@ export const RESEARCH = {
   /** the text of a lab note or a comment, and the comment a reply answers */
   text: "text",
   replyTo: "reply_to",
+  /** the project properties saying who hears of its pipeline: emails, a webhook, a score threshold */
+  notifyEmail: "notify_email",
+  notifyWebhook: "notify_webhook",
+  notifyScore: "notify_score",
 } as const;
 
 /** The review values a key sets in the review queue. */

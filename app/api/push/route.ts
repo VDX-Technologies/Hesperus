@@ -10,8 +10,11 @@ import { csvMessages, ingestCustom } from "@/lib/engine/custom-ingest";
 import { ingestPush, takeIngestToken } from "@/lib/engine/ingest";
 import { CUSTOM } from "@/lib/engine/registers";
 import { ValidationError } from "@/lib/engine/package";
-import { sourceByToken } from "@/lib/engine/sources";
+import { markSeen, sourceByToken } from "@/lib/engine/sources";
 import { getPackage } from "@/lib/packages";
+import { after } from "next/server";
+import { mailerFromEnv } from "@/lib/engine/mail";
+import { notifyPush } from "@/lib/research-pipeline";
 
 const MAX_BODY = 4_000_000; // Vercel caps function bodies at 4.5 MB anyway
 
@@ -70,15 +73,27 @@ export async function POST(request: Request) {
     }
   }
   try {
-    const result = csv
-      ? await ingestCustom(db, source, await csvMessages(db, source, new URL(request.url).searchParams.get("type") ?? "", text))
-      : custom
-        ? await ingestCustom(db, source, await pushConnector.messages(source, body))
-        : await ingestPush(db, source, await pushConnector.messages(source, body), pkg!);
+    if (custom) {
+      const messages = csv
+        ? await csvMessages(db, source, new URL(request.url).searchParams.get("type") ?? "", text)
+        : await pushConnector.messages(source, body);
+      const result = await ingestCustom(db, source, messages);
+      // a research project's emails and webhook hear of new runs and high scores, after the answer
+      after(() =>
+        notifyPush(db, source, messages, result, { mailer: mailerFromEnv(), origin: new URL(request.url).origin }).catch((e) => {
+          if (!(e instanceof ConnectorError)) console.error(e);
+        }),
+      );
+      return Response.json(result, { status: result.rejected.length && !result.accepted ? 422 : 200 });
+    }
+    const result = await ingestPush(db, source, await pushConnector.messages(source, body), pkg!);
     return Response.json(result, { status: result.rejected.length && !result.accepted ? 422 : 200 });
   } catch (e) {
-    if (e instanceof ConnectorError) return Response.json({ error: e.message }, { status: e.status });
-    if (e instanceof ValidationError || e instanceof RangeError) return Response.json({ error: e.message }, { status: 400 });
-    throw e;
+    const status = e instanceof ConnectorError ? e.status : e instanceof ValidationError || e instanceof RangeError ? 400 : null;
+    if (status === null) throw e;
+    const error = (e as Error).message;
+    // a refused batch shows on the project page of a custom source, next to its last push
+    if (custom) await markSeen(db, source, error).catch(() => undefined);
+    return Response.json({ error }, { status });
   }
 }

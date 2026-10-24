@@ -210,7 +210,7 @@ Con lo stesso token una source `custom` allega file a un oggetto (form multipart
 
 ### 6.6d Client Python (`clients/python/vdx_core_client`)
 
-È un client senza dipendenze per le pipeline: `Client(base_url, token)` offre `.send(messaggi)` (a blocchi di 500), `.send_csv(tipo, testo_o_file)` e `.attach(file, ref(tipo, external_id))`. Gli helper `obj`, `event` e `ref` costruiscono i messaggi. Sui `429` riprova rispettando `Retry-After`. Un `422` restituisce i motivi del rifiuto; gli altri errori sollevano `CoreError(status)`.
+È un client senza dipendenze per le pipeline: `Client(base_url, token)` offre `.send(messaggi)` (a blocchi di 500), `.send_csv(tipo, testo_o_file)` e `.attach(file, ref(tipo, external_id))`. `.iter_results(filtro)` e `.get_results(filtro)` rileggono i risultati del progetto con le revisioni (`GET /api/research/results`, a pagine di 1000; il filtro è la query della pagina del progetto, come dict o stringa). Gli helper `obj`, `event` e `ref` costruiscono i messaggi. Sui `429` riprova rispettando `Retry-After`. Un `422` restituisce i motivi del rifiuto; gli altri errori sollevano `CoreError(status)`.
 
 ### 6.7 Sullo schermo
 
@@ -464,13 +464,17 @@ Ogni tipo di evento con uno schema ha un registro, senza codice dedicato:
   - Senza la console le pagine `/research/o/[slug]` rispondono 404; i menu collegano tra loro le console attive.
   - L'elenco delle console sta in `lib/consoles.ts`: una nuova console si aggiunge lì e in `prepareConsole`. Non si usa `org_modules`, perché il backend lo legge come elenco di prodotti.
 - **Tipi** (`scripts/research/types.ts`, caricati all'attivazione o con `scripts/seed-research.ts <org>` tramite le stesse API dell'editor):
-  - `custom.project`: area, domanda, ipotesi, stage, protocollo, `result_links` (testo, una riga per link `Etichetta https://…{campo}`: le pagine di un risultato in cataloghi esterni, espanse da `expandLinks` con i valori del risultato, anche di `extra`), `result_schema`;
+  - `custom.project`: area, domanda, ipotesi, stage, protocollo, `result_links` (testo, una riga per link `Etichetta https://…{campo}`: le pagine di un risultato in cataloghi esterni, espanse da `expandLinks` con i valori del risultato, anche di `extra`), `result_schema`, e le notifiche `notify_email` (separate da virgola), `notify_webhook` (solo https) e `notify_score`;
   - `custom.dataset`: fonte, descrizione, dimensione, URL, licenza;
   - `custom.result`: score, review `to_review|discarded|interesting|sent`, note, assegnatario (`assignee`, email di un membro), run, `extra` che segue `project.result_schema`; collegamento `project` obbligatorio;
   - `custom.view`: query (stringa dei filtri), collegamento `project` obbligatorio;
   - eventi `custom.run` (commit, parametri, elementi, durata, esito; sul progetto e anche sul dataset), `custom.lab_note` (testo, sul progetto) e `custom.comment` (testo e `reply_to`, sul risultato).
   - Il formato `text` (stringa su più righe) vale per proprietà e campi evento: textarea nei form, a capo conservati nelle viste; lo usano note, testi e `result_links`.
 - **Source**: `scripts/create-research-source.ts <org> <progetto>` crea la source push `custom` con scope sul progetto (`also: custom.dataset`) e stampa il token una volta.
+- **Pipeline** (`lib/research-pipeline.ts`):
+  - `ingestCustom` chiude ogni invio con `markSeen` (`sources.last_seen`, e `last_error` con il numero di messaggi rifiutati e il primo motivo; un errore dell'intera richiesta lo scrive `/api/push`). La pagina del progetto mostra le sue source (`scopedSources`: push con `config.scope.id` uguale al progetto) con stato, ultime cifre del token, ultimo invio ed errore.
+  - `GET /api/research/results` con il token della source: `pipelineResults` legge i risultati del progetto dello scope con i filtri di `resultFilters` (`review`, `min`, `f.<chiave>`, `q`, `sort`...), paginati con `offset` e `limit` (1000, al massimo 2000). Rifiuta con 403 le source che non lavorano per un progetto, con 409 se il progetto non c'è più; rispetta il limite di frequenza dell'ingest (429).
+  - Notifiche: dopo la risposta (`after()` in `/api/push`) `notifyPush` guarda cosa ha portato l'invio (`pushNews`): le run create e, se il progetto ha `notify_score`, i risultati creati con score almeno pari. Una mail (`newsMail`, mittente `alerts.email_from`, solo se `RESEND_API_KEY` è impostata) e un POST JSON `{project, url, runs, results}` al webhook (timeout 5 s, niente redirect). Conta solo ciò che è `created`: lo stesso invio ripetuto non notifica di nuovo. Un canale che fallisce non blocca l'altro e finisce nel log.
 - **Console** (`/research/o/[slug]`):
   - la home: tre indicatori (da rivedere, nuovi dall'ultima visita, run fallite nelle ultime 24 ore), i progetti con stage, distribuzione dello score, barra di revisione e ultima run, e le ultime run, note e commenti con il link alla loro pagina. L'ultima visita sta nel cookie `research_visit` (`lastVisit`: dopo 30 minuti di assenza la visita precedente diventa il riferimento); una pagina non può scrivere cookie mentre si disegna, quindi lo sposta `<VisitMarker>` chiamando `POST /research/o/[slug]/visit`;
   - il progetto con lo storico delle run e i risultati, con le colonne del suo `result_schema`:
@@ -530,6 +534,7 @@ Ogni tipo di evento con uno schema ha un registro, senza codice dedicato:
 | `/research/o/[slug]/doc/[id]` | membri | download o anteprima di un allegato |
 | `/api/push` | gateway, pipeline | ingresso dati (JSON, o CSV per le source `custom`) |
 | `/api/push/document` | pipeline | allegati agli oggetti dei tipi personalizzati |
+| `/api/research/results` | pipeline (token della source) | risultati del progetto con le revisioni, filtrati e a pagine |
 | `/api/health` | pubblico | stato di salute |
 
 ### 12.2 Come le pagine leggono i dati

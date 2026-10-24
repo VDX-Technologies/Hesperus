@@ -8,7 +8,8 @@ import time
 import uuid
 import urllib.error
 import urllib.request
-from typing import Any, Iterable, Optional, Union
+from typing import Any, Iterable, Iterator, Optional, Union
+from urllib.parse import quote, urlencode
 
 Ref = Union[str, dict]
 
@@ -55,11 +56,13 @@ class Client:
         self.retries = retries
         self.timeout = timeout
 
-    def _request(self, path: str, data: bytes, content_type: str) -> Any:
+    def _request(self, path: str, data: Optional[bytes] = None, content_type: Optional[str] = None) -> Any:
+        """POSTs `data`, or GETs `path` when there is none; waits and retries when rate limited."""
+        headers = {"Authorization": f"Bearer {self.token}"}
+        if content_type:
+            headers["Content-Type"] = content_type
         for attempt in range(self.retries + 1):
-            req = urllib.request.Request(self.base_url + path, data=data, method="POST", headers={
-                "Authorization": f"Bearer {self.token}", "Content-Type": content_type,
-            })
+            req = urllib.request.Request(self.base_url + path, data=data, method="POST" if data is not None else "GET", headers=headers)
             try:
                 with urllib.request.urlopen(req, timeout=self.timeout) as r:
                     return json.loads(r.read() or b"null")
@@ -93,7 +96,6 @@ class Client:
         """A CSV of objects of `type`: external_id, name, link.<key>, properties (prop.sub inside
         an object property), default.<prop>."""
         text = open(path_or_text, encoding="utf-8").read() if os.path.exists(path_or_text) else path_or_text
-        from urllib.parse import quote
         return self._request(f"/api/push?type={quote(type)}", text.encode(), "text/csv")
 
     def attach(self, file: Union[str, bytes], to: Ref, *, filename: Optional[str] = None, content_type: Optional[str] = None) -> dict:
@@ -114,3 +116,21 @@ class Client:
                      f"Content-Type: {content_type}\r\n\r\n".encode() + data + b"\r\n")
         parts.append(f"--{boundary}--\r\n".encode())
         return self._request("/api/push/document", b"".join(parts), f"multipart/form-data; boundary={boundary}")
+
+    def iter_results(self, filter: Union[dict, str, None] = None, *, page_size: int = 1000) -> Iterator[dict]:
+        """The results of the token's project, with their reviews, page by page: each one is
+        {id, externalId, name, properties, createdAt}. `filter` takes the project page's query,
+        as a dict or a string: review, min, max (score), f.<key>, min.<key>, max.<key>, q, sort,
+        order; e.g. {"review": "interesting"} or "review=discarded&min=0.5"."""
+        query = filter.lstrip("?") if isinstance(filter, str) else urlencode(filter or {})
+        offset = 0
+        while True:
+            page = self._request(f"/api/research/results?{query}{'&' if query else ''}offset={offset}&limit={page_size}")
+            yield from page["results"]
+            offset += len(page["results"])
+            if not page["results"] or offset >= page["total"]:
+                return
+
+    def get_results(self, filter: Union[dict, str, None] = None, *, page_size: int = 1000) -> list:
+        """Every result iter_results gives, as a list: what a retraining reads back."""
+        return list(self.iter_results(filter, page_size=page_size))

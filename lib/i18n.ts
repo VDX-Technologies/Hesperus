@@ -488,6 +488,9 @@ const en = {
   comments: "Comments", noComments: "No comments yet.", reply: "Reply", addComment: "Comment",
   commentPlaceholder: "A comment on this result…", replyPlaceholder: "Your reply…",
   outsideLinks: "Elsewhere", openPdf: "open", csvFirstRows: "first {n} rows", previewAbove: "preview above",
+  pipeline: "Pipeline", lastPush: "Last push", lastPushError: "Last error",
+  noPipeline: "No pipeline sends to this project yet: create its token with scripts/create-research-source.ts.",
+  sourceStatus_active: "active", sourceStatus_paused: "paused", sourceStatus_error: "error",
 };
 export type Dict = typeof en;
 
@@ -976,6 +979,9 @@ const it: Dict = {
   comments: "Commenti", noComments: "Ancora nessun commento.", reply: "Rispondi", addComment: "Commenta",
   commentPlaceholder: "Un commento su questo risultato…", replyPlaceholder: "La tua risposta…",
   outsideLinks: "Altrove", openPdf: "apri", csvFirstRows: "prime {n} righe", previewAbove: "anteprima sopra",
+  pipeline: "Pipeline", lastPush: "Ultimo invio", lastPushError: "Ultimo errore",
+  noPipeline: "Nessuna pipeline invia ancora a questo progetto: crea il suo token con scripts/create-research-source.ts.",
+  sourceStatus_active: "attiva", sourceStatus_paused: "in pausa", sourceStatus_error: "in errore",
 };
 
 const DICTS: Record<Locale, Dict> = { en, it };

@@ -6,7 +6,7 @@
 import { createHash } from "node:crypto";
 import { forTenant, inTransaction, type Db, type TenantDb } from "./db";
 import type { ObjectStore } from "./store";
-import type { Source } from "./sources";
+import { markSeen, type Source } from "./sources";
 import type { Actor } from "./audit";
 import { record } from "./audit";
 import { ConnectorError, type RawMessage } from "./connectors";
@@ -152,6 +152,7 @@ export async function ingestCustom(db: Db, source: Source, messages: RawMessage[
       out.rejected.push({ index, error: e.message });
     }
   }
+  await markSeen(db, source, out.rejected.length ? `${out.rejected.length} rejected: ${out.rejected[0].error}` : null, now);
   return out;
 }
 
