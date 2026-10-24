@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { requireOrg } from "@/lib/auth";
+import { requireConsole } from "@/lib/auth";
 import { getT } from "@/lib/i18n";
 import { tenantDb } from "@/lib/engine/db";
 import { canRecord, type Role } from "@/lib/engine/manual";
@@ -18,7 +18,7 @@ const ERRORS = ["required", "notNumber", "unitRequired", "notDate", "manualErr_4
 export default async function Crops(props: PageProps<"/terra/o/[slug]/crops">) {
   const { slug } = await props.params;
   const sp = await props.searchParams;
-  const { org, role, modules } = await requireOrg(slug);
+  const { org, role, modules } = await requireConsole(slug, "terra");
   if (!modules.some((m) => m.module === "agronomy")) notFound();
   const { t, locale } = await getT();
   const db = tenantDb(org.id);

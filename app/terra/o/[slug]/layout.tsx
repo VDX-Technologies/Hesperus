@@ -1,13 +1,13 @@
-import { requireOrg } from "@/lib/auth";
+import { requireConsole } from "@/lib/auth";
 import { getT } from "@/lib/i18n";
 import { tenantDb } from "@/lib/engine/db";
 import { countOpenAlerts } from "@/lib/packages/console";
 import { Header } from "@/components/header";
 import { LiveRefresh } from "@/components/terra/live-refresh";
-import { ConsentGate } from "@/components/terra/consent-gate";
+import { ConsentGate } from "@/components/consent-gate";
 import { getConsent } from "@/lib/consent";
 import { Metadata } from "next";
-import { CONSOLES, hasConsole } from "@/lib/consoles";
+import { enabledConsoles } from "@/lib/consoles";
 
 export const metadata: Metadata = {
   title: { default: "VDX Terra", template: "%s · VDX Terra" },
@@ -17,7 +17,8 @@ export const metadata: Metadata = {
 
 export default async function OrgLayout(props: LayoutProps<"/terra/o/[slug]">) {
   const { slug } = await props.params;
-  const { supabase, user, org, isAdmin, modules } = await requireOrg(slug);
+  // VDX turns the console on per organization, from the vendor console
+  const { supabase, user, org, isAdmin, modules } = await requireConsole(slug, "terra");
   const { t, locale } = await getT();
   const db = tenantDb(org.id);
   const [count, uploads, consent] = await Promise.all([
@@ -45,13 +46,13 @@ export default async function OrgLayout(props: LayoutProps<"/terra/o/[slug]">) {
             ...(hasUpload ? [{ href: `/terra/o/${slug}/upload`, label: t.upload }] : []),
             { href: `/terra/o/${slug}/activity`, label: t.activity },
             { href: `/terra/o/${slug}/settings`, label: t.settings },
-            ...CONSOLES.filter((c) => hasConsole(org, c.id)).map((c) => ({ href: c.href(slug), label: c.name })),
+            ...enabledConsoles(org).filter((c) => c.id !== "terra").map((c) => ({ href: c.href(slug), label: c.name })),
           ]}
         />
         <LiveRefresh orgId={org.id} />
         <main className="mx-auto max-w-7xl px-4 pb-16 pt-5 sm:px-6 lg:px-8 lg:pt-7">{props.children}</main>
       </div>
-      {mustSign && <ConsentGate slug={slug} email={user.email} t={t} locale={locale} />}
+      {mustSign && <ConsentGate slug={slug} home={`/terra/o/${slug}`} email={user.email} t={t} locale={locale} />}
     </>
   );
 }

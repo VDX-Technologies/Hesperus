@@ -1,11 +1,11 @@
 // An uploaded file as it was loaded, from the archive, for anyone who can read the tenant.
-import { requireOrg } from "@/lib/auth";
+import { requireConsole } from "@/lib/auth";
 import { tenantDb } from "@/lib/engine/db";
 import { storeFromEnv } from "@/lib/engine/store";
 
 export async function GET(_req: Request, rctx: RouteContext<"/terra/o/[slug]/upload/[id]">) {
   const { slug, id } = await rctx.params;
-  const { org } = await requireOrg(slug);
+  const { org } = await requireConsole(slug, "terra");
   const { rows } = await tenantDb(org.id).query<{ storage_key: string; filename: string | null; content_type: string | null }>(
     `select storage_key, filename, content_type from documents where tenant_id = $1 and id = $2`,
     [org.id, id],

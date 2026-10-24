@@ -4,11 +4,10 @@
 // object type its links to other types. Builds the definition the server validates
 // (checkEventType, checkObjectType) and saves; the type is usable at once.
 import { useActionState, useState } from "react";
-import type { EventFormState } from "@/components/terra/event-form";
+import type { EventFormState } from "@/components/event-form";
 import type { EventTypeInput } from "@/lib/engine/registers";
 import type { ObjectTypeInput } from "@/lib/engine/custom-objects";
 import type { Schema } from "@/lib/engine/schema";
-import { saveObjectTypeAction, saveType } from "@/app/terra/o/[slug]/registers/actions";
 
 export interface FieldDraft {
   key: string; label: string; type: string; required: boolean; units: string; options: string; fromSubject: string;
@@ -60,8 +59,10 @@ type Text = Record<
   string
 >;
 
-export function TypeEditor({ slug, locale, kind = "event", initial, subjects, fieldTypes, text }: {
+export function TypeEditor({ slug, action: save, locale, kind = "event", initial, subjects, fieldTypes, text }: {
   slug: string;
+  /** The console's server action that saves the definition and opens the type. */
+  action: (prev: EventFormState, form: FormData) => Promise<EventFormState>;
   locale: string;
   kind?: "event" | "object";
   initial?: TypeDraft;
@@ -72,7 +73,7 @@ export function TypeEditor({ slug, locale, kind = "event", initial, subjects, fi
 }) {
   const object = kind === "object";
   const [d, setD] = useState<TypeDraft>(initial ?? { key: "", name: { it: "", en: "" }, subject: "", fields: [blank()], also: [], links: [] });
-  const [state, action, pending] = useActionState<EventFormState, FormData>(object ? saveObjectTypeAction : saveType, {});
+  const [state, action, pending] = useActionState<EventFormState, FormData>(save, {});
   const setField = (i: number, patch: Partial<FieldDraft>) => setD((s) => ({ ...s, fields: s.fields.map((f, j) => (j === i ? { ...f, ...patch } : f)) }));
   const links = d.links ?? [];
   const setLink = (i: number, patch: Partial<LinkDraft>) => setD((s) => ({ ...s, links: links.map((l, j) => (j === i ? { ...l, ...patch } : l)) }));

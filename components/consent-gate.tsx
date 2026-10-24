@@ -1,16 +1,17 @@
 import { CONSENT_DOC } from "@/lib/consent";
 import type { Dict } from "@/lib/i18n";
 import type { Locale } from "@/lib/packages/types";
-import { signConsent } from "@/app/terra/o/[slug]/consent-actions";
+import { signConsent } from "@/lib/consent-actions";
 import { SubmitButton } from "@/components/submit-button";
 
 /** Research consent document shown over the console until the user signs it (first access only). */
-export function ConsentGate({ slug, email, t, locale }: { slug: string; email?: string; t: Dict; locale: Locale }) {
+export function ConsentGate({ slug, home, email, t, locale }: { slug: string; home: string; email?: string; t: Dict; locale: Locale }) {
   const doc = CONSENT_DOC[locale];
   return (
     <div role="dialog" aria-modal="true" aria-labelledby="consent-title" className="fixed inset-0 z-50 flex items-end justify-center bg-ink-950/85 backdrop-blur-sm sm:items-center sm:p-6">
       <form action={signConsent} className="card safe-y flex max-h-dvh w-full max-w-2xl flex-col sm:max-h-[90dvh]">
         <input type="hidden" name="slug" value={slug} />
+        <input type="hidden" name="back" value={home} />
         <div className="border-b border-line-soft px-5 py-4 sm:px-6">
           <p className="text-[11px] uppercase tracking-[0.14em] text-dim">{t.consentKicker}</p>
           <h2 id="consent-title" className="mt-1 text-lg font-semibold tracking-tight">{doc.title}</h2>

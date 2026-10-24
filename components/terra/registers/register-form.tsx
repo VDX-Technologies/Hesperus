@@ -3,7 +3,7 @@
 // the type takes from it fill in, the date starts at today, "Repeat last" copies the previous
 // entry of this user.
 import { useState } from "react";
-import { EventForm, type EventFormLabels, type EventFormValues } from "@/components/terra/event-form";
+import { EventForm, type EventFormLabels, type EventFormValues } from "@/components/event-form";
 import type { Schema } from "@/lib/engine/schema";
 import { recordEntry } from "@/app/terra/o/[slug]/registers/actions";
 

@@ -27,7 +27,7 @@ Non sempre serve un modulo. Un cliente può definire i **propri tipi** di oggett
 | **Membership** | Un utente che fa parte di un'org con un ruolo: `owner`, `member` o `viewer`. |
 | **Platform admin** | Una persona dello staff VDX che vede tutti i clienti. |
 | **Modulo** | Un prodotto (es. `lora`) attivato per un'org (`org_modules`), con la sua configurazione (le soglie del cliente). |
-| **Console** | Una dashboard oltre a VDX Terra (oggi `research`), attivata dallo staff per un'org (`organizations.consoles`). Terra c'è sempre. |
+| **Console** | Una dashboard (oggi `terra` e `research`) attivata dallo staff per un'org (`organizations.consoles`). Un'org ne ha almeno una; le nuove partono con Terra. |
 | **Source** | Un canale da cui arrivano dati (es. un gateway LoRa). Ha un token segreto. |
 | **Oggetto** | Una "cosa" nel mondo reale: un nodo sensore, una serra… Ha un tipo (`object_type`), delle proprietà e uno stato. |
 | **Metrica** | Un numero nel tempo legato a un oggetto (es. temperatura alle 10:05 = 24,3). |
@@ -82,7 +82,7 @@ Tecnologie:
 
 ```
 organizations ──< memberships >── utenti (Supabase auth)
-      │   .consoles  (le dashboard oltre a Terra: es. {research})
+      │   .consoles  (le dashboard attive: es. {terra,research})
       │
       ├──< org_modules   (quali prodotti ha, con quale config)
       └──< sources, objects, metrics, events, alerts…  (tutto ha tenant_id)
@@ -448,17 +448,20 @@ Ogni tipo di evento con uno schema ha un registro, senza codice dedicato:
 
 **Tipi oggetto** (`lib/engine/custom-objects.ts`, modulo `custom`):
 
-- L'editor di schema (`/terra/o/[slug]/registers/types?kind=object`) definisce proprietà, collegamenti dichiarati e ordine dei campi. `saveObjectType` usa `checkObjectType`, rispetta `registers.object_types_max` e scrive l'audit.
+- L'editor di schema definisce proprietà, collegamenti dichiarati e ordine dei campi (`/terra/o/[slug]/registers/types?kind=object` in Terra, `/research/o/[slug]/types/edit` in Research). `saveObjectType` usa `checkObjectType`, rispetta `registers.object_types_max` e scrive l'audit.
 - Oggetti: `createObject`, `upsertObject`, `updateObject`, `setLink` e `deleteObject`, sempre con filtro tenant e audit `object.*`.
 - Ricerca generica: `searchObjects` (filtro per collegamento, valori `where`, intervalli `min`/`max`, ordinamento su una proprietà, totale, pagine), `countLinked` e `objectDocuments`.
-- Le pagine generiche `/terra/o/[slug]/registers/objects` mostrano, creano e modificano gli oggetti di qualsiasi tipo personalizzato.
+- Le pagine generiche `/terra/o/[slug]/registers/objects` e `/research/o/[slug]/objects` mostrano, creano e modificano gli oggetti di qualsiasi tipo personalizzato; i form condivisi e le validazioni sono in `lib/object-forms.ts`.
 
 **VDX Research** è configurazione più una console:
 
-- **Attivazione**: da `/admin` (alla creazione dell'org o dalla sua pagina, sezione Dashboard) lo staff aggiunge `research` a `organizations.consoles` (migrazione `20261108000000_org_consoles.sql`; cambiano solo i platform admin, policy "admins manage orgs").
+- **Attivazione**: da `/admin` (alla creazione dell'org o dalla sua pagina, sezione Dashboard) lo staff sceglie le console in `organizations.consoles` (migrazione `20261108000000_org_consoles.sql`; cambiano solo i platform admin, policy "admins manage orgs").
+  - Anche Terra è una console (`20261109000000_terra_console.sql`: le org esistenti la ricevono, le nuove la hanno di default). Un'org ne tiene almeno una: l'ultima attiva non si spegne e la creazione senza console è rifiutata.
+  - Registri, editor degli schemi, attività e impostazioni del consenso usano viste condivise senza riferimenti a una console (`components/registers`, `components/activity-view.tsx`, `components/consent-settings.tsx`). Ogni console espone le proprie route e azioni, protette dal proprio `requireConsole`.
+  - `/` e la firma del consenso portano alla prima console attiva (`consoleHome`); il consenso si firma in qualunque console si apra per prima.
   - All'attivazione `prepareConsole` (`lib/console-setup.ts`) carica i tipi Research se l'org non ha ancora `custom.project`; i tipi già presenti, magari modificati dal cliente, restano come sono.
   - L'audit registra `console.enable` / `console.disable`.
-  - Senza la console `/research/o/[slug]` risponde 404; con la console, il menu di Terra ha il link a Research.
+  - Senza la console le pagine `/research/o/[slug]` rispondono 404; i menu collegano tra loro le console attive.
   - L'elenco delle console sta in `lib/consoles.ts`: una nuova console si aggiunge lì e in `prepareConsole`. Non si usa `org_modules`, perché il backend lo legge come elenco di prodotti.
 - **Tipi** (`scripts/research/types.ts`, caricati all'attivazione o con `scripts/seed-research.ts <org>` tramite le stesse API dell'editor):
   - `custom.project`: area, domanda, ipotesi, stage, protocollo, `result_schema`;
@@ -471,6 +474,7 @@ Ogni tipo di evento con uno schema ha un registro, senza codice dedicato:
   - il progetto con lo storico delle run e i risultati filtrabili per score e revisione, con le colonne del suo `result_schema`;
   - la scheda del risultato con proprietà, allegati (anteprima solo per immagini raster) e storico;
   - la revisione (stato + nota) registrata nell'audit.
+  - tipi, oggetti, attività e impostazioni del consenso alle route `/types`, `/types/edit`, `/objects/[type]`, `/activity` e `/settings`; le azioni di scrittura ritornano a percorsi Research. I form condivisi e le validazioni sono in `lib/object-forms.ts`, mentre `lib/type-drafts.ts` prepara i dati per l'editor.
 - I nomi dei tipi e delle proprietà usati dalla console stanno **solo** in `lib/research.ts`. Il motore non conosce progetti o risultati.
 
 ---
@@ -482,7 +486,7 @@ Ogni tipo di evento con uno schema ha un registro, senza codice dedicato:
 | URL | Chi | Cosa |
 |---|---|---|
 | `/login` | tutti | accesso |
-| `/` | tutti | smista: staff verso `/admin`, clienti verso `/terra/o/<slug>` |
+| `/` | tutti | smista: staff verso `/admin`, clienti verso la prima console attiva della loro org |
 | `/terra/o/[slug]` | membri dell'org | panoramica dei dispositivi del cliente |
 | `/terra/o/[slug]/alerts` | membri | allarmi aperti e storici |
 | `/terra/o/[slug]/devices/[id]` | membri | dettaglio e grafici di un dispositivo |
@@ -494,11 +498,16 @@ Ogni tipo di evento con uno schema ha un registro, senza codice dedicato:
 | `/terra/o/[slug]/upload` | owner (gli altri vedono solo l'elenco) | caricamento di file CSV nelle source upload, ultimi file caricati |
 | `/terra/o/[slug]/settings` | owner (gli altri in sola lettura) | soglie aziendali e per dispositivo |
 | `/admin` | staff VDX | elenco clienti, creazione di nuove org (con le dashboard da attivare) |
-| `/admin/orgs/[id]` | staff | gestione di un cliente (moduli, dashboard, soglie, luoghi, membri, attività) |
+| `/admin/orgs/[id]` | staff | gestione di un cliente in un'unica pagina (moduli, dashboard, soglie, luoghi, membri, attività) |
 | `/admin/engine` | staff | stato dell'engine (job, quote, salute) e gestione delle source (nuova source, nuovo token, pausa) |
 | `/admin/settings` | staff | `engine_settings` e destinatari delle email di salute |
 | `/terra/o/[slug]/registers/objects[/type]` | membri (viewer in sola lettura) | oggetti dei tipi personalizzati e i loro collegamenti |
 | `/research/o/[slug]` | membri | VDX Research: progetti |
+| `/research/o/[slug]/types` | membri (creazione schema: owner) | tipi oggetto personalizzati |
+| `/research/o/[slug]/types/edit` | owner | editor dei tipi oggetto |
+| `/research/o/[slug]/objects/[type]` | membri (viewer in sola lettura) | oggetti e collegamenti del tipo |
+| `/research/o/[slug]/activity` | membri | audit dell'organizzazione |
+| `/research/o/[slug]/settings` | membri | stato e gestione del consenso personale |
 | `/research/o/[slug]/p/[id]` | membri | progetto: run, risultati filtrabili e ordinabili |
 | `/research/o/[slug]/r/[id]` | membri (revisione: owner e member) | risultato: proprietà, allegati, storico, revisione |
 | `/research/o/[slug]/doc/[id]` | membri | download o anteprima di un allegato |
@@ -565,7 +574,7 @@ Si eseguono con `npm test` (vitest).
 - `tests/engine/custom-objects.test.ts`, `research-seed.test.ts`: tipi oggetto personalizzati, collegamenti, `schemaFrom`, limiti, audit, isolamento; i tipi Research.
 - `tests/engine/custom-ingest.test.ts`: push custom (idempotenza, chiavi degli eventi, scope, CSV, allegati, audit firmato dalla source).
 - `tests/engine/research-console.test.ts`: ricerca, filtri, ordinamento, conteggi, allegati e revisione.
-- `tests/engine/console-setup.test.ts`: attivazione delle console (tipi caricati una volta, modifiche del cliente preservate, isolamento).
+- `tests/engine/console-setup.test.ts`: attivazione delle console (Terra di default, console d'atterraggio, tipi caricati una volta, modifiche del cliente preservate, isolamento).
 - `clients/python/tests/`: il client Python (`cd clients/python && python3 -m unittest discover -s tests`).
 - `tests/db/`: l'harness che crea un **database usa-e-getta** per ogni file di test, applicando tutte le migrazioni. Richiede un Postgres locale (`npx supabase start`) oppure `TEST_DATABASE_URL`.
 

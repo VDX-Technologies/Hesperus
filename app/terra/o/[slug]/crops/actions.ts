@@ -5,7 +5,7 @@ import { requireOrg } from "@/lib/auth";
 import { tenantDb } from "@/lib/engine/db";
 import { ManualEventError, archiveManualObject, canRecord, createManualObject, deleteManualObject, updateManualObject, type Role } from "@/lib/engine/manual";
 import { payloadFromForm } from "@/lib/engine/schema";
-import type { EventFormState } from "@/components/terra/event-form";
+import type { EventFormState } from "@/components/event-form";
 import { agronomyPackage, CROP_FORM } from "@/lib/packages/agronomy";
 
 const text = (form: FormData) => Object.fromEntries([...form].filter(([, v]) => typeof v === "string")) as Record<string, string>;

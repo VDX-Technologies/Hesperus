@@ -1,7 +1,8 @@
 import "server-only";
 import { cache } from "react";
-import { redirect } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { hasConsole } from "@/lib/consoles";
 
 /**
  * Signed-in user + whether they are VDX staff. Redirects to /login when signed out.
@@ -35,3 +36,10 @@ export const requireOrg = cache(async (slug: string) => {
   ]);
   return { ...ctx, org, modules: (mods ?? []).filter((x) => x.enabled), role: (m?.role as string) ?? (ctx.isAdmin ? "owner" : "viewer") };
 });
+
+/** requireOrg for the pages of one console: they do not exist for organizations without it. */
+export async function requireConsole(slug: string, id: string) {
+  const ctx = await requireOrg(slug);
+  if (!hasConsole(ctx.org, id)) notFound();
+  return ctx;
+}

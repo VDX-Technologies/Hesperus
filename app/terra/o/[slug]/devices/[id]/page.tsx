@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { requireOrg } from "@/lib/auth";
+import { requireConsole } from "@/lib/auth";
 import { getT } from "@/lib/i18n";
 import { tenantDb } from "@/lib/engine/db";
 import { listObjects } from "@/lib/packages/console";
@@ -9,14 +9,14 @@ import { ActivityList } from "@/components/activity-list";
 import { getPackageDef } from "@/lib/packages/ui";
 import { hasUi, MODULE_UI } from "@/components/terra/modules/registry";
 import { SettingsForm } from "@/components/settings-form";
-import { Flash } from "@/components/terra/flash";
+import { Flash } from "@/components/flash";
 import { SectionTitle } from "@/components/ui";
 import { saveDeviceSettings } from "../../settings/actions";
 
 export default async function DevicePage(props: PageProps<"/terra/o/[slug]/devices/[id]">) {
   const { slug, id } = await props.params;
   const { range, saved, error } = await props.searchParams;
-  const { org, modules, role } = await requireOrg(slug);
+  const { org, modules, role } = await requireConsole(slug, "terra");
   const { t, locale } = await getT();
   if (!/^[0-9a-f-]{36}$/i.test(id)) notFound();
   const db = tenantDb(org.id);

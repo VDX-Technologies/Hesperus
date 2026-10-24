@@ -1,5 +1,5 @@
 import { revalidatePath } from "next/cache";
-import { requireOrg } from "@/lib/auth";
+import { requireConsole } from "@/lib/auth";
 import { getT, timeAgo } from "@/lib/i18n";
 import { tenantDb } from "@/lib/engine/db";
 import { listAlerts, type ConsoleAlert } from "@/lib/packages/console";
@@ -10,14 +10,14 @@ import { PushToggle } from "@/components/terra/push-toggle";
 async function ackAlert(formData: FormData) {
   "use server";
   const slug = String(formData.get("slug"));
-  const { supabase } = await requireOrg(slug);
+  const { supabase } = await requireConsole(slug, "terra");
   await supabase.rpc("ack_alert", { alert_id: Number(formData.get("id")) });
   revalidatePath(`/terra/o/${slug}`, "layout");
 }
 
 export default async function Alerts(props: PageProps<"/terra/o/[slug]/alerts">) {
   const { slug } = await props.params;
-  const { org, role } = await requireOrg(slug);
+  const { org, role } = await requireConsole(slug, "terra");
   const { t, locale } = await getT();
   const db = tenantDb(org.id);
   const [open, closed] = await Promise.all([

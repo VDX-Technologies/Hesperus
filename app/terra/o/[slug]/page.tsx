@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { requireOrg } from "@/lib/auth";
+import { requireConsole } from "@/lib/auth";
 import { getT, timeAgo } from "@/lib/i18n";
 import { tenantDb } from "@/lib/engine/db";
 import { countOpenAlertSummary, listAlerts, listObjects } from "@/lib/packages/console";
@@ -21,7 +21,7 @@ const btn = "inline-flex items-center gap-1.5 rounded-md border border-line px-3
 export default async function Overview(props: PageProps<"/terra/o/[slug]">) {
   const { slug } = await props.params;
   const sp = await props.searchParams;
-  const { org, role, modules } = await requireOrg(slug);
+  const { org, role, modules } = await requireConsole(slug, "terra");
   const { t, locale } = await getT();
   const db = tenantDb(org.id);
   const period = periodFrom(sp.p);

@@ -17,7 +17,7 @@ import { SettingsForm } from "@/components/settings-form";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { SectionTitle } from "@/components/ui";
 import { ConfirmButton } from "@/components/confirm-button";
-import { CONSOLES, hasConsole, parseConsoles, TERRA_HREF } from "@/lib/consoles";
+import { CONSOLES, enabledConsoles, parseConsoles } from "@/lib/consoles";
 import { prepareConsole } from "@/lib/console-setup";
 
 const path = (id: string) => `/admin/orgs/${id}`;
@@ -44,6 +44,8 @@ async function toggleConsole(formData: FormData) {
   if (error) throw new Error(error.message);
   const current: string[] = data.consoles ?? [];
   const consoles = parseConsoles(on ? [...current, id] : current.filter((c) => c !== id));
+  // an organization without consoles would leave its users nowhere to land
+  if (!consoles.length) throw new Error("an organization needs at least one console");
   const { error: e } = await supabase.from("organizations").update({ consoles }).eq("id", org);
   if (e) throw new Error(e.message);
   const db = tenantDb(org);
@@ -183,15 +185,10 @@ async function removeMember(formData: FormData) {
   revalidatePath(path(org));
 }
 
-const TABS = ["overview", "thresholds", "sites", "members", "activity"] as const;
-type Tab = (typeof TABS)[number];
-
 export default async function OrgAdmin(props: PageProps<"/admin/orgs/[id]">) {
-  const [{ id }, sp] = await Promise.all([props.params, props.searchParams]);
-  const tab: Tab = TABS.includes(sp.tab as Tab) ? (sp.tab as Tab) : "overview";
+  const { id } = await props.params;
   const { supabase } = await requireAdmin();
   const { t, locale } = await getT();
-  // only what the open tab shows: the org and its products are cheap, the rest is loaded on demand
   const [{ data: org }, mods] = await Promise.all([
     supabase.from("organizations").select("id, name, slug, consoles").eq("id", id).maybeSingle(),
     supabase.from("org_modules").select("module, enabled, config").eq("org_id", id),
@@ -199,7 +196,6 @@ export default async function OrgAdmin(props: PageProps<"/admin/orgs/[id]">) {
   if (!org) notFound();
   const enabled = new Map((mods.data ?? []).map((m) => [m.module, m]));
   const configurable = Object.values(PACKAGES).filter((m) => enabled.get(m.id)?.enabled && m.settings.length);
-  const tabLabel: Record<Tab, string> = { overview: t.overview, thresholds: t.thresholds, sites: t.places, members: t.members, activity: t.activity };
 
   return (
     <div>
@@ -212,10 +208,7 @@ export default async function OrgAdmin(props: PageProps<"/admin/orgs/[id]">) {
           <div className="num text-xs text-dim">/{org.slug}</div>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Link href={TERRA_HREF(org.slug)} className="btn">
-            {t.openTerra} →
-          </Link>
-          {CONSOLES.filter((c) => hasConsole(org, c.id)).map((c) => (
+          {enabledConsoles(org).map((c) => (
             <Link key={c.id} href={c.href(org.slug)} className="btn">
               {t.open} {c.name} →
             </Link>
@@ -223,45 +216,30 @@ export default async function OrgAdmin(props: PageProps<"/admin/orgs/[id]">) {
         </div>
       </div>
 
-      <nav className="mt-6 flex gap-1 overflow-x-auto border-b border-line-soft text-sm">
-        {TABS.filter((k) => k !== "thresholds" || configurable.length).map((k) => (
-          <Link
-            key={k}
-            href={k === "overview" ? path(id) : `${path(id)}?tab=${k}`}
-            prefetch
-            className={`-mb-px whitespace-nowrap border-b-2 px-3 py-2 ${
-              tab === k ? "border-ice text-frost" : "border-transparent text-dim hover:text-mist"
-            }`}
-          >
-            {tabLabel[k]}
-          </Link>
-        ))}
-      </nav>
-
-      {tab === "overview" && <Overview id={id} enabled={enabled} consoles={org.consoles ?? []} t={t} locale={locale} />}
-      {tab === "thresholds" &&
-        configurable.map((m) => (
-          <div key={m.id}>
-            <SectionTitle>
-              {m.name} · {t.orgDefaults}
-            </SectionTitle>
-            <p className="mb-3 text-sm text-mist">{t.orgDefaultsHelp}</p>
-            <SettingsForm
-              mod={m}
-              action={saveThresholds}
-              hidden={{ org: id, module: m.id }}
-              values={(enabled.get(m.id)?.config ?? {}) as Record<string, number>}
-              inherited={m.defaults as Record<string, number>}
-              editable
-              allowEmpty={false}
-              t={t}
-              locale={locale}
-            />
-          </div>
-        ))}
-      {tab === "sites" && <Sites id={id} t={t} locale={locale} />}
-      {tab === "members" && <Members id={id} t={t} />}
-      {tab === "activity" && <ActivityList entries={await listAudit(tenantDb(id), { limit: 200 })} t={t} locale={locale} />}
+      <Overview id={id} enabled={enabled} consoles={org.consoles ?? []} t={t} locale={locale} />
+      {configurable.map((m) => (
+        <div key={m.id}>
+          <SectionTitle>
+            {m.name} · {t.orgDefaults}
+          </SectionTitle>
+          <p className="mb-3 text-sm text-mist">{t.orgDefaultsHelp}</p>
+          <SettingsForm
+            mod={m}
+            action={saveThresholds}
+            hidden={{ org: id, module: m.id }}
+            values={(enabled.get(m.id)?.config ?? {}) as Record<string, number>}
+            inherited={m.defaults as Record<string, number>}
+            editable
+            allowEmpty={false}
+            t={t}
+            locale={locale}
+          />
+        </div>
+      ))}
+      <Sites id={id} t={t} locale={locale} />
+      <Members id={id} t={t} />
+      <SectionTitle>{t.activity}</SectionTitle>
+      <ActivityList entries={await listAudit(tenantDb(id), { limit: 200 })} t={t} locale={locale} />
     </div>
   );
 }
@@ -316,15 +294,10 @@ function Overview({
       </div>
       <SectionTitle>{t.consoles}</SectionTitle>
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <div className="card border-ice/40 p-5">
-          <div className="flex items-center justify-between">
-            <span className="text-lg font-medium">VDX Terra</span>
-            <span className="text-xs text-ok">{t.alwaysOn}</span>
-          </div>
-          <p className="mt-2 text-sm text-mist">{t.terraTagline}</p>
-        </div>
         {CONSOLES.map((c) => {
           const on = consoles.includes(c.id);
+          // the last console stays on: the organization's users need somewhere to land
+          const last = on && consoles.length === 1;
           return (
             <form key={c.id} action={toggleConsole} className={`card p-5 ${on ? "border-ice/40" : ""}`}>
               <input type="hidden" name="org" value={id} />
@@ -332,7 +305,9 @@ function Overview({
               <input type="hidden" name="enabled" value={on ? "0" : "1"} />
               <div className="flex items-center justify-between">
                 <span className="text-lg font-medium">{c.name}</span>
-                <button className={`btn text-xs ${on ? "border-ok text-ok" : ""}`}>{on ? t.enabled : t.disabled}</button>
+                <button disabled={last} className={`btn text-xs ${on ? "border-ok text-ok" : ""} ${last ? "cursor-not-allowed" : ""}`}>
+                  {on ? t.enabled : t.disabled}
+                </button>
               </div>
               <p className="mt-2 text-sm text-mist">{c.tagline[locale]}</p>
             </form>

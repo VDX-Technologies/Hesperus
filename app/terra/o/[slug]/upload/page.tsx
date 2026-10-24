@@ -1,5 +1,5 @@
 import { agronomyPackage } from "@/lib/packages/agronomy";
-import { requireOrg } from "@/lib/auth";
+import { requireConsole } from "@/lib/auth";
 import { getT, timeAgo, type Dict } from "@/lib/i18n";
 import { tenantDb } from "@/lib/engine/db";
 import { listUploads, uploadSources } from "@/lib/engine/upload";
@@ -15,7 +15,7 @@ const fmtSize = (n: number) => (n < 1024 * 1024 ? `${Math.max(1, Math.round(n / 
 /** CSV files loaded into the tenant's upload sources, and the form to load a new one (owner only). */
 export default async function Upload(props: PageProps<"/terra/o/[slug]/upload">) {
   const { slug } = await props.params;
-  const { org, role } = await requireOrg(slug);
+  const { org, role } = await requireConsole(slug, "terra");
   const { t, locale } = await getT();
   const db = tenantDb(org.id);
   const sp = await props.searchParams;

@@ -1,5 +1,5 @@
-// Turning a console on from the vendor console: Research loads its types the first time, and a
-// type the customer has since edited is left as it is.
+// Turning a console on from the vendor console: new organizations start with Terra, Research loads
+// its types the first time, and a type the customer has since edited is left as it is.
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { Client } from "pg";
 vi.mock("server-only", () => ({}));
@@ -8,7 +8,7 @@ import { forTenant, type TenantDb } from "../../lib/engine/db";
 import type { Author } from "../../lib/engine/manual";
 import { getObjectType, listObjectTypes, saveObjectType } from "../../lib/engine/custom-objects";
 import { prepareConsole } from "../../lib/console-setup";
-import { hasConsole, parseConsoles } from "../../lib/consoles";
+import { consoleHome, enabledConsoles, hasConsole, parseConsoles } from "../../lib/consoles";
 
 let db: Client;
 let drop: () => Promise<void>;
@@ -26,11 +26,18 @@ beforeAll(async () => {
 afterAll(async () => drop?.());
 
 describe("console setup", () => {
-  it("organizations start with no console besides Terra", async () => {
+  it("organizations start with Terra only", async () => {
     const { rows } = await db.query(`select consoles from organizations where id = $1`, [ORG]);
-    expect(rows[0].consoles).toEqual([]);
+    expect(rows[0].consoles).toEqual(["terra"]);
     expect(hasConsole(rows[0], "research")).toBe(false);
-    expect(parseConsoles(["research", "nope", "research"])).toEqual(["research"]);
+    expect(parseConsoles(["research", "nope", "terra", "research"])).toEqual(["terra", "research"]);
+  });
+
+  it("users land on the first console the organization has, or nowhere when it has none", () => {
+    expect(consoleHome({ consoles: ["terra", "research"] }, "a")).toBe("/terra/o/a");
+    expect(consoleHome({ consoles: ["research"] }, "a")).toBe("/research/o/a");
+    expect(consoleHome({ consoles: [] }, "a")).toBeNull();
+    expect(enabledConsoles({ consoles: ["research"] }).map((c) => c.id)).toEqual(["research"]);
   });
 
   it("loads the research types once, only in its tenant, and keeps the customer's edits", async () => {
@@ -44,7 +51,8 @@ describe("console setup", () => {
     expect((await getObjectType(A, "custom.project"))!.name).toEqual({ en: "Study", it: "Studio" });
   });
 
-  it("an unknown console prepares nothing", async () => {
+  it("Terra and unknown consoles prepare nothing", async () => {
+    expect(await prepareConsole(B, admin, "terra")).toEqual([]);
     expect(await prepareConsole(B, admin, "nope")).toEqual([]);
     expect(await listObjectTypes(B)).toEqual([]);
   });

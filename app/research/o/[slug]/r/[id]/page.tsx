@@ -6,7 +6,7 @@ import { canRecord } from "@/lib/engine/manual";
 import { fieldText, label } from "@/lib/engine/registers";
 import { getObject, getObjectType, objectDocuments } from "@/lib/engine/custom-objects";
 import { ActivityList } from "@/components/activity-list";
-import { Flash } from "@/components/terra/flash";
+import { Flash } from "@/components/flash";
 import { inlineImage, projectFields, RESEARCH } from "@/lib/research";
 import { researchContext } from "../../context";
 import { reviewResult } from "../../actions";

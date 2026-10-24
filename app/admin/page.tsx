@@ -18,6 +18,8 @@ async function createOrg(formData: FormData) {
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-|-$/g, "");
   const consoles = parseConsoles(formData.getAll("console"));
+  // its users need at least one console to land on
+  if (!consoles.length) throw new Error("choose at least one console");
   const { data, error } = await supabase
     .from("organizations")
     .insert({ name, slug, locale: formData.get("locale") === "it" ? "it" : "en", consoles })
@@ -85,12 +87,9 @@ export default async function AdminHome() {
         <fieldset className="flex flex-col gap-1 text-sm text-mist">
           <legend className="mb-1">{t.consoles}</legend>
           <div className="flex flex-wrap items-center gap-3 py-1.5">
-            <label className="flex items-center gap-1.5 text-dim">
-              <input type="checkbox" checked disabled /> VDX Terra
-            </label>
             {CONSOLES.map((c) => (
               <label key={c.id} className="flex items-center gap-1.5">
-                <input type="checkbox" name="console" value={c.id} /> {c.name}
+                <input type="checkbox" name="console" value={c.id} defaultChecked={c.id === "terra"} /> {c.name}
               </label>
             ))}
           </div>

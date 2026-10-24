@@ -17,7 +17,7 @@ export default async function Projects(props: PageProps<"/research/o/[slug]">) {
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">{t.projects}</h1>
         <p className="mt-6 text-sm text-dim">{t.noProjectType}</p>
-        <Link href={`/terra/o/${slug}/registers/objects`} className="btn mt-4 inline-block">{t.schemaEditor}</Link>
+        <Link href={`/research/o/${slug}/types`} className="btn mt-4 inline-block">{t.schemaEditor}</Link>
       </div>
     );
   }
@@ -34,7 +34,7 @@ export default async function Projects(props: PageProps<"/research/o/[slug]">) {
     <div>
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <h1 className="text-2xl font-semibold tracking-tight">{t.projects}</h1>
-        <Link href={`/terra/o/${slug}/registers/objects/${encodeURIComponent(RESEARCH.project)}#new`} className="text-xs text-frost hover:underline">+ {t.newObject}</Link>
+        <Link href={`/research/o/${slug}/objects/${encodeURIComponent(RESEARCH.project)}#new`} className="text-xs text-frost hover:underline">+ {t.newObject}</Link>
       </div>
       {projects.length ? (
         <ul className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">

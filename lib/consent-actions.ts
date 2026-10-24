@@ -8,13 +8,14 @@ import { record } from "@/lib/engine/audit";
 import { CONSENT_VERSION } from "@/lib/consent";
 import { safePath } from "@/lib/safe-path";
 
-/** First-access signature of the research consent document (the only way to create the row). */
+/** First-access signature of the research consent document (the only way to create the row); back to the console it showed on. */
 export async function signConsent(formData: FormData) {
   const slug = String(formData.get("slug"));
+  const back = safePath(formData.get("back"));
   const name = String(formData.get("name") ?? "").trim().replace(/\s+/g, " ");
   const { supabase, user, org } = await requireOrg(slug);
   // the browser already requires both; if bypassed, the document simply shows again
-  if (formData.get("accept") !== "on" || name.length < 2 || name.length > 200) redirect(`/terra/o/${slug}`);
+  if (formData.get("accept") !== "on" || name.length < 2 || name.length > 200) redirect(back);
   const { error } = await supabase.from("research_consents").insert({
     user_id: user.id,
     version: CONSENT_VERSION,
@@ -24,8 +25,9 @@ export async function signConsent(formData: FormData) {
   // 23505: already signed (double submit, other tab): the document is done either way
   if (error && error.code !== "23505") throw new Error(error.message);
   if (!error) await record(tenantDb(org.id), user, "consent.sign", { subject: "research", data: { version: CONSENT_VERSION } });
-  revalidatePath(`/terra/o/${slug}`, "layout");
-  redirect(`/terra/o/${slug}`);
+  // the gate shows on every console's layout
+  revalidatePath("/", "layout");
+  redirect(back);
 }
 
 /** Withdraws or gives back the consent from the settings page. */
@@ -41,6 +43,6 @@ export async function setConsent(formData: FormData) {
     .select("user_id");
   if (error || !data?.length) redirect(`${back}?error=consentFailed`);
   await record(tenantDb(org.id), user, granted ? "consent.grant" : "consent.withdraw", { subject: "research" });
-  revalidatePath(`/terra/o/${slug}`, "layout");
+  revalidatePath("/", "layout");
   redirect(`${back}?saved=consent`);
 }

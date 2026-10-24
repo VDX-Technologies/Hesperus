@@ -47,7 +47,7 @@ export default async function Project(props: PageProps<"/research/o/[slug]/p/[id
         <h1 className="text-2xl font-semibold tracking-tight">{project.name}</h1>
         <div className="flex gap-3 text-xs">
           <Link href={`/research/o/${slug}`} className="text-dim hover:underline">← {t.projects}</Link>
-          <Link href={`/terra/o/${slug}/registers/objects/${encodeURIComponent(type.type)}?edit=${project.id}#new`} className="text-frost hover:underline">{t.edit}</Link>
+          <Link href={`/research/o/${slug}/objects/${encodeURIComponent(type.type)}?edit=${project.id}#new`} className="text-frost hover:underline">{t.edit}</Link>
         </div>
       </div>
 
