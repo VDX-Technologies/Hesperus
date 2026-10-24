@@ -386,17 +386,15 @@ export interface ObjectSearch {
 const numeric = (s: PropertySpec | undefined) => s?.type === "number" || s?.type === "integer";
 
 /**
- * A page of the objects of one custom type, filtered on their properties, with the number of
- * objects that match. Only properties declared by the type (or by `schemas`, one level down) can
- * be filtered or sorted on; others are ignored, so a stale link never breaks the page. Objects
- * missing the sort property come last.
+ * The objects of one custom type a search matches, as a query and its parameters (`where`, with
+ * the columns of SELECT_OBJECTS) and the property paths it can read, shared by the page of objects
+ * and the aggregates over them. Null when nothing can match.
  */
-export async function searchObjects(db: TenantDb, type: string, q: ObjectSearch = {}): Promise<{ objects: CustomObject[]; total: number }> {
-  const none = { objects: [], total: 0 };
+async function filtered(db: TenantDb, type: string, q: ObjectSearch) {
   const t = await getObjectType(db, type);
-  if (!t || t.module !== CUSTOM) return none;
+  if (!t || t.module !== CUSTOM) return null;
   const link = q.linkedTo && UUID.test(q.linkedTo.id) ? q.linkedTo : null;
-  if (q.linkedTo && !link) return none;
+  if (q.linkedTo && !link) return null;
   const params: unknown[] = [db.tenantId, RESERVED_LINKS, CUSTOM, t.key];
   const p = (v: unknown) => `$${params.push(v)}`;
   // a declared property, or a field of an object property: its spec and its jsonb / text path
@@ -427,6 +425,24 @@ export async function searchObjects(db: TenantDb, type: string, q: ObjectSearch 
     }
   }
   const where = `${SELECT_OBJECTS} and t.key = $4${conds.map((c) => ` and ${c}`).join("")}`;
+  // a numeric property, read from the rows of `where` taken as `o`
+  const numberOf = (k: string) => {
+    const f = at(k);
+    return f && numeric(f.spec) ? numberAt(f) : null;
+  };
+  return { params, p, at, numberAt, numberOf, where };
+}
+
+/**
+ * A page of the objects of one custom type, filtered on their properties, with the number of
+ * objects that match. Only properties declared by the type (or by `schemas`, one level down) can
+ * be filtered or sorted on; others are ignored, so a stale link never breaks the page. Objects
+ * missing the sort property come last.
+ */
+export async function searchObjects(db: TenantDb, type: string, q: ObjectSearch = {}): Promise<{ objects: CustomObject[]; total: number }> {
+  const s = await filtered(db, type, q);
+  if (!s) return { objects: [], total: 0 };
+  const { params, p, at, numberAt, where } = s;
   const countParams = [...params];
   const by = q.order?.by ?? "";
   const dir = q.order?.desc ? "desc" : "asc";
@@ -444,19 +460,76 @@ export async function searchObjects(db: TenantDb, type: string, q: ObjectSearch 
   return { objects: rows.map(toObject), total: count.rows[0].n };
 }
 
+export interface Histogram {
+  /** the lowest and highest value among the matching objects; null when none holds a number */
+  min: number | null;
+  max: number | null;
+  /** equal-width bins from min to max, the last one closed: [lo, hi) … [lo, hi] */
+  bins: { lo: number; hi: number; n: number }[];
+}
+
+/**
+ * How the values of one numeric property spread over the objects a search matches, in `bins`
+ * equal-width bins (at most 100); objects without a number there are left out.
+ */
+export async function objectHistogram(db: TenantDb, type: string, key: string, q: ObjectSearch = {}, bins = 20): Promise<Histogram> {
+  const none: Histogram = { min: null, max: null, bins: [] };
+  const s = await filtered(db, type, q);
+  const value = s?.numberOf(key);
+  if (!s || !value) return none;
+  const k = Math.max(1, Math.min(Math.floor(bins), 100));
+  const kp = s.p(k);
+  const { rows } = await db.query<{ lo: number; hi: number; b: number; n: number }>(`with v as (select ${value} v from (${s.where}) o), r as (select min(v) lo, max(v) hi from v)
+    select r.lo::float8 lo, r.hi::float8 hi,
+           case when r.hi = r.lo then 1 else least(width_bucket(v.v, r.lo, r.hi, ${kp}::int), ${kp}::int) end b, count(*)::int n
+      from v, r where v.v is not null group by 1, 2, 3 order by 3`, s.params);
+  if (!rows.length) return none;
+  const { lo, hi } = rows[0];
+  const n = hi === lo ? 1 : k;
+  const width = (hi - lo) / n;
+  const counts = new Map(rows.map((r) => [r.b, r.n]));
+  return {
+    min: lo, max: hi,
+    bins: Array.from({ length: n }, (_, i) => ({ lo: lo + i * width, hi: i === n - 1 ? hi : lo + (i + 1) * width, n: counts.get(i + 1) ?? 0 })),
+  };
+}
+
+/**
+ * Two numeric properties of the objects a search matches, as points to plot (those holding a
+ * number in both), at most `limit` of them (2000 at most), with how many there are in all.
+ */
+export async function objectPoints(
+  db: TenantDb, type: string, x: string, y: string, q: ObjectSearch = {}, limit = 1000,
+): Promise<{ points: { id: string; name: string; x: number; y: number }[]; total: number }> {
+  const s = await filtered(db, type, q);
+  const vx = s?.numberOf(x);
+  const vy = s?.numberOf(y);
+  if (!s || !vx || !vy) return { points: [], total: 0 };
+  const cap = Math.max(1, Math.min(Math.floor(limit), 2000));
+  const { rows } = await db.query<{ id: string; name: string; x: number; y: number; total: number }>(
+    `select id, name, x, y, count(*) over ()::int total from (
+       select o.id, coalesce(o.name, o.external_id, left(o.id::text, 8)) name, (${vx})::float8 x, (${vy})::float8 y from (${s.where}) o
+     ) p where x is not null and y is not null order by id limit ${s.p(cap)}`,
+    s.params,
+  );
+  return { points: rows.map(({ total: _, ...p }) => p), total: rows[0]?.total ?? 0 };
+}
+
 /**
  * How many objects of a type each object is linked to through `link`, split by the value of
- * one property when `by` is given: the results of every project, per review status.
+ * one property when `by` is given: the results of every project, per review status. With
+ * `since`, only the objects created from then on.
  */
-export async function countLinked(db: TenantDb, type: string, link: string, by?: string): Promise<{ id: string; value: string | null; n: number }[]> {
+export async function countLinked(db: TenantDb, type: string, link: string, by?: string, since?: Date): Promise<{ id: string; value: string | null; n: number }[]> {
   if (!type.startsWith(`${CUSTOM}.`)) return [];
   const { rows } = await db.query<{ id: string; value: string | null; n: number }>(
     `select l.dst_id id, case when $5::text is null then null else o.properties->>$5 end value, count(*)::int n
        from objects o join object_types t on t.id = o.type_id
        join links l on l.tenant_id = $1 and l.src_id = o.id and l.type = $4
       where o.tenant_id = $1 and t.tenant_id = $1 and t.module = $2 and t.key = $3
+        and ($6::timestamptz is null or o.created_at >= $6)
       group by 1, 2`,
-    [db.tenantId, CUSTOM, type.slice(CUSTOM.length + 1), link, by ?? null],
+    [db.tenantId, CUSTOM, type.slice(CUSTOM.length + 1), link, by ?? null, since ?? null],
   );
   return rows;
 }

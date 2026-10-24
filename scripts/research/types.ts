@@ -68,6 +68,13 @@ export const objectTypes: ObjectTypeInput[] = [
     },
     links: { project: { type: "custom.project", required: true } },
   },
+  {
+    // a saved search of a project's results: its filters, sort and columns, shared with the team
+    key: "view",
+    name: l("Vista salvata", "Saved view"),
+    properties: { query: { type: "string", required: true, label: l("Filtri", "Filters") } },
+    links: { project: { type: "custom.project", required: true } },
+  },
 ];
 
 export const eventTypes: EventTypeInput[] = [

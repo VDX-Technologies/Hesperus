@@ -107,8 +107,8 @@ async function pushEvent(db: TenantDb, source: Source, scope: SourceScope | null
        values ($1, $2, $3, 'info', $4, $5, $6, $7)
        on conflict (tenant_id, source_id, idempotency_key) where idempotency_key is not null do nothing returning id
      )
-     insert into event_objects (tenant_id, event_id, object_id)
-     select $1, e.id, o from e, unnest($8::uuid[]) o returning event_id id`,
+     insert into event_objects (tenant_id, event_id, object_id, pos)
+     select $1, e.id, u.o, u.pos - 1 from e, unnest($8::uuid[]) with ordinality u(o, pos) returning event_id id`,
     [db.tenantId, ts, type, payload, source.id, now, key, ids],
   );
   if (!rows[0]) {

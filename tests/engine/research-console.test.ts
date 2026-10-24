@@ -9,11 +9,11 @@ import { forTenant, type TenantDb } from "../../lib/engine/db";
 import type { Author } from "../../lib/engine/manual";
 import { createSource } from "../../lib/engine/sources";
 import { MemoryStore } from "../../lib/engine/store";
-import { countLinked, createObject, getObject, getObjectType, objectDocuments, searchObjects, updateObject } from "../../lib/engine/custom-objects";
+import { countLinked, createObject, getObject, getObjectType, objectDocuments, objectHistogram, objectPoints, searchObjects, updateObject } from "../../lib/engine/custom-objects";
 import { pushDocument } from "../../lib/engine/custom-ingest";
 import { listAudit } from "../../lib/engine/audit";
 import { getSettings } from "../../lib/engine/settings";
-import { batchPatch, filterQuery, inlineImage, projectFields, resultFilters, resultsCsv, reviewPatch, RESEARCH } from "../../lib/research";
+import { batchPatch, filterQuery, inlineImage, lastVisit, projectFields, resultFilters, resultsCsv, reviewPatch, RESEARCH, shownColumns, viewQuery } from "../../lib/research";
 import { seedResearch } from "../../scripts/research/types";
 
 let db: Client;
@@ -92,6 +92,35 @@ describe("research console", () => {
     expect(counts.some((c) => c.id === otherB)).toBe(false);
   });
 
+  it("counts only the results created since a moment when asked", async () => {
+    expect(await countLinked(A, RESEARCH.result, RESEARCH.link, undefined, new Date(Date.now() + 60_000))).toEqual([]);
+    const since = await countLinked(A, RESEARCH.result, RESEARCH.link, undefined, new Date(Date.now() - 3_600_000));
+    expect(since.find((c) => c.id === tess)?.n).toBe(4);
+  });
+
+  it("spreads a numeric property over bins with the same filters as the table", async () => {
+    const h = await objectHistogram(A, RESEARCH.result, RESEARCH.score, resultFilters({}, tess), 3);
+    expect([h.min, h.max]).toEqual([0.1, 0.9]);
+    expect(h.bins.map((b) => b.n)).toEqual([1, 1, 2]);
+    expect(h.bins[2].hi).toBe(0.9);
+    const some = await objectHistogram(A, RESEARCH.result, RESEARCH.score, resultFilters({ min: "0.4" }, tess), 2);
+    expect(some.bins.map((b) => b.n)).toEqual([1, 2]);
+    // one value: a single bin; nothing numeric, or another tenant's project: no bins
+    expect((await objectHistogram(A, RESEARCH.result, RESEARCH.score, resultFilters({}, other))).bins).toEqual([{ lo: 0.95, hi: 0.95, n: 1 }]);
+    expect(await objectHistogram(A, RESEARCH.result, RESEARCH.review, resultFilters({}, tess))).toEqual({ min: null, max: null, bins: [] });
+    expect((await objectHistogram(B, RESEARCH.result, RESEARCH.score, resultFilters({}, tess))).bins).toEqual([]);
+  });
+
+  it("plots two numeric properties, a project's own fields included", async () => {
+    const type = (await getObjectType(A, RESEARCH.result))!;
+    const c = { result: type.properties, own: projectFields((await getObject(A, tess))!), me: owner.email };
+    const p = await objectPoints(A, RESEARCH.result, RESEARCH.score, "extra.tic_id", resultFilters({ max: "0.7" }, tess, c));
+    expect(p.total).toBe(3);
+    expect(p.points.map((x) => [x.name, x.x, x.y]).sort()).toEqual([["b", 0.4, 1], ["c", 0.7, 1], ["d", 0.1, 1]]);
+    expect((await objectPoints(A, RESEARCH.result, RESEARCH.score, RESEARCH.score, resultFilters({}, tess), 2)).points).toHaveLength(2);
+    expect(await objectPoints(A, RESEARCH.result, RESEARCH.score, "extra.tic_id", resultFilters({}, tess))).toEqual({ points: [], total: 0 });
+  });
+
   it("lists a result's attachments, only in its tenant", async () => {
     const { source } = await createSource(db, { tenantId: ORG, name: "p", module: "custom", config: { scope: { link: "project", id: tess } } });
     const store = new MemoryStore();
@@ -168,5 +197,28 @@ describe("research console", () => {
     expect(f).toMatchObject({ min: undefined, max: undefined, where: undefined, page: 1, order: { by: "score", desc: true } });
     expect(["image/png", "IMAGE/JPEG; q=1", "image/webp"].map(inlineImage)).toEqual([true, true, true]);
     expect(["image/svg+xml", "text/html", null].map(inlineImage)).toEqual([false, false, false]);
+  });
+
+  it("keeps the chosen columns and the charts in a view, and nothing else", () => {
+    const all = ["score", "review", "extra.mass"];
+    expect([...shownColumns(["review", "extra.mass"], all)]).toEqual(["review", "extra.mass"]);
+    expect([...shownColumns("review,nope", all)]).toEqual(["review"]);
+    expect([...shownColumns(undefined, all)]).toEqual(all);
+    expect([...shownColumns("nope", all)]).toEqual(all);
+    expect(filterQuery({ cols: ["score", "review"], q: "kepler" }).get("cols")).toBe("score,review");
+    const q = new URLSearchParams(viewQuery("q=kepler&cols=score&cols=review&hist=extra.mass&x=score&y=extra.mass&page=3&saved=1&min.extra.mass=2"));
+    expect(Object.fromEntries(q)).toEqual({ q: "kepler", cols: "score,review", hist: "extra.mass", x: "score", y: "extra.mass", "min.extra.mass": "2" });
+  });
+
+  it("counts new results from the start of the previous visit, the same for a whole visit", () => {
+    const h = 3_600_000, t0 = 1_700_000_000_000;
+    expect(lastVisit(undefined, t0)).toEqual({ since: null, next: `|${t0}` });
+    expect(lastVisit("garbage", t0)).toEqual({ since: null, next: `|${t0}` });
+    expect(lastVisit(`|${t0 + h}`, t0)).toEqual({ since: null, next: `|${t0}` });
+    // a reload during the first visit: still nothing to compare with
+    expect(lastVisit(`|${t0}`, t0 + 60_000)).toEqual({ since: null, next: null });
+    // back the next day: new since the first visit, and that stays during the visit
+    expect(lastVisit(`|${t0}`, t0 + 24 * h)).toEqual({ since: new Date(t0), next: `${t0}|${t0 + 24 * h}` });
+    expect(lastVisit(`${t0}|${t0 + 24 * h}`, t0 + 24 * h + 60_000)).toEqual({ since: new Date(t0), next: null });
   });
 });

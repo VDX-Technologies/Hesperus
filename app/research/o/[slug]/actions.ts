@@ -2,10 +2,10 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { ManualEventError, canRecord, recordEvent } from "@/lib/engine/manual";
-import { getObject, updateObject } from "@/lib/engine/custom-objects";
+import { createObject, deleteObject, getObject, updateObject } from "@/lib/engine/custom-objects";
 import { getEvent } from "@/lib/engine/events";
 import { getEventType, specOf } from "@/lib/engine/registers";
-import { batchPatch, RESEARCH, reviewPatch } from "@/lib/research";
+import { batchPatch, RESEARCH, reviewPatch, viewQuery } from "@/lib/research";
 import { deleteObjectForm, saveObjectForm, saveObjectTypeForm } from "@/lib/object-forms";
 import type { EventFormState } from "@/components/event-form";
 import { assignees, researchContext } from "./context";
@@ -171,4 +171,46 @@ export async function deleteObjectAction(form: FormData): Promise<void> {
   const error = await deleteObjectForm(db, author, form);
   revalidatePath(`/research/o/${slug}`, "layout");
   redirect(error ? `${base}?error=${error}` : base);
+}
+
+/** Saves the filters, sort, columns and charts of a project's results table as a named view. */
+export async function saveView(form: FormData): Promise<void> {
+  const slug = String(form.get("slug"));
+  const project = String(form.get("project"));
+  const { db, author } = await researchContext(slug);
+  const home = `/research/o/${slug}/p/${project}`;
+  const query = viewQuery(String(form.get("query") ?? ""));
+  let outcome = "error=viewEmpty";
+  try {
+    if (!UUID.test(project)) throw new ManualEventError(404, "no such project");
+    const name = String(form.get("name") ?? "").trim().slice(0, 80);
+    if (name && query) {
+      await createObject(db, author, { type: RESEARCH.view, name, properties: { [RESEARCH.query]: query }, links: { [RESEARCH.link]: project } });
+      outcome = "saved=1";
+    }
+  } catch (e) {
+    if (!(e instanceof ManualEventError)) throw e;
+    outcome = `error=manualErr_${e.status}`;
+  }
+  revalidatePath(`/research/o/${slug}`, "layout");
+  redirect(`${home}?${query ? `${query}&` : ""}${outcome}`);
+}
+
+/** Deletes a saved view of a project. */
+export async function deleteView(form: FormData): Promise<void> {
+  const slug = String(form.get("slug"));
+  const project = String(form.get("project"));
+  const id = String(form.get("id"));
+  const { db, author } = await researchContext(slug);
+  let outcome = "?saved=1";
+  try {
+    const v = UUID.test(id) ? await getObject(db, id) : null;
+    if (!v || v.type !== RESEARCH.view || v.links[RESEARCH.link] !== project) throw new ManualEventError(404, "no such view");
+    await deleteObject(db, author, id);
+  } catch (e) {
+    if (!(e instanceof ManualEventError)) throw e;
+    outcome = `?error=manualErr_${e.status}`;
+  }
+  revalidatePath(`/research/o/${slug}`, "layout");
+  redirect(`/research/o/${slug}/p/${project}${outcome}`);
 }

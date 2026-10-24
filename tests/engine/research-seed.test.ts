@@ -29,10 +29,10 @@ afterAll(async () => drop?.());
 
 describe("research seed", () => {
   it("defines the types once, again without duplicates, only in its tenant", async () => {
-    const types = ["custom.project", "custom.dataset", "custom.result", "custom.run", "custom.lab_note", "custom.comment"];
+    const types = ["custom.project", "custom.dataset", "custom.result", "custom.view", "custom.run", "custom.lab_note", "custom.comment"];
     expect(await seedResearch(A, owner)).toEqual(types);
     expect(await seedResearch(A, owner)).toEqual(types);
-    expect((await listObjectTypes(A)).map((t) => t.type).sort()).toEqual(["custom.dataset", "custom.project", "custom.result"]);
+    expect((await listObjectTypes(A)).map((t) => t.type).sort()).toEqual(["custom.dataset", "custom.project", "custom.result", "custom.view"]);
     const { rows } = await db.query(`select count(*)::int n from event_types where tenant_id = $1 and module = 'custom'`, [ORG]);
     expect(rows[0].n).toBe(3);
     expect(await listObjectTypes(B)).toEqual([]);

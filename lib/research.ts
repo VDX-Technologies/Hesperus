@@ -14,6 +14,9 @@ export const RESEARCH = {
   dataset: "custom.dataset",
   labNote: "custom.lab_note",
   comment: "custom.comment",
+  /** a saved search of a project's results, its query string in `query` */
+  view: "custom.view",
+  query: "query",
   /** the result → project link */
   link: "project",
   stage: "stage",
@@ -42,14 +45,57 @@ export const REVIEW_KEYS: Record<string, string> = { i: "interesting", d: "disca
 
 type Query = Record<string, string | string[] | undefined>;
 
-/** The query parameters that filter or sort results, so a link can keep them (not the page). */
+/** The query parameters that filter, sort or lay out results, so a link can keep them (not the page). */
 export const isFilterParam = (k: string) =>
-  ["q", "review", "min", "max", "mine", "sort", "order"].includes(k) || /^(f|min|max)\.[\w.]+$/.test(k);
+  ["q", "review", "min", "max", "mine", "sort", "order", "cols", "hist", "x", "y"].includes(k) || /^(f|min|max)\.[\w.]+$/.test(k);
 
 export function filterQuery(sp: Query): URLSearchParams {
   const q = new URLSearchParams();
-  for (const [k, v] of Object.entries(sp)) if (typeof v === "string" && v.trim() && isFilterParam(k)) q.set(k, v.trim());
+  for (const [k, raw] of Object.entries(sp)) {
+    // the column picker's checkboxes send one `cols` each
+    const v = k === "cols" && Array.isArray(raw) ? raw.join(",") : raw;
+    if (typeof v === "string" && v.trim() && isFilterParam(k)) q.set(k, v.trim());
+  }
   return q;
+}
+
+/**
+ * The columns of the results table: `cols` lists the keys shown, comma separated (`extra.<field>`
+ * for the project's own); without it, or when none of its keys is a column, all of them.
+ */
+export function shownColumns(cols: unknown, all: string[]): Set<string> {
+  const raw = Array.isArray(cols) ? cols.join(",") : cols;
+  const asked = typeof raw === "string" ? raw.split(",").map((c) => c.trim()).filter((c) => all.includes(c)) : [];
+  return new Set(asked.length ? asked : all);
+}
+
+/** The query string a saved view keeps: its filters, sort, columns and charts, nothing else. */
+export function viewQuery(raw: string): string {
+  const sp: Query = {};
+  for (const [k, v] of new URLSearchParams(raw)) {
+    const had = sp[k];
+    sp[k] = had === undefined ? v : [...(Array.isArray(had) ? had : [had]), v];
+  }
+  return filterQuery(sp).toString();
+}
+
+/** The cookie holding the dashboard visits, scoped to the organization's Research pages. */
+export const VISIT_COOKIE = "research_visit";
+
+/** How long a visit to the dashboard lasts: coming back within it is still the same visit. */
+const VISIT = 30 * 60_000;
+
+/**
+ * "New since your last visit" from the visit cookie, which holds the start of the previous visit
+ * and of the latest one ("prev|latest", ms). A visit starting now counts from the latest; a page
+ * reloaded during a visit keeps counting from the previous one. `next` is the cookie to write
+ * then, null when it stays as it is; `since` is null on a first visit.
+ */
+export function lastVisit(cookie: string | undefined, now: number): { since: Date | null; next: string | null } {
+  const [prev, latest] = (cookie ?? "").split("|").map((v) => (/^\d+$/.test(v) ? Number(v) : null));
+  if (!latest || latest > now) return { since: null, next: `|${now}` };
+  if (now - latest > VISIT) return { since: new Date(latest), next: `${latest}|${now}` };
+  return { since: prev ? new Date(prev) : null, next: null };
 }
 
 /** The schemas the filters are read against: the result type's, the project's own fields, and who is asking. */

@@ -60,7 +60,7 @@ export function parseCursor(s: string | null | undefined): Cursor | undefined {
 const COLS = `e.id, e.ts, e.recorded_at, e.type, e.severity, e.payload, e.source_id, e.author, e.author_label, e.supersedes, e.voided,
   coalesce(e.root_id, e.id) root_id,
   (select count(*)::int from events v where v.tenant_id = $1 and coalesce(v.root_id, v.id) = coalesce(e.root_id, e.id) and v.id <= e.id) version,
-  array(select eo.object_id from event_objects eo where eo.tenant_id = $1 and eo.event_id = e.id) object_ids`;
+  array(select eo.object_id from event_objects eo where eo.tenant_id = $1 and eo.event_id = e.id order by eo.pos, eo.object_id) object_ids`;
 
 type Raw = {
   id: string; ts: Date; recorded_at: Date; type: string; severity: Severity; payload: Record<string, unknown>; source_id: string | null;
@@ -170,7 +170,7 @@ export async function* allDashboardEvents(
          limit $7
        )
        select p.id, p.ts, p.type, p.payload, p.author_label,
-              array(select eo.object_id from event_objects eo where eo.tenant_id = $1 and eo.event_id = p.id) object_ids
+              array(select eo.object_id from event_objects eo where eo.tenant_id = $1 and eo.event_id = p.id order by eo.pos, eo.object_id) object_ids
        from page p order by p.ts desc, p.id desc`,
       [db.tenantId, q.types, q.from ?? null, q.to ?? null, after?.ts ?? null, after?.id ?? null, chunk],
     );

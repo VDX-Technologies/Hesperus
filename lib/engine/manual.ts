@@ -122,8 +122,8 @@ async function insert(
          insert into events (tenant_id, ts, type, severity, payload, source_id, recorded_at, author, author_label, supersedes, voided)
          values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $12) returning id
        )
-       insert into event_objects (tenant_id, event_id, object_id)
-       select $1, e.id, o from e, unnest($11::uuid[]) o returning event_id id`,
+       insert into event_objects (tenant_id, event_id, object_id, pos)
+       select $1, e.id, u.o, u.pos - 1 from e, unnest($11::uuid[]) with ordinality u(o, pos) returning event_id id`,
       [db.tenantId, e.ts, e.type, e.severity, e.payload, source.id, now, author.id, author.email ?? null, e.supersedes, e.objectIds, e.voided ?? null],
     );
     return Number(rows[0].id);
@@ -158,7 +158,7 @@ export async function correctEvent(
 ): Promise<number> {
   const { rows } = await db.query<{ type: string; severity: Severity; author: string | null; objects: string[]; latest: boolean; voided: string | null }>(
     `select e.type, e.severity, e.author, e.voided,
-            array(select object_id from event_objects where tenant_id = $1 and event_id = e.id) objects,
+            array(select object_id from event_objects where tenant_id = $1 and event_id = e.id order by pos, object_id) objects,
             not exists (select 1 from events n where n.tenant_id = $1 and n.supersedes = e.id) latest
        from events e where e.tenant_id = $1 and e.id = $2`,
     [db.tenantId, eventId],
@@ -187,7 +187,7 @@ export async function voidEvent(db: TenantDb, author: Author, eventId: number, r
   if (!why) throw new ManualEventError(400, "a reason is required");
   const { rows } = await db.query<{ type: string; ts: Date; severity: Severity; payload: Record<string, unknown>; author: string | null; voided: string | null; objects: string[]; latest: boolean }>(
     `select e.type, e.ts, e.severity, e.payload, e.author, e.voided,
-            array(select object_id from event_objects where tenant_id = $1 and event_id = e.id) objects,
+            array(select object_id from event_objects where tenant_id = $1 and event_id = e.id order by pos, object_id) objects,
             not exists (select 1 from events n where n.tenant_id = $1 and n.supersedes = e.id) latest
        from events e where e.tenant_id = $1 and e.id = $2`,
     [db.tenantId, eventId],

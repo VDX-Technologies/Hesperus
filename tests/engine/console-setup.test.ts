@@ -42,7 +42,7 @@ describe("console setup", () => {
 
   it("loads the research types once, only in its tenant, and keeps the customer's edits", async () => {
     expect(await prepareConsole(A, admin, "research")).toContain("custom.project");
-    expect((await listObjectTypes(A)).length).toBe(3);
+    expect((await listObjectTypes(A)).length).toBe(4);
     expect(await listObjectTypes(B)).toEqual([]);
 
     const project = (await getObjectType(A, "custom.project"))!;

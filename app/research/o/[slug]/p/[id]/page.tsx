@@ -3,15 +3,16 @@ import { notFound } from "next/navigation";
 import { getT } from "@/lib/i18n";
 import { listEvents } from "@/lib/engine/events";
 import { fieldText, getEventType, label } from "@/lib/engine/registers";
-import { getObject, getObjectType, searchObjects } from "@/lib/engine/custom-objects";
+import { countLinked, getObject, getObjectType, objectHistogram, objectPoints, searchObjects } from "@/lib/engine/custom-objects";
 import { getSettings, num } from "@/lib/engine/settings";
 import { canRecord } from "@/lib/engine/manual";
 import type { PropertySpec } from "@/lib/engine/package";
-import { filterQuery, projectFields, RESEARCH, resultFilters } from "@/lib/research";
+import { filterQuery, projectFields, RESEARCH, resultFilters, shownColumns } from "@/lib/research";
 import { CheckAll } from "@/components/check-all";
 import { Flash } from "@/components/flash";
 import { SubmitButton } from "@/components/submit-button";
-import { reviewMany } from "../../actions";
+import { Histogram, ResultScatter } from "@/components/research/charts";
+import { deleteView, reviewMany, saveView } from "../../actions";
 import { assignees, researchContext } from "../../context";
 import { Outcome, runLabel } from "../../runs";
 
@@ -19,15 +20,16 @@ const isNumber = (s: PropertySpec) => s.type === "number" || s.type === "integer
 
 /**
  * A project: its properties, its run history and its results, searched, filtered on any of their
- * properties (the project's own fields too) and sorted by column, with batch review and assignment.
+ * properties (the project's own fields too) and sorted by column, with batch review and assignment;
+ * charts of the results matching the filters, the review funnel, a choice of columns and saved views.
  */
 export default async function Project(props: PageProps<"/research/o/[slug]/p/[id]">) {
   const { slug, id } = await props.params;
   const sp = await props.searchParams;
   const { org, db, author } = await researchContext(slug);
   const { t, locale } = await getT();
-  const [project, type, resultType, runType] = await Promise.all([
-    getObject(db, id), getObjectType(db, RESEARCH.project), getObjectType(db, RESEARCH.result), getEventType(db, [], RESEARCH.run),
+  const [project, type, resultType, runType, viewType] = await Promise.all([
+    getObject(db, id), getObjectType(db, RESEARCH.project), getObjectType(db, RESEARCH.result), getEventType(db, [], RESEARCH.run), getObjectType(db, RESEARCH.view),
   ]);
   if (!project || !type || project.type !== type.type) notFound();
 
@@ -35,10 +37,25 @@ export default async function Project(props: PageProps<"/research/o/[slug]/p/[id
   const own = projectFields(project);
   const assignable = !!resultType?.properties[RESEARCH.assignee];
   const { page, ...filters } = resultFilters(sp, project.id, { result: resultType?.properties, own, me: author.email });
-  const [runs, notes, { objects: results, total }] = await Promise.all([
+  const one = (k: string) => (typeof sp[k] === "string" ? (sp[k] as string) : "");
+  // the numeric columns the charts can plot: the result's, then the project's own fields
+  const numeric = [
+    ...Object.entries(resultType?.properties ?? {}).filter(([, s]) => isNumber(s)).map(([k, s]) => [k, label(s.label, locale, k)] as const),
+    ...Object.entries(own).filter(([, s]) => isNumber(s)).map(([k, s]) => [`${RESEARCH.extra}.${k}`, label(s.label, locale, k)] as const),
+  ];
+  const numericKeys = numeric.map(([k]) => k);
+  const pick = (k: string, fallback: string | undefined) => (numericKeys.includes(one(k)) ? one(k) : fallback);
+  const hist = pick("hist", numericKeys.includes(RESEARCH.score) ? RESEARCH.score : numericKeys[0]);
+  const x = pick("x", hist);
+  const y = pick("y", numericKeys.find((k) => k !== x));
+  const [runs, notes, { objects: results, total }, histogram, scatter, byReview, views] = await Promise.all([
     listEvents(db, { types: [RESEARCH.run], objectId: project.id, recursive: false, limit: 50 }),
     listEvents(db, { types: [RESEARCH.labNote], objectId: project.id, recursive: false, limit: 3 }),
     resultType ? searchObjects(db, RESEARCH.result, { ...filters, limit: pageSize, offset: (page - 1) * pageSize }) : { objects: [], total: 0 },
+    resultType && hist ? objectHistogram(db, RESEARCH.result, hist, filters, 24) : null,
+    resultType && x && y && x !== y ? objectPoints(db, RESEARCH.result, x, y, filters, 1500) : null,
+    resultType ? countLinked(db, RESEARCH.result, RESEARCH.link, RESEARCH.review) : [],
+    viewType ? searchObjects(db, RESEARCH.view, { linkedTo: { key: RESEARCH.link, id: project.id }, order: { by: "name", desc: false }, limit: 50 }) : null,
   ]);
 
   const members = assignable ? await assignees(org.id) : [];
@@ -48,8 +65,9 @@ export default async function Project(props: PageProps<"/research/o/[slug]/p/[id
   // the result's own scalar properties, then the project's fields held in `extra`
   const cols = Object.entries(resultType?.properties ?? {}).filter(([k, s]) => s.type !== "object" && k !== RESEARCH.note);
   const extraCols = Object.entries(own).filter(([, s]) => s.type !== "object");
+  const columns = [...cols.map(([k, s]) => [k, label(s.label, locale, k)] as const), ...extraCols.map(([k, s]) => [`${RESEARCH.extra}.${k}`, label(s.label, locale, k)] as const)];
+  const visible = shownColumns(sp.cols, columns.map(([k]) => k));
   const review = resultType?.properties[RESEARCH.review];
-  const one = (k: string) => (typeof sp[k] === "string" ? (sp[k] as string) : "");
   const base = `/research/o/${slug}/p/${project.id}`;
   // a link to this page with the current filters, some of them changed (null removes one)
   const link = (change: Record<string, string | null>, path = base) => {
@@ -100,6 +118,29 @@ export default async function Project(props: PageProps<"/research/o/[slug]/p/[id
   const queue = filterQuery(sp);
   queue.delete("review");
   const exportLink = (format: string) => link({ format }, `${base}/export`);
+  // the current filters as hidden inputs of a form that sets the others
+  const keep = (...drop: string[]) =>
+    [...filterQuery(sp)].filter(([k]) => !drop.includes(k)).map(([k, v]) => <input key={k} type="hidden" name={k} value={v} />);
+  const nameOf = (k: string) => numeric.find(([n]) => n === k)?.[1] ?? k;
+  // a histogram's range is the score's min / max, or a field's min.<key> / max.<key>
+  const [minKey, maxKey] = hist === RESEARCH.score ? ["min", "max"] : [`min.${hist}`, `max.${hist}`];
+  const histQuery = filterQuery(sp);
+  histQuery.delete(minKey);
+  histQuery.delete(maxKey);
+  const ranged = !!(one(minKey) || one(maxKey));
+  // the review funnel over all the project's results: reviewed, then kept (interesting or sent), then sent
+  const counts = Object.fromEntries(byReview.filter((r) => r.id === project.id).map((r) => [r.value ?? "", r.n]));
+  const all = Object.values(counts).reduce((a, n) => a + n, 0);
+  const states = (review?.enum ?? []).map(String);
+  const funnel = states.includes("interesting") && states.includes("sent") && all > 0
+    ? [
+        { label: t.funnelTotal, n: all },
+        { label: t.funnelReviewed, n: all - (counts[RESEARCH.pending] ?? 0) - (counts[""] ?? 0) },
+        { label: `${fieldText(review, "interesting", locale)} + ${fieldText(review, "sent", locale)}`, n: (counts.interesting ?? 0) + (counts.sent ?? 0) },
+        { label: fieldText(review, "sent", locale), n: counts.sent ?? 0 },
+      ]
+    : [];
+  const current = filterQuery(sp).toString();
 
   return (
     <div>
@@ -182,8 +223,7 @@ export default async function Project(props: PageProps<"/research/o/[slug]/p/[id
         </div>
         <div className="mt-3"><Flash saved={sp.saved} error={sp.error} t={t} /></div>
         <form className="mt-3 text-sm">
-          {one("sort") && <input type="hidden" name="sort" value={one("sort")} />}
-          {one("order") && <input type="hidden" name="order" value={one("order")} />}
+          {keep(...[...filterQuery(sp).keys()].filter((k) => !["sort", "order", "cols", "hist", "x", "y"].includes(k)))}
           <div className="flex flex-wrap items-end gap-3">
             <label className="block"><span className="text-xs text-dim">{t.searchResults}</span>
               <input name="q" type="search" defaultValue={one("q")} className="mt-1 w-48" /></label>
@@ -217,6 +257,107 @@ export default async function Project(props: PageProps<"/research/o/[slug]/p/[id
           <a href={exportLink("csv")} className="text-frost hover:underline">{t.exportCsv}</a>
           <a href={exportLink("json")} className="text-frost hover:underline">{t.exportJson}</a>
         </div>
+        {views && (
+          <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
+            <span className="text-dim">{t.savedViews}</span>
+            {views.objects.map((v) => {
+              const q = String(v.properties[RESEARCH.query] ?? "");
+              return (
+                <span key={v.id} className={`flex items-center gap-1 rounded-full border px-2.5 py-1 ${q === current ? "border-ice/60 text-ice" : "border-line text-mist"}`}>
+                  <Link href={q ? `${base}?${q}` : base} className="hover:underline">{v.name}</Link>
+                  {editor && (
+                    <form action={deleteView}>
+                      <input type="hidden" name="slug" value={slug} />
+                      <input type="hidden" name="project" value={project.id} />
+                      <input type="hidden" name="id" value={v.id} />
+                      <button className="text-dim hover:text-alarm" aria-label={`${t.deleteView} ${v.name}`} title={t.deleteView}>×</button>
+                    </form>
+                  )}
+                </span>
+              );
+            })}
+            {!views.objects.length && <span className="text-dim">{t.noViews}</span>}
+            {editor && current && (
+              <form action={saveView} className="flex items-center gap-1">
+                <input type="hidden" name="slug" value={slug} />
+                <input type="hidden" name="project" value={project.id} />
+                <input type="hidden" name="query" value={current} />
+                <input name="name" required maxLength={80} placeholder={t.viewName} aria-label={t.viewName} className="w-36 py-1 text-xs" />
+                <button className="btn py-1 text-xs">{t.saveView}</button>
+              </form>
+            )}
+          </div>
+        )}
+        {(histogram?.bins.length || funnel.length || scatter) ? (
+          <div className="mt-4 grid gap-4 lg:grid-cols-2">
+            {histogram && histogram.bins.length > 0 && hist && (
+              <div className="card p-4">
+                <form className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                  {keep("hist", "page")}
+                  <label className="flex items-center gap-2 text-dim">{t.distribution}
+                    <select name="hist" defaultValue={hist} className="py-1 text-xs">
+                      {numeric.map(([k, n]) => <option key={k} value={k}>{n}</option>)}
+                    </select></label>
+                  <button className="btn py-1 text-xs">{t.show}</button>
+                  {ranged && <Link href={link({ [minKey]: null, [maxKey]: null })} className="text-dim hover:underline">{t.clearRange}</Link>}
+                </form>
+                <div className="mt-2">
+                  <Histogram bins={histogram.bins} path={base} query={histQuery.toString()} minKey={minKey} maxKey={maxKey} locale={locale}
+                    labels={{ count: t.resultsShown, range: t.dragToFilter }} />
+                </div>
+                <p className="mt-1 text-xs text-dim">{t.dragToFilter}</p>
+              </div>
+            )}
+            {scatter && x && y && (
+              <div className="card p-4">
+                <form className="flex flex-wrap items-center gap-2 text-xs">
+                  {keep("x", "y", "page")}
+                  {([["x", x], ["y", y]] as const).map(([k, v]) => (
+                    <label key={k} className="flex items-center gap-1 text-dim">{k.toUpperCase()}
+                      <select name={k} defaultValue={v} className="py-1 text-xs">
+                        {numeric.map(([n, l]) => <option key={n} value={n}>{l}</option>)}
+                      </select></label>
+                  ))}
+                  <button className="btn py-1 text-xs">{t.show}</button>
+                </form>
+                <div className="mt-2">
+                  <ResultScatter points={scatter.points} href={`/research/o/${slug}/r`} xLabel={nameOf(x)} yLabel={nameOf(y)} locale={locale} />
+                </div>
+                <p className="mt-1 text-xs text-dim">
+                  {scatter.total > scatter.points.length ? `${t.pointsShown} ${scatter.points.length} / ${scatter.total}. ` : ""}{t.clickPoint}
+                </p>
+              </div>
+            )}
+            {funnel.length > 0 && (
+              <div className="card p-4">
+                <h3 className="text-xs text-dim">{t.reviewFunnel}</h3>
+                <ol className="mt-3 space-y-2 text-xs">
+                  {funnel.map((f) => (
+                    <li key={f.label}>
+                      <div className="flex justify-between gap-2"><span className="text-mist">{f.label}</span>
+                        <span><span className="num text-frost">{f.n}</span> <span className="num text-dim">{Math.round((f.n / all) * 100)}%</span></span></div>
+                      <div className="mt-1 h-2 rounded-sm bg-line-soft"><div className="h-2 rounded-sm bg-ice/80" style={{ width: `${(f.n / all) * 100}%` }} /></div>
+                    </li>
+                  ))}
+                </ol>
+              </div>
+            )}
+          </div>
+        ) : null}
+        {columns.length > 0 && (
+          <details className="mt-3 text-xs">
+            <summary className="cursor-pointer text-dim">{t.columns} <span className="num">{visible.size}/{columns.length}</span></summary>
+            <form className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-2">
+              {keep("cols", "page")}
+              {columns.map(([k, n]) => (
+                <label key={k} className="flex items-center gap-1.5"><input type="checkbox" name="cols" value={k} defaultChecked={visible.has(k)} /> {n}</label>
+              ))}
+              <button className="btn py-1 text-xs">{t.show}</button>
+              {visible.size < columns.length && <Link href={link({ cols: null })} className="text-dim hover:underline">{t.allColumns}</Link>}
+            </form>
+            <p className="mt-1 text-dim">{t.columnsExportNote}</p>
+          </details>
+        )}
         {results.length ? (
           <form action={reviewMany}>
             <input type="hidden" name="slug" value={slug} />
@@ -248,10 +389,10 @@ export default async function Project(props: PageProps<"/research/o/[slug]/p/[id
                   <tr>
                     {editor && <th className="w-8 px-3 py-2"><CheckAll name="ids" label={t.selectAll} /></th>}
                     <th className="px-3 py-2">{sortHead("name", t.objectName)}</th>
-                    {cols.map(([k, s]) => (
+                    {cols.filter(([k]) => visible.has(k)).map(([k, s]) => (
                       <th key={k} className="px-3 py-2">{isNumber(s) || s.type === "string" ? sortHead(k, label(s.label, locale, k)) : label(s.label, locale, k)}</th>
                     ))}
-                    {extraCols.map(([k, s]) => (
+                    {extraCols.filter(([k]) => visible.has(`${RESEARCH.extra}.${k}`)).map(([k, s]) => (
                       <th key={`x.${k}`} className="px-3 py-2">
                         {isNumber(s) || s.type === "string" ? sortHead(`${RESEARCH.extra}.${k}`, label(s.label, locale, k)) : label(s.label, locale, k)}
                       </th>
@@ -265,14 +406,14 @@ export default async function Project(props: PageProps<"/research/o/[slug]/p/[id
                       <tr key={r.id}>
                         {editor && <td className="px-3 py-2"><input type="checkbox" name="ids" value={r.id} aria-label={r.name} /></td>}
                         <td className="px-3 py-2"><Link href={`/research/o/${slug}/r/${r.id}`} className="text-frost hover:underline">{r.name}</Link></td>
-                        {cols.map(([k, s]) => (
+                        {cols.filter(([k]) => visible.has(k)).map(([k, s]) => (
                           <td key={k} className={isNumber(s) ? "num px-3 py-2" : "px-3 py-2"}>
                             {k === RESEARCH.runRef && r.properties[k] ? (
                               <Link href={`${base}/run/${Number(r.properties[k])}`} className="text-frost hover:underline">#{String(r.properties[k])}</Link>
                             ) : fieldText(s, r.properties[k], locale)}
                           </td>
                         ))}
-                        {extraCols.map(([k, s]) => <td key={`x.${k}`} className={isNumber(s) ? "num px-3 py-2" : "px-3 py-2"}>{fieldText(s, extra[k], locale)}</td>)}
+                        {extraCols.filter(([k]) => visible.has(`${RESEARCH.extra}.${k}`)).map(([k, s]) => <td key={`x.${k}`} className={isNumber(s) ? "num px-3 py-2" : "px-3 py-2"}>{fieldText(s, extra[k], locale)}</td>)}
                       </tr>
                     );
                   })}

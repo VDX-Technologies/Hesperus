@@ -467,12 +467,16 @@ Ogni tipo di evento con uno schema ha un registro, senza codice dedicato:
   - `custom.project`: area, domanda, ipotesi, stage, protocollo, `result_links` (testo, una riga per link `Etichetta https://…{campo}`: le pagine di un risultato in cataloghi esterni, espanse da `expandLinks` con i valori del risultato, anche di `extra`), `result_schema`;
   - `custom.dataset`: fonte, descrizione, dimensione, URL, licenza;
   - `custom.result`: score, review `to_review|discarded|interesting|sent`, note, assegnatario (`assignee`, email di un membro), run, `extra` che segue `project.result_schema`; collegamento `project` obbligatorio;
+  - `custom.view`: query (stringa dei filtri), collegamento `project` obbligatorio;
   - eventi `custom.run` (commit, parametri, elementi, durata, esito; sul progetto e anche sul dataset), `custom.lab_note` (testo, sul progetto) e `custom.comment` (testo e `reply_to`, sul risultato).
   - Il formato `text` (stringa su più righe) vale per proprietà e campi evento: textarea nei form, a capo conservati nelle viste; lo usano note, testi e `result_links`.
 - **Source**: `scripts/create-research-source.ts <org> <progetto>` crea la source push `custom` con scope sul progetto (`also: custom.dataset`) e stampa il token una volta.
 - **Console** (`/research/o/[slug]`):
-  - i progetti con stage, numero di risultati e ultima run;
+  - la home: tre indicatori (da rivedere, nuovi dall'ultima visita, run fallite nelle ultime 24 ore), i progetti con stage, distribuzione dello score, barra di revisione e ultima run, e le ultime run, note e commenti con il link alla loro pagina. L'ultima visita sta nel cookie `research_visit` (`lastVisit`: dopo 30 minuti di assenza la visita precedente diventa il riferimento); una pagina non può scrivere cookie mentre si disegna, quindi lo sposta `<VisitMarker>` chiamando `POST /research/o/[slug]/visit`;
   - il progetto con lo storico delle run e i risultati, con le colonne del suo `result_schema`:
+    - grafici sui risultati filtrati (`components/research/charts.tsx`): istogramma di una proprietà numerica (`objectHistogram`, `hist`; trascinare sulle barre imposta `min`/`max`), dispersione di due proprietà (`objectPoints`, `x`/`y`, fino a 1500 punti; un punto apre il risultato) e l'imbuto di revisione (totale → rivisti → interessanti → inviati);
+    - viste salvate: oggetti `custom.view` collegati al progetto con la query dei filtri (`viewQuery` toglie pagina e messaggi); `saveView` / `deleteView`, condivise tra i membri;
+    - colonne scelte con `cols` (`shownColumns`); l'export contiene sempre tutte le colonne;
     - ricerca `q`, filtri `f.<chiave>`, `min.<chiave>`, `max.<chiave>` generati dallo schema (anche `extra.<campo>`), "assegnati a me" (`mine=1`), ordinamento per colonna (`sort`, `order`). `resultFilters` li legge, `filterQuery` li conserva nei link;
     - azioni in blocco (`reviewMany`): revisione e assegnatario sui risultati selezionati, un aggiornamento con audit per oggetto, assegnatari limitati ai membri owner/member;
     - export `/p/[id]/export?format=csv|json` con gli stessi filtri e ordinamento, a pagine e in streaming (CSV con chiavi, `;` e decimali con la virgola, via `resultsCsv`);
@@ -484,6 +488,7 @@ Ogni tipo di evento con uno schema ha un registro, senza codice dedicato:
   - i commenti sul risultato (`addComment`), con risposte raggruppate in thread da `commentThreads`: `reply_to` è il `rootId` del commento, quindi un thread resta intero anche se il commento viene corretto;
   - la revisione (stato + nota) registrata nell'audit.
   - tipi, oggetti, attività e impostazioni del consenso alle route `/types`, `/types/edit`, `/objects/[type]`, `/activity` e `/settings`; le azioni di scrittura ritornano a percorsi Research. I form condivisi e le validazioni sono in `lib/object-forms.ts`, mentre `lib/type-drafts.ts` prepara i dati per l'editor.
+- Gli oggetti di un evento sono in ordine (`event_objects.pos`, migrazione `20261110000000_event_object_order.sql`): il primo è quello a cui l'evento si riferisce (il progetto di una run, il risultato di un commento). `listEvents` e le letture di `manual.ts` li restituiscono ordinati per `pos` e poi per id.
 - I nomi dei tipi e delle proprietà usati dalla console stanno **solo** in `lib/research.ts`. Il motore non conosce progetti o risultati.
 
 ---
@@ -511,13 +516,14 @@ Ogni tipo di evento con uno schema ha un registro, senza codice dedicato:
 | `/admin/engine` | staff | stato dell'engine (job, quote, salute) e gestione delle source (nuova source, nuovo token, pausa) |
 | `/admin/settings` | staff | `engine_settings` e destinatari delle email di salute |
 | `/terra/o/[slug]/registers/objects[/type]` | membri (viewer in sola lettura) | oggetti dei tipi personalizzati e i loro collegamenti |
-| `/research/o/[slug]` | membri | VDX Research: progetti |
+| `/research/o/[slug]` | membri | VDX Research: home con indicatori, progetti e attività recente |
+| `/research/o/[slug]/visit` (POST) | membri | sposta il cookie dell'ultima visita |
 | `/research/o/[slug]/types` | membri (creazione schema: owner) | tipi oggetto personalizzati |
 | `/research/o/[slug]/types/edit` | owner | editor dei tipi oggetto |
 | `/research/o/[slug]/objects/[type]` | membri (viewer in sola lettura) | oggetti e collegamenti del tipo |
 | `/research/o/[slug]/activity` | membri | audit dell'organizzazione |
 | `/research/o/[slug]/settings` | membri | stato e gestione del consenso personale |
-| `/research/o/[slug]/p/[id]` | membri (azioni in blocco: owner e member) | progetto: run, risultati filtrabili e ordinabili |
+| `/research/o/[slug]/p/[id]` | membri (azioni in blocco e viste: owner e member) | progetto: run, grafici, viste salvate, risultati filtrabili e ordinabili |
 | `/research/o/[slug]/p/[id]/review` | membri (revisione: owner e member) | coda di revisione da tastiera |
 | `/research/o/[slug]/p/[id]/export` | membri | risultati filtrati in CSV o JSON |
 | `/research/o/[slug]/r/[id]` | membri (revisione: owner e member) | risultato: proprietà, allegati, storico, revisione |
