@@ -6,6 +6,13 @@ import { Header } from "@/components/header";
 import { LiveRefresh } from "@/components/terra/live-refresh";
 import { ConsentGate } from "@/components/terra/consent-gate";
 import { getConsent } from "@/lib/consent";
+import { Metadata } from "next";
+
+export const metadata: Metadata = {
+  title: { default: "VDX Terra", template: "%s · VDX Terra" },
+  description: "One platform for the agri-food sector.",
+  appleWebApp: { capable: true, title: "VDX Terra", statusBarStyle: "black-translucent" },
+};
 
 export default async function OrgLayout(props: LayoutProps<"/terra/o/[slug]">) {
   const { slug } = await props.params;
@@ -22,27 +29,27 @@ export default async function OrgLayout(props: LayoutProps<"/terra/o/[slug]">) {
   const mustSign = !isAdmin && !consent;
   return (
     <>
-    <div className="min-h-screen lg:pl-64" inert={mustSign}>
-      <Header
-        title={org.name}
-        t={t}
-        locale={locale}
-        path={`/terra/o/${slug}`}
-        isAdmin={isAdmin}
-        nav={[
-          { href: `/terra/o/${slug}`, label: t.overview },
-          { href: `/terra/o/${slug}/alerts`, label: t.alerts, badge: count },
-          { href: `/terra/o/${slug}/registers`, label: t.registers },
-          ...(modules.some((m) => m.module === "agronomy") ? [{ href: `/terra/o/${slug}/crops`, label: t.crops }] : []),
-          ...(hasUpload ? [{ href: `/terra/o/${slug}/upload`, label: t.upload }] : []),
-          { href: `/terra/o/${slug}/activity`, label: t.activity },
-          { href: `/terra/o/${slug}/settings`, label: t.settings },
-        ]}
-      />
-      <LiveRefresh orgId={org.id} />
-      <main className="mx-auto max-w-7xl px-4 pb-16 pt-5 sm:px-6 lg:px-8 lg:pt-7">{props.children}</main>
-    </div>
-    {mustSign && <ConsentGate slug={slug} email={user.email} t={t} locale={locale} />}
+      <div className="min-h-screen lg:pl-64" inert={mustSign}>
+        <Header
+          title={org.name}
+          t={t}
+          locale={locale}
+          path={`/terra/o/${slug}`}
+          isAdmin={isAdmin}
+          nav={[
+            { href: `/terra/o/${slug}`, label: t.overview },
+            { href: `/terra/o/${slug}/alerts`, label: t.alerts, badge: count },
+            { href: `/terra/o/${slug}/registers`, label: t.registers },
+            ...(modules.some((m) => m.module === "agronomy") ? [{ href: `/terra/o/${slug}/crops`, label: t.crops }] : []),
+            ...(hasUpload ? [{ href: `/terra/o/${slug}/upload`, label: t.upload }] : []),
+            { href: `/terra/o/${slug}/activity`, label: t.activity },
+            { href: `/terra/o/${slug}/settings`, label: t.settings },
+          ]}
+        />
+        <LiveRefresh orgId={org.id} />
+        <main className="mx-auto max-w-7xl px-4 pb-16 pt-5 sm:px-6 lg:px-8 lg:pt-7">{props.children}</main>
+      </div>
+      {mustSign && <ConsentGate slug={slug} email={user.email} t={t} locale={locale} />}
     </>
   );
 }
