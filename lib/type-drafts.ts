@@ -14,6 +14,7 @@ export const fieldDrafts = (schema: Schema, locale: string, fromSubject: Record<
     fromSubject: fromSubject[k] ?? "",
     holdsSchema: s.format === "schema",
     schemaFrom: s.schemaFrom ?? "",
+    multiline: s.format === "text",
   }));
 
 /** The draft of a saved custom object type. */

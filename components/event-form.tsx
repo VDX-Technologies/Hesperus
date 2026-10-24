@@ -106,6 +106,8 @@ export function EventForm({
             input = <input {...common} type="date" required={spec.required} className="mt-1 w-full" />;
           } else if (spec.type === "object") {
             input = <textarea {...common} rows={3} spellCheck={false} required={spec.required} placeholder="{ }" className="mt-1 w-full font-mono text-xs" />;
+          } else if (spec.format === "text") {
+            input = <textarea {...common} rows={3} required={spec.required} className="mt-1 w-full" />;
           } else if (spec.type === "boolean") {
             input = <input type="checkbox" name={k} checked={values[k] === "true"} onChange={(e) => set(k, String(e.target.checked))} className="mt-2 block" />;
           } else {

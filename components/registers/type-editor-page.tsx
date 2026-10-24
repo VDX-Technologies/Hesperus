@@ -33,7 +33,7 @@ export async function TypeEditorPage({ db, slug, kind, draft, action }: {
             addField: t.addField, remove: t.remove, fieldKey: t.typeKey, fieldLabel: t.fieldLabel, fieldType: t.fieldType,
             required: t.required, units: t.fieldUnits, options: t.fieldOptions, fromSubject: t.fromSubject, save: t.save,
             choose: t.choose, also: t.typeAlso, links: t.typeLinks, addLink: t.addLink, linkType: t.linkType,
-            holdsSchema: t.holdsSchema, schemaFrom: t.schemaFrom,
+            holdsSchema: t.holdsSchema, schemaFrom: t.schemaFrom, multiline: t.multiline,
           }}
         />
       </div>

@@ -4,10 +4,11 @@ import { getT } from "@/lib/i18n";
 import { canRecord } from "@/lib/engine/manual";
 import { fieldText, label } from "@/lib/engine/registers";
 import { getObject, getObjectType, objectDocuments, searchObjects } from "@/lib/engine/custom-objects";
-import { filterQuery, inlineImage, projectFields, RESEARCH, resultFilters, REVIEW_KEYS } from "@/lib/research";
+import { expandLinks, filterQuery, projectFields, RESEARCH, resultFilters, REVIEW_KEYS } from "@/lib/research";
 import { ReviewKeys } from "@/components/research/review-keys";
 import { quickReview } from "../../../actions";
 import { researchContext } from "../../../context";
+import { Attachments, OutsideLinks } from "../../../attachments";
 
 /**
  * The review queue: the project's results still to review, one at a time, highest score first
@@ -59,9 +60,7 @@ export default async function ReviewQueue(props: PageProps<"/research/o/[slug]/p
   const shown = Object.entries(resultType.properties).filter(([k, s]) => s.type !== "object" && !hidden.has(k) && result.properties[k] !== undefined);
   const extra = (result.properties[RESEARCH.extra] ?? {}) as Record<string, unknown>;
   const extraRows = Object.entries(own).filter(([k]) => extra[k] !== undefined);
-  const images = docs.filter((d) => inlineImage(d.contentType));
-  const files = docs.filter((d) => !inlineImage(d.contentType));
-  const doc = (d: { id: string }) => `/research/o/${slug}/doc/${d.id}`;
+  const links = expandLinks(project.properties[RESEARCH.links], result);
 
   return (
     <div>
@@ -75,25 +74,15 @@ export default async function ReviewQueue(props: PageProps<"/research/o/[slug]/p
             <dl className="mt-3 grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
               {result.externalId && <div><dt className="text-xs text-dim">{t.externalId}</dt><dd className="num break-words">{result.externalId}</dd></div>}
               {shown.map(([k, s]) => (
-                <div key={k}><dt className="text-xs text-dim">{label(s.label, locale, k)}</dt><dd className="break-words">{fieldText(s, result.properties[k], locale)}</dd></div>
+                <div key={k}><dt className="text-xs text-dim">{label(s.label, locale, k)}</dt><dd className="whitespace-pre-line break-words">{fieldText(s, result.properties[k], locale)}</dd></div>
               ))}
               {extraRows.map(([k, s]) => (
-                <div key={`x.${k}`}><dt className="text-xs text-dim">{label(s.label, locale, k)}</dt><dd className="break-words">{fieldText(s, extra[k], locale)}</dd></div>
+                <div key={`x.${k}`}><dt className="text-xs text-dim">{label(s.label, locale, k)}</dt><dd className="whitespace-pre-line break-words">{fieldText(s, extra[k], locale)}</dd></div>
               ))}
             </dl>
+            {links.length > 0 && <div className="mt-3"><OutsideLinks links={links} t={t} /></div>}
           </div>
-          {images.map((d) => (
-            <figure key={d.id} className="card p-2">
-              {/* eslint-disable-next-line @next/next/no-img-element -- private, tenant-checked bytes: no image optimizer */}
-              <img src={doc(d)} alt={d.filename ?? ""} className="w-full rounded bg-white" />
-              <figcaption className="mt-1 truncate text-xs text-dim">{d.filename}</figcaption>
-            </figure>
-          ))}
-          {files.length > 0 && (
-            <ul className="space-y-1 text-sm">
-              {files.map((d) => <li key={d.id}><a href={doc(d)} className="text-frost hover:underline">{d.filename ?? d.id}</a></li>)}
-            </ul>
-          )}
+          <div><Attachments db={db} slug={slug} docs={docs} t={t} locale={locale} /></div>
         </div>
 
         {canRecord(author.role) ? (

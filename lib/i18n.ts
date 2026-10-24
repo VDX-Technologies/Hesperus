@@ -457,7 +457,7 @@ const en = {
   fromSubject: "Fill from object property",
   notJson: "Not valid JSON", typeAlso: "Can also be linked to", otherObjects: "Other objects",
   objectTypes: "Object types", newObjectType: "New object type", editObjectType: "Edit object type", typeProperties: "Properties",
-  typeLinks: "Links", addLink: "Add link", linkType: "Points to", holdsSchema: "holds a field schema",
+  typeLinks: "Links", addLink: "Add link", linkType: "Points to", holdsSchema: "holds a field schema", multiline: "several lines",
   schemaFrom: "follows the schema of (link.property)", objects: "Objects", newObject: "New object", editObject: "Edit object",
   objectName: "Name", externalId: "External id", noObjectsOfType: "No objects yet.", deleteObject: "Delete",
   deleteObjectConfirm: "Delete this object? It cannot be undone.", objectLinkedErr: "It has events or other objects linked to it.",
@@ -474,6 +474,13 @@ const en = {
   batchEmpty: "Select at least one result.", batchUnchanged: "The selected results already had those values.",
   queueEmpty: "Nothing left to review with these filters.", queueHint: "Keys: i interesting · d discarded · s sent · j skip · k back · n note",
   skip: "Skip", previous: "Previous",
+  run: "Run", datasets: "Datasets", noDatasets: "No datasets.", usedByRuns: "Runs that read it", showResults: "Show the results",
+  producedByRun: "Produced by run #{n}", compare: "Compare", compareRun: "Run", compareWith: "with", compareRuns: "Compare runs",
+  noParams: "No parameters.", labNotes: "Lab notebook", allNotes: "All notes", writeNote: "Add note", noNotes: "No notes yet.",
+  notePlaceholder: "What changed, what you tried, what you saw…", textRequired: "Write something first.",
+  comments: "Comments", noComments: "No comments yet.", reply: "Reply", addComment: "Comment",
+  commentPlaceholder: "A comment on this result…", replyPlaceholder: "Your reply…",
+  outsideLinks: "Elsewhere", openPdf: "open", csvFirstRows: "first {n} rows", previewAbove: "preview above",
 };
 export type Dict = typeof en;
 
@@ -931,7 +938,7 @@ const it: Dict = {
   fromSubject: "Compila dalla proprietà dell'oggetto",
   notJson: "Non è un JSON valido", typeAlso: "Si può collegare anche a", otherObjects: "Altri oggetti",
   objectTypes: "Tipi di oggetto", newObjectType: "Nuovo tipo di oggetto", editObjectType: "Modifica tipo di oggetto", typeProperties: "Proprietà",
-  typeLinks: "Collegamenti", addLink: "Aggiungi collegamento", linkType: "Punta a", holdsSchema: "contiene uno schema di campi",
+  typeLinks: "Collegamenti", addLink: "Aggiungi collegamento", linkType: "Punta a", holdsSchema: "contiene uno schema di campi", multiline: "su più righe",
   schemaFrom: "segue lo schema di (collegamento.proprietà)", objects: "Oggetti", newObject: "Nuovo oggetto", editObject: "Modifica oggetto",
   objectName: "Nome", externalId: "Id esterno", noObjectsOfType: "Ancora nessun oggetto.", deleteObject: "Elimina",
   deleteObjectConfirm: "Eliminare questo oggetto? Non si può annullare.", objectLinkedErr: "Ha eventi o altri oggetti collegati.",
@@ -948,6 +955,13 @@ const it: Dict = {
   batchEmpty: "Seleziona almeno un risultato.", batchUnchanged: "I risultati selezionati avevano già quei valori.",
   queueEmpty: "Niente da rivedere con questi filtri.", queueHint: "Tasti: i interessante · d scartato · s inviato · j salta · k indietro · n nota",
   skip: "Salta", previous: "Precedente",
+  run: "Esecuzione", datasets: "Dataset", noDatasets: "Nessun dataset.", usedByRuns: "Esecuzioni che lo hanno letto", showResults: "Mostra i risultati",
+  producedByRun: "Prodotto dall'esecuzione #{n}", compare: "Confronta", compareRun: "Esecuzione", compareWith: "con", compareRuns: "Confronto tra esecuzioni",
+  noParams: "Nessun parametro.", labNotes: "Quaderno di laboratorio", allNotes: "Tutte le note", writeNote: "Aggiungi nota", noNotes: "Ancora nessuna nota.",
+  notePlaceholder: "Cosa è cambiato, cosa hai provato, cosa hai visto…", textRequired: "Scrivi prima qualcosa.",
+  comments: "Commenti", noComments: "Ancora nessun commento.", reply: "Rispondi", addComment: "Commenta",
+  commentPlaceholder: "Un commento su questo risultato…", replyPlaceholder: "La tua risposta…",
+  outsideLinks: "Altrove", openPdf: "apri", csvFirstRows: "prime {n} righe", previewAbove: "anteprima sopra",
 };
 
 const DICTS: Record<Locale, Dict> = { en, it };

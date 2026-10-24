@@ -13,6 +13,8 @@ export interface FieldDraft {
   key: string; label: string; type: string; required: boolean; units: string; options: string; fromSubject: string;
   /** Object types only: the property holds a field schema, or follows one read through a link. */
   holdsSchema?: boolean; schemaFrom?: string;
+  /** A string field written on several lines. */
+  multiline?: boolean;
 }
 export interface LinkDraft { key: string; type: string; required: boolean }
 export interface TypeDraft {
@@ -33,6 +35,7 @@ function toSchema(d: TypeDraft, locale: string, object: boolean): Schema {
       ...(f.label ? { label: { [locale]: f.label } } : {}),
       ...(f.type === "quantity" ? { units: list(f.units) } : {}),
       ...(f.type === "string" && options.length ? { enum: options } : {}),
+      ...(f.type === "string" && !options.length && f.multiline ? { format: "text" as const } : {}),
       ...(object && f.type === "object" && f.holdsSchema ? { format: "schema" as const } : {}),
       ...(object && f.type === "object" && !f.holdsSchema && f.schemaFrom?.trim() ? { schemaFrom: f.schemaFrom.trim() } : {}),
     };
@@ -55,7 +58,7 @@ export function toObjectDefinition(d: TypeDraft, locale: string): ObjectTypeInpu
 type Text = Record<
   | "key" | "nameIt" | "nameEn" | "subject" | "fields" | "addField" | "remove" | "fieldKey" | "fieldLabel" | "fieldType"
   | "required" | "units" | "options" | "fromSubject" | "save" | "choose" | "also" | "links" | "addLink" | "linkType"
-  | "holdsSchema" | "schemaFrom",
+  | "holdsSchema" | "schemaFrom" | "multiline",
   string
 >;
 
@@ -126,6 +129,9 @@ export function TypeEditor({ slug, action: save, locale, kind = "event", initial
             </select>
             {f.type === "quantity" && <input aria-label={text.units} placeholder={`${text.units} (kg, l)`} value={f.units} onChange={(e) => setField(i, { units: e.target.value })} required />}
             {f.type === "string" && <input aria-label={text.options} placeholder={text.options} value={f.options} onChange={(e) => setField(i, { options: e.target.value })} />}
+            {f.type === "string" && !f.options.trim() && (
+              <label className="flex items-center gap-2"><input type="checkbox" checked={!!f.multiline} onChange={(e) => setField(i, { multiline: e.target.checked })} /> {text.multiline}</label>
+            )}
             {!object && <input aria-label={text.fromSubject} placeholder={text.fromSubject} value={f.fromSubject} onChange={(e) => setField(i, { fromSubject: e.target.value })} />}
             {object && f.type === "object" && (
               <>

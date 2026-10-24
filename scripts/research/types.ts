@@ -24,6 +24,8 @@ export const objectTypes: ObjectTypeInput[] = [
       started: { type: "timestamp", label: l("Inizio", "Start") },
       ended: { type: "timestamp", label: l("Fine", "End") },
       protocol: { type: "string", label: l("Link protocollo", "Protocol link") },
+      // one link per line, "Label https://...{tic_id}": a result's pages in outside catalogs
+      result_links: { type: "string", format: "text", label: l("Link esterni dei risultati", "Result links") },
       // the properties of this project's results (TIC id, gene, enzyme...), set per project
       result_schema: { type: "object", format: "schema", label: l("Proprietà dei risultati", "Result properties") },
     },
@@ -57,7 +59,7 @@ export const objectTypes: ObjectTypeInput[] = [
           interesting: l("Interessante", "Interesting"), sent: l("Inviato a un ricercatore", "Sent to a researcher"),
         },
       },
-      note: { type: "string", label: l("Note", "Notes") },
+      note: { type: "string", format: "text", label: l("Note", "Notes") },
       // the email of the member who should look at it
       assignee: { type: "string", label: l("Assegnato a", "Assigned to") },
       // the id of the run (an event) that produced it
@@ -90,7 +92,17 @@ export const eventTypes: EventTypeInput[] = [
     key: "lab_note",
     name: l("Nota di laboratorio", "Lab note"),
     subject: "custom.project",
-    fields: { text: { type: "string", required: true, label: l("Testo", "Text") } },
+    fields: { text: { type: "string", format: "text", required: true, label: l("Testo", "Text") } },
+  },
+  {
+    key: "comment",
+    name: l("Commento", "Comment"),
+    subject: "custom.result",
+    fields: {
+      text: { type: "string", format: "text", required: true, label: l("Testo", "Text") },
+      // the comment it answers, for threads
+      reply_to: { type: "integer", min: 1, label: l("In risposta a", "Reply to") },
+    },
   },
 ];
 

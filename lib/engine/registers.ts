@@ -270,7 +270,11 @@ export function checkEventType(input: EventTypeInput): string | null {
   if (!Object.keys(input.fields).length) return "at least one field is required";
   const err = checkFields(input.fields, FIELD_TYPES);
   if (err) return err;
-  if (Object.values(input.fields).some((s) => s.format || s.schemaFrom)) return "schemas belong to object types";
+  if (Object.values(input.fields).some((s) => s.format === "schema" || s.schemaFrom)) return "schemas belong to object types";
+  for (const [k, s] of Object.entries(input.fields)) {
+    if (s.format === "text" && s.type !== "string") return `"${k}": only string fields are written on several lines`;
+    if (s.format && s.format !== "text") return `"${k}": unknown format`;
+  }
   for (const k of Object.keys(input.fromSubject ?? {})) if (!input.fields[k]) return `unknown field "${k}"`;
   for (const t of input.also ?? []) if (!TYPE.test(t) || t === input.subject) return `invalid linked type "${t}"`;
   if ((input.also?.length ?? 0) > 5) return "too many linked types";

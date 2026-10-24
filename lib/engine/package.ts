@@ -16,8 +16,11 @@ export interface PropertySpec {
   label?: Record<string, string>;
   /** Text for enum values, {value: {"en": ..., "it": ...}}; ignored by validation. */
   options?: Record<string, Record<string, string>>;
-  /** "schema": an object property holding a field schema itself (a project's result fields). */
-  format?: "schema";
+  /**
+   * "schema": an object property holding a field schema itself (a project's result fields);
+   * "text": a string property written on several lines (a note, one link per line).
+   */
+  format?: "schema" | "text";
   /** "link.property": an object property validated against the schema held by the linked object. */
   schemaFrom?: string;
 }

@@ -30,6 +30,7 @@ export default async function ResearchLayout(props: LayoutProps<"/research/o/[sl
           isAdmin={isAdmin}
           nav={[
             { href: `/research/o/${slug}`, label: t.projects },
+            { href: `/research/o/${slug}/d`, label: t.datasets },
             { href: `/research/o/${slug}/types`, label: t.schemaEditor },
             { href: `/research/o/${slug}/activity`, label: t.activity },
             { href: `/research/o/${slug}/settings`, label: t.settings },

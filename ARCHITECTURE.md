@@ -464,10 +464,11 @@ Ogni tipo di evento con uno schema ha un registro, senza codice dedicato:
   - Senza la console le pagine `/research/o/[slug]` rispondono 404; i menu collegano tra loro le console attive.
   - L'elenco delle console sta in `lib/consoles.ts`: una nuova console si aggiunge lì e in `prepareConsole`. Non si usa `org_modules`, perché il backend lo legge come elenco di prodotti.
 - **Tipi** (`scripts/research/types.ts`, caricati all'attivazione o con `scripts/seed-research.ts <org>` tramite le stesse API dell'editor):
-  - `custom.project`: area, domanda, ipotesi, stage, protocollo, `result_schema`;
+  - `custom.project`: area, domanda, ipotesi, stage, protocollo, `result_links` (testo, una riga per link `Etichetta https://…{campo}`: le pagine di un risultato in cataloghi esterni, espanse da `expandLinks` con i valori del risultato, anche di `extra`), `result_schema`;
   - `custom.dataset`: fonte, descrizione, dimensione, URL, licenza;
   - `custom.result`: score, review `to_review|discarded|interesting|sent`, note, assegnatario (`assignee`, email di un membro), run, `extra` che segue `project.result_schema`; collegamento `project` obbligatorio;
-  - eventi `custom.run` (commit, parametri, elementi, durata, esito; sul progetto e anche sul dataset) e `custom.lab_note`.
+  - eventi `custom.run` (commit, parametri, elementi, durata, esito; sul progetto e anche sul dataset), `custom.lab_note` (testo, sul progetto) e `custom.comment` (testo e `reply_to`, sul risultato).
+  - Il formato `text` (stringa su più righe) vale per proprietà e campi evento: textarea nei form, a capo conservati nelle viste; lo usano note, testi e `result_links`.
 - **Source**: `scripts/create-research-source.ts <org> <progetto>` crea la source push `custom` con scope sul progetto (`also: custom.dataset`) e stampa il token una volta.
 - **Console** (`/research/o/[slug]`):
   - i progetti con stage, numero di risultati e ultima run;
@@ -476,7 +477,11 @@ Ogni tipo di evento con uno schema ha un registro, senza codice dedicato:
     - azioni in blocco (`reviewMany`): revisione e assegnatario sui risultati selezionati, un aggiornamento con audit per oggetto, assegnatari limitati ai membri owner/member;
     - export `/p/[id]/export?format=csv|json` con gli stessi filtri e ordinamento, a pagine e in streaming (CSV con chiavi, `;` e decimali con la virgola, via `resultsCsv`);
   - la coda di revisione `/p/[id]/review`: un risultato da rivedere alla volta, con i filtri della tabella, e scorciatoie da tastiera (`REVIEW_KEYS`: i, d, s; j/k avanti e indietro, n nota) via `quickReview`;
-  - la scheda del risultato con proprietà, allegati (anteprima solo per immagini raster) e storico;
+  - le run: `/p/[id]/run/[eventId]` mostra campi, parametri, dataset usati e i conteggi di revisione dei risultati prodotti (che filtrano la tabella con `f.run`); `/p/[id]/compare?a=&b=` confronta due run del progetto campo per campo, con i parametri via `paramDiff` (cambiati, solo in A, solo in B) e i conteggi per revisione;
+  - il quaderno di laboratorio `/p/[id]/notes` (`addLabNote`); il progetto mostra le ultime tre note;
+  - i dataset `/d` e `/d/[id]`: proprietà, link e run che li hanno usati (le run citano il dataset tra i propri oggetti);
+  - la scheda del risultato con proprietà, link esterni, la run che l'ha prodotto, allegati e storico. Allegati (`attachments.tsx`, condivisi con la coda): anteprima inline solo per immagini raster, prime righe per i CSV (`csvPreview`), PDF solo come link in una nuova scheda (gli header globali vietano i frame);
+  - i commenti sul risultato (`addComment`), con risposte raggruppate in thread da `commentThreads`: `reply_to` è il `rootId` del commento, quindi un thread resta intero anche se il commento viene corretto;
   - la revisione (stato + nota) registrata nell'audit.
   - tipi, oggetti, attività e impostazioni del consenso alle route `/types`, `/types/edit`, `/objects/[type]`, `/activity` e `/settings`; le azioni di scrittura ritornano a percorsi Research. I form condivisi e le validazioni sono in `lib/object-forms.ts`, mentre `lib/type-drafts.ts` prepara i dati per l'editor.
 - I nomi dei tipi e delle proprietà usati dalla console stanno **solo** in `lib/research.ts`. Il motore non conosce progetti o risultati.

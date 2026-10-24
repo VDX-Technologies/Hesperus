@@ -105,8 +105,9 @@ export function checkObjectType(input: ObjectTypeInput): string | null {
     if (!TYPE.test(l?.type ?? "")) return `invalid type for link "${k}"`;
   }
   for (const [k, s] of Object.entries(input.properties)) {
-    if ((s.format || s.schemaFrom) && s.type !== "object") return `"${k}": only object properties hold or follow a schema`;
-    if (s.format && s.format !== "schema") return `"${k}": unknown format`;
+    if ((s.format === "schema" || s.schemaFrom) && s.type !== "object") return `"${k}": only object properties hold or follow a schema`;
+    if (s.format === "text" && s.type !== "string") return `"${k}": only string properties are written on several lines`;
+    if (s.format && s.format !== "schema" && s.format !== "text") return `"${k}": unknown format`;
     if (s.format && s.schemaFrom) return `"${k}": a property holds a schema or follows one, not both`;
     if (s.schemaFrom) {
       const [link, prop] = s.schemaFrom.split(".");

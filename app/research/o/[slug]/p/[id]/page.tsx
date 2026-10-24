@@ -13,6 +13,7 @@ import { Flash } from "@/components/flash";
 import { SubmitButton } from "@/components/submit-button";
 import { reviewMany } from "../../actions";
 import { assignees, researchContext } from "../../context";
+import { Outcome, runLabel } from "../../runs";
 
 const isNumber = (s: PropertySpec) => s.type === "number" || s.type === "integer";
 
@@ -34,8 +35,9 @@ export default async function Project(props: PageProps<"/research/o/[slug]/p/[id
   const own = projectFields(project);
   const assignable = !!resultType?.properties[RESEARCH.assignee];
   const { page, ...filters } = resultFilters(sp, project.id, { result: resultType?.properties, own, me: author.email });
-  const [runs, { objects: results, total }] = await Promise.all([
+  const [runs, notes, { objects: results, total }] = await Promise.all([
     listEvents(db, { types: [RESEARCH.run], objectId: project.id, recursive: false, limit: 50 }),
+    listEvents(db, { types: [RESEARCH.labNote], objectId: project.id, recursive: false, limit: 3 }),
     resultType ? searchObjects(db, RESEARCH.result, { ...filters, limit: pageSize, offset: (page - 1) * pageSize }) : { objects: [], total: 0 },
   ]);
 
@@ -113,29 +115,61 @@ export default async function Project(props: PageProps<"/research/o/[slug]/p/[id
         {shown.map(([k, s]) => (
           <div key={k}>
             <dt className="text-xs text-dim">{label(s.label, locale, k)}</dt>
-            <dd className="break-words">{fieldText(s, project.properties[k], locale)}</dd>
+            <dd className="whitespace-pre-line break-words">{fieldText(s, project.properties[k], locale)}</dd>
           </div>
         ))}
       </dl>
 
       <section className="mt-8">
+        <div className="flex flex-wrap items-baseline justify-between gap-2">
+          <h2 className="text-sm font-medium">{t.labNotes}</h2>
+          <Link href={`${base}/notes`} className="text-xs text-frost hover:underline">{notes.length ? t.allNotes : t.writeNote} →</Link>
+        </div>
+        {notes.length > 0 && (
+          <ul className="card mt-3 divide-y divide-line-soft text-sm">
+            {notes.map((n) => (
+              <li key={n.id} className="px-3 py-2">
+                <p className="text-xs text-dim">{n.authorLabel ?? n.author ?? "—"} · {n.ts.toLocaleString(locale)}</p>
+                <p className="mt-1 line-clamp-3 whitespace-pre-line break-words">{String(n.payload[RESEARCH.text] ?? "")}</p>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      <section className="mt-8">
         <h2 className="text-sm font-medium">{t.runs}</h2>
         {runs.length ? (
-          <div className="card mt-3 overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="text-left text-xs text-dim">
-                <tr><th className="px-3 py-2">{t.date}</th>{runCols.map(([k, s]) => <th key={k} className="px-3 py-2">{label(s.label, locale, k)}</th>)}</tr>
-              </thead>
-              <tbody className="divide-y divide-line-soft">
-                {runs.map((e) => (
-                  <tr key={e.id}>
-                    <td className="num whitespace-nowrap px-3 py-2">{e.ts.toLocaleString(locale)}</td>
-                    {runCols.map(([k, s]) => <td key={k} className="px-3 py-2">{fieldText(s, e.payload[k], locale)}</td>)}
-                  </tr>
+          <>
+            {runs.length > 1 && (
+              <form action={`${base}/compare`} className="mt-3 flex flex-wrap items-end gap-3 text-sm">
+                {(["a", "b"] as const).map((k, i) => (
+                  <label key={k} className="block"><span className="text-xs text-dim">{i ? t.compareWith : t.compareRun}</span>
+                    <select name={k} defaultValue={String(runs[i === 0 ? 1 : 0].id)} className="mt-1 max-w-72">
+                      {runs.map((e) => <option key={e.id} value={e.id}>{runLabel(e, locale)}</option>)}
+                    </select></label>
                 ))}
-              </tbody>
-            </table>
-          </div>
+                <button className="btn">{t.compare}</button>
+              </form>
+            )}
+            <div className="card mt-3 overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="text-left text-xs text-dim">
+                  <tr><th className="px-3 py-2">{t.date}</th>{runCols.map(([k, s]) => <th key={k} className="px-3 py-2">{label(s.label, locale, k)}</th>)}</tr>
+                </thead>
+                <tbody className="divide-y divide-line-soft">
+                  {runs.map((e) => (
+                    <tr key={e.id}>
+                      <td className="num whitespace-nowrap px-3 py-2"><Link href={`${base}/run/${e.id}`} className="text-frost hover:underline">{e.ts.toLocaleString(locale)}</Link></td>
+                      {runCols.map(([k, s]) => (
+                        <td key={k} className="px-3 py-2">{k === RESEARCH.outcome ? <Outcome spec={s} value={e.payload[k]} locale={locale} /> : fieldText(s, e.payload[k], locale)}</td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
         ) : (
           <p className="mt-3 text-sm text-dim">{t.noRuns}</p>
         )}
@@ -231,7 +265,13 @@ export default async function Project(props: PageProps<"/research/o/[slug]/p/[id
                       <tr key={r.id}>
                         {editor && <td className="px-3 py-2"><input type="checkbox" name="ids" value={r.id} aria-label={r.name} /></td>}
                         <td className="px-3 py-2"><Link href={`/research/o/${slug}/r/${r.id}`} className="text-frost hover:underline">{r.name}</Link></td>
-                        {cols.map(([k, s]) => <td key={k} className={isNumber(s) ? "num px-3 py-2" : "px-3 py-2"}>{fieldText(s, r.properties[k], locale)}</td>)}
+                        {cols.map(([k, s]) => (
+                          <td key={k} className={isNumber(s) ? "num px-3 py-2" : "px-3 py-2"}>
+                            {k === RESEARCH.runRef && r.properties[k] ? (
+                              <Link href={`${base}/run/${Number(r.properties[k])}`} className="text-frost hover:underline">#{String(r.properties[k])}</Link>
+                            ) : fieldText(s, r.properties[k], locale)}
+                          </td>
+                        ))}
                         {extraCols.map(([k, s]) => <td key={`x.${k}`} className={isNumber(s) ? "num px-3 py-2" : "px-3 py-2"}>{fieldText(s, extra[k], locale)}</td>)}
                       </tr>
                     );
