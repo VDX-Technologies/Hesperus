@@ -17,6 +17,8 @@ import { SettingsForm } from "@/components/settings-form";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { SectionTitle } from "@/components/ui";
 import { ConfirmButton } from "@/components/confirm-button";
+import { CONSOLES, hasConsole, parseConsoles, TERRA_HREF } from "@/lib/consoles";
+import { prepareConsole } from "@/lib/console-setup";
 
 const path = (id: string) => `/admin/orgs/${id}`;
 
@@ -29,6 +31,24 @@ async function toggleModule(formData: FormData) {
     .from("org_modules")
     .upsert({ org_id: org, module: String(formData.get("module")), enabled: formData.get("enabled") === "1" });
   await record(tenantDb(org), user, formData.get("enabled") === "1" ? "module.enable" : "module.disable", { subject: String(formData.get("module")) });
+  revalidatePath(path(org));
+}
+
+async function toggleConsole(formData: FormData) {
+  "use server";
+  const { supabase, user } = await requireAdmin();
+  const org = String(formData.get("org"));
+  const id = String(formData.get("console"));
+  const on = formData.get("enabled") === "1";
+  const { data, error } = await supabase.from("organizations").select("consoles").eq("id", org).single();
+  if (error) throw new Error(error.message);
+  const current: string[] = data.consoles ?? [];
+  const consoles = parseConsoles(on ? [...current, id] : current.filter((c) => c !== id));
+  const { error: e } = await supabase.from("organizations").update({ consoles }).eq("id", org);
+  if (e) throw new Error(e.message);
+  const db = tenantDb(org);
+  if (on) await prepareConsole(db, { id: user.id, email: user.email, role: "owner" }, id);
+  await record(db, user, on ? "console.enable" : "console.disable", { subject: id });
   revalidatePath(path(org));
 }
 
@@ -173,7 +193,7 @@ export default async function OrgAdmin(props: PageProps<"/admin/orgs/[id]">) {
   const { t, locale } = await getT();
   // only what the open tab shows: the org and its products are cheap, the rest is loaded on demand
   const [{ data: org }, mods] = await Promise.all([
-    supabase.from("organizations").select("id, name, slug").eq("id", id).maybeSingle(),
+    supabase.from("organizations").select("id, name, slug, consoles").eq("id", id).maybeSingle(),
     supabase.from("org_modules").select("module, enabled, config").eq("org_id", id),
   ]);
   if (!org) notFound();
@@ -191,9 +211,16 @@ export default async function OrgAdmin(props: PageProps<"/admin/orgs/[id]">) {
           <h1 className="text-2xl font-semibold tracking-tight">{org.name}</h1>
           <div className="num text-xs text-dim">/{org.slug}</div>
         </div>
-        <Link href={`/terra/o/${org.slug}`} className="btn">
-          {t.openCustomer} →
-        </Link>
+        <div className="flex flex-wrap gap-2">
+          <Link href={TERRA_HREF(org.slug)} className="btn">
+            {t.openTerra} →
+          </Link>
+          {CONSOLES.filter((c) => hasConsole(org, c.id)).map((c) => (
+            <Link key={c.id} href={c.href(org.slug)} className="btn">
+              {t.open} {c.name} →
+            </Link>
+          ))}
+        </div>
       </div>
 
       <nav className="mt-6 flex gap-1 overflow-x-auto border-b border-line-soft text-sm">
@@ -211,7 +238,7 @@ export default async function OrgAdmin(props: PageProps<"/admin/orgs/[id]">) {
         ))}
       </nav>
 
-      {tab === "overview" && <Overview id={id} enabled={enabled} t={t} locale={locale} />}
+      {tab === "overview" && <Overview id={id} enabled={enabled} consoles={org.consoles ?? []} t={t} locale={locale} />}
       {tab === "thresholds" &&
         configurable.map((m) => (
           <div key={m.id}>
@@ -252,9 +279,10 @@ function RemoveButton({ t }: { t: Dict }) {
 function Overview({
   id,
   enabled,
+  consoles,
   t,
   locale,
-}: Ctx & { enabled: Map<string, { enabled: boolean }>; locale: Locale }) {
+}: Ctx & { enabled: Map<string, { enabled: boolean }>; consoles: string[]; locale: Locale }) {
   return (
     <>
       <Tokens id={id} t={t} locale={locale} />
@@ -285,6 +313,31 @@ function Overview({
             <p className="mt-2 text-sm text-mist">{m.tagline[locale]}</p>
           </div>
         ))}
+      </div>
+      <SectionTitle>{t.consoles}</SectionTitle>
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="card border-ice/40 p-5">
+          <div className="flex items-center justify-between">
+            <span className="text-lg font-medium">VDX Terra</span>
+            <span className="text-xs text-ok">{t.alwaysOn}</span>
+          </div>
+          <p className="mt-2 text-sm text-mist">{t.terraTagline}</p>
+        </div>
+        {CONSOLES.map((c) => {
+          const on = consoles.includes(c.id);
+          return (
+            <form key={c.id} action={toggleConsole} className={`card p-5 ${on ? "border-ice/40" : ""}`}>
+              <input type="hidden" name="org" value={id} />
+              <input type="hidden" name="console" value={c.id} />
+              <input type="hidden" name="enabled" value={on ? "0" : "1"} />
+              <div className="flex items-center justify-between">
+                <span className="text-lg font-medium">{c.name}</span>
+                <button className={`btn text-xs ${on ? "border-ok text-ok" : ""}`}>{on ? t.enabled : t.disabled}</button>
+              </div>
+              <p className="mt-2 text-sm text-mist">{c.tagline[locale]}</p>
+            </form>
+          );
+        })}
       </div>
     </>
   );

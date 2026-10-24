@@ -3,29 +3,39 @@ import { redirect } from "next/navigation";
 import { requireAdmin } from "@/lib/auth";
 import { getT } from "@/lib/i18n";
 import { SectionTitle } from "@/components/ui";
+import { tenantDb } from "@/lib/engine/db";
+import { record } from "@/lib/engine/audit";
+import { CONSOLES, parseConsoles } from "@/lib/consoles";
+import { prepareConsole } from "@/lib/console-setup";
 
 async function createOrg(formData: FormData) {
   "use server";
-  const { supabase } = await requireAdmin();
+  const { supabase, user } = await requireAdmin();
   const name = String(formData.get("name")).trim();
   const slug = String(formData.get("slug") || name)
     .toLowerCase()
     .normalize("NFD")
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-|-$/g, "");
+  const consoles = parseConsoles(formData.getAll("console"));
   const { data, error } = await supabase
     .from("organizations")
-    .insert({ name, slug, locale: formData.get("locale") === "it" ? "it" : "en" })
+    .insert({ name, slug, locale: formData.get("locale") === "it" ? "it" : "en", consoles })
     .select("id")
     .single();
   if (error) throw new Error(error.message);
+  const db = tenantDb(data.id);
+  for (const c of consoles) {
+    await prepareConsole(db, { id: user.id, email: user.email, role: "owner" }, c);
+    await record(db, user, "console.enable", { subject: c });
+  }
   redirect(`/admin/orgs/${data.id}`);
 }
 
 export default async function AdminHome() {
   const { supabase } = await requireAdmin();
   const { t } = await getT();
-  const { data: orgs, error } = await supabase.from("organizations").select("id, name, slug, org_modules(module, enabled), objects(count)").order("name");
+  const { data: orgs, error } = await supabase.from("organizations").select("id, name, slug, consoles, org_modules(module, enabled), objects(count)").order("name");
   if (error) throw new Error(error.message);
   return (
     <div>
@@ -36,6 +46,11 @@ export default async function AdminHome() {
             <div className="text-lg font-medium">{o.name}</div>
             <div className="num text-xs text-dim">/{o.slug}</div>
             <div className="mt-3 flex flex-wrap gap-1.5">
+              {CONSOLES.filter((c) => (o.consoles ?? []).includes(c.id)).map((c) => (
+                <span key={c.id} className="rounded-full border border-ice/40 px-2 py-0.5 text-xs text-frost">
+                  {c.name}
+                </span>
+              ))}
               {(o.org_modules ?? [])
                 .filter((m) => m.enabled)
                 .map((m) => (
@@ -67,6 +82,19 @@ export default async function AdminHome() {
             <option value="en">English</option>
           </select>
         </label>
+        <fieldset className="flex flex-col gap-1 text-sm text-mist">
+          <legend className="mb-1">{t.consoles}</legend>
+          <div className="flex flex-wrap items-center gap-3 py-1.5">
+            <label className="flex items-center gap-1.5 text-dim">
+              <input type="checkbox" checked disabled /> VDX Terra
+            </label>
+            {CONSOLES.map((c) => (
+              <label key={c.id} className="flex items-center gap-1.5">
+                <input type="checkbox" name="console" value={c.id} /> {c.name}
+              </label>
+            ))}
+          </div>
+        </fieldset>
         <button className="btn">{t.create}</button>
       </form>
     </div>

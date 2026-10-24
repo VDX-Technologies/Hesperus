@@ -27,6 +27,7 @@ Non sempre serve un modulo. Un cliente può definire i **propri tipi** di oggett
 | **Membership** | Un utente che fa parte di un'org con un ruolo: `owner`, `member` o `viewer`. |
 | **Platform admin** | Una persona dello staff VDX che vede tutti i clienti. |
 | **Modulo** | Un prodotto (es. `lora`) attivato per un'org (`org_modules`), con la sua configurazione (le soglie del cliente). |
+| **Console** | Una dashboard oltre a VDX Terra (oggi `research`), attivata dallo staff per un'org (`organizations.consoles`). Terra c'è sempre. |
 | **Source** | Un canale da cui arrivano dati (es. un gateway LoRa). Ha un token segreto. |
 | **Oggetto** | Una "cosa" nel mondo reale: un nodo sensore, una serra… Ha un tipo (`object_type`), delle proprietà e uno stato. |
 | **Metrica** | Un numero nel tempo legato a un oggetto (es. temperatura alle 10:05 = 24,3). |
@@ -81,6 +82,7 @@ Tecnologie:
 
 ```
 organizations ──< memberships >── utenti (Supabase auth)
+      │   .consoles  (le dashboard oltre a Terra: es. {research})
       │
       ├──< org_modules   (quali prodotti ha, con quale config)
       └──< sources, objects, metrics, events, alerts…  (tutto ha tenant_id)
@@ -453,7 +455,12 @@ Ogni tipo di evento con uno schema ha un registro, senza codice dedicato:
 
 **VDX Research** è configurazione più una console:
 
-- **Tipi** (`scripts/research/types.ts`, caricati con `scripts/seed-research.ts <org>` tramite le stesse API dell'editor):
+- **Attivazione**: da `/admin` (alla creazione dell'org o dalla sua pagina, sezione Dashboard) lo staff aggiunge `research` a `organizations.consoles` (migrazione `20261108000000_org_consoles.sql`; cambiano solo i platform admin, policy "admins manage orgs").
+  - All'attivazione `prepareConsole` (`lib/console-setup.ts`) carica i tipi Research se l'org non ha ancora `custom.project`; i tipi già presenti, magari modificati dal cliente, restano come sono.
+  - L'audit registra `console.enable` / `console.disable`.
+  - Senza la console `/research/o/[slug]` risponde 404; con la console, il menu di Terra ha il link a Research.
+  - L'elenco delle console sta in `lib/consoles.ts`: una nuova console si aggiunge lì e in `prepareConsole`. Non si usa `org_modules`, perché il backend lo legge come elenco di prodotti.
+- **Tipi** (`scripts/research/types.ts`, caricati all'attivazione o con `scripts/seed-research.ts <org>` tramite le stesse API dell'editor):
   - `custom.project`: area, domanda, ipotesi, stage, protocollo, `result_schema`;
   - `custom.dataset`: fonte, descrizione, dimensione, URL, licenza;
   - `custom.result`: score, review `to_review|discarded|interesting|sent`, note, run, `extra` che segue `project.result_schema`; collegamento `project` obbligatorio;
@@ -486,8 +493,8 @@ Ogni tipo di evento con uno schema ha un registro, senza codice dedicato:
 | `/terra/o/[slug]/treatments` | — | reindirizza al registro `agronomy.treatment` |
 | `/terra/o/[slug]/upload` | owner (gli altri vedono solo l'elenco) | caricamento di file CSV nelle source upload, ultimi file caricati |
 | `/terra/o/[slug]/settings` | owner (gli altri in sola lettura) | soglie aziendali e per dispositivo |
-| `/admin` | staff VDX | elenco clienti, creazione di nuove org |
-| `/admin/orgs/[id]` | staff | gestione di un cliente (moduli, soglie, luoghi, membri, attività) |
+| `/admin` | staff VDX | elenco clienti, creazione di nuove org (con le dashboard da attivare) |
+| `/admin/orgs/[id]` | staff | gestione di un cliente (moduli, dashboard, soglie, luoghi, membri, attività) |
 | `/admin/engine` | staff | stato dell'engine (job, quote, salute) e gestione delle source (nuova source, nuovo token, pausa) |
 | `/admin/settings` | staff | `engine_settings` e destinatari delle email di salute |
 | `/terra/o/[slug]/registers/objects[/type]` | membri (viewer in sola lettura) | oggetti dei tipi personalizzati e i loro collegamenti |
@@ -558,6 +565,7 @@ Si eseguono con `npm test` (vitest).
 - `tests/engine/custom-objects.test.ts`, `research-seed.test.ts`: tipi oggetto personalizzati, collegamenti, `schemaFrom`, limiti, audit, isolamento; i tipi Research.
 - `tests/engine/custom-ingest.test.ts`: push custom (idempotenza, chiavi degli eventi, scope, CSV, allegati, audit firmato dalla source).
 - `tests/engine/research-console.test.ts`: ricerca, filtri, ordinamento, conteggi, allegati e revisione.
+- `tests/engine/console-setup.test.ts`: attivazione delle console (tipi caricati una volta, modifiche del cliente preservate, isolamento).
 - `clients/python/tests/`: il client Python (`cd clients/python && python3 -m unittest discover -s tests`).
 - `tests/db/`: l'harness che crea un **database usa-e-getta** per ogni file di test, applicando tutte le migrazioni. Richiede un Postgres locale (`npx supabase start`) oppure `TEST_DATABASE_URL`.
 

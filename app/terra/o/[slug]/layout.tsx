@@ -7,6 +7,7 @@ import { LiveRefresh } from "@/components/terra/live-refresh";
 import { ConsentGate } from "@/components/terra/consent-gate";
 import { getConsent } from "@/lib/consent";
 import { Metadata } from "next";
+import { CONSOLES, hasConsole } from "@/lib/consoles";
 
 export const metadata: Metadata = {
   title: { default: "VDX Terra", template: "%s · VDX Terra" },
@@ -44,6 +45,7 @@ export default async function OrgLayout(props: LayoutProps<"/terra/o/[slug]">) {
             ...(hasUpload ? [{ href: `/terra/o/${slug}/upload`, label: t.upload }] : []),
             { href: `/terra/o/${slug}/activity`, label: t.activity },
             { href: `/terra/o/${slug}/settings`, label: t.settings },
+            ...CONSOLES.filter((c) => hasConsole(org, c.id)).map((c) => ({ href: c.href(slug), label: c.name })),
           ]}
         />
         <LiveRefresh orgId={org.id} />

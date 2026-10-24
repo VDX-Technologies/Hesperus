@@ -1,9 +1,10 @@
-import { redirect } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { Metadata } from "next";
 import { requireOrg } from "@/lib/auth";
 import { getT } from "@/lib/i18n";
 import { getConsent } from "@/lib/consent";
 import { Header } from "@/components/header";
+import { hasConsole } from "@/lib/consoles";
 
 export const metadata: Metadata = {
   title: { default: "VDX Research", template: "%s · VDX Research" },
@@ -14,6 +15,8 @@ export const metadata: Metadata = {
 export default async function ResearchLayout(props: LayoutProps<"/research/o/[slug]">) {
   const { slug } = await props.params;
   const { supabase, user, org, isAdmin } = await requireOrg(slug);
+  // VDX turns the console on per organization, from the vendor console
+  if (!hasConsole(org, "research")) notFound();
   const { t, locale } = await getT();
   // the consent is signed once, on the main console
   if (!isAdmin && !(await getConsent(supabase, user.id))) redirect(`/terra/o/${slug}`);
