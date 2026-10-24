@@ -13,7 +13,7 @@ import { canRecord, ManualEventError, type Author } from "./manual";
 import { record, type Actor } from "./audit";
 import { getSettings, num } from "./settings";
 import { checkFields, KEY, validateProperties, type Schema } from "./schema";
-import { CUSTOM, FIELD_TYPES } from "./registers";
+import { CUSTOM, FIELD_TYPES, filterable } from "./registers";
 
 export interface LinkSpec {
   /** Target object type, "custom.project" or a package type such as "core.site". */
@@ -359,16 +359,102 @@ export async function listObjects(
   type: string,
   opts: { linkedTo?: { key: string; id: string }; limit?: number } = {},
 ): Promise<CustomObject[]> {
+  return (await searchObjects(db, type, { linkedTo: opts.linkedTo, limit: Math.min(opts.limit ?? 500, 2000) })).objects;
+}
+
+export interface ObjectSearch {
+  linkedTo?: { key: string; id: string };
+  /** property → value it must hold (string, number, integer or boolean properties) */
+  where?: Record<string, unknown>;
+  /** property → lowest / highest value (number or integer properties) */
+  min?: Record<string, number>;
+  max?: Record<string, number>;
+  /** a number, integer or string property, or "created" (the default, newest first) */
+  order?: { by: string; desc?: boolean };
+  limit?: number;
+  offset?: number;
+}
+
+const numeric = (s: PropertySpec | undefined) => s?.type === "number" || s?.type === "integer";
+
+/**
+ * A page of the objects of one custom type, filtered on their properties, with the number of
+ * objects that match. Only properties declared by the type can be filtered or sorted on; others
+ * are ignored, so a stale link never breaks the page. Objects missing the sort property come last.
+ */
+export async function searchObjects(db: TenantDb, type: string, q: ObjectSearch = {}): Promise<{ objects: CustomObject[]; total: number }> {
+  const none = { objects: [], total: 0 };
+  const t = await getObjectType(db, type);
+  if (!t || t.module !== CUSTOM) return none;
+  const link = q.linkedTo && UUID.test(q.linkedTo.id) ? q.linkedTo : null;
+  if (q.linkedTo && !link) return none;
+  const params: unknown[] = [db.tenantId, RESERVED_LINKS, CUSTOM, t.key];
+  const p = (v: unknown) => `$${params.push(v)}`;
+  const conds: string[] = [];
+  if (link) conds.push(`exists (select 1 from links l where l.tenant_id = $1 and l.src_id = o.id and l.type = ${p(link.key)} and l.dst_id = ${p(link.id)}::uuid)`);
+  const numberAt = (k: string) => `case when jsonb_typeof(o.properties->${p(k)}) = 'number' then (o.properties->>${p(k)})::numeric end`;
+  for (const [k, v] of Object.entries(q.where ?? {})) {
+    const s = t.properties[k];
+    if (v === undefined || v === null || v === "" || !s || !filterable(s)) continue;
+    conds.push(`o.properties->${p(k)} = ${p(JSON.stringify(v))}::jsonb`);
+  }
+  for (const [bound, op] of [[q.min, ">="], [q.max, "<="]] as const) {
+    for (const [k, v] of Object.entries(bound ?? {})) {
+      if (Number.isFinite(v) && numeric(t.properties[k])) conds.push(`${numberAt(k)} ${op} ${p(v)}`);
+    }
+  }
+  const where = `${SELECT_OBJECTS} and t.key = $4${conds.map((c) => ` and ${c}`).join("")}`;
+  const countParams = [...params];
+  const by = q.order?.by;
+  const dir = q.order?.desc ? "desc" : "asc";
+  const order = by && numeric(t.properties[by]) ? `${numberAt(by)} ${dir} nulls last, o.created_at desc`
+    : by && t.properties[by]?.type === "string" ? `o.properties->>${p(by)} ${dir} nulls last, o.created_at desc`
+    : `o.created_at ${by === "created" && !q.order?.desc ? "asc" : "desc"}`;
+  const limit = Math.max(0, Math.min(q.limit ?? num(await getSettings(db.shared), "objects.page_size", 100), 2000));
+  const offset = Math.max(0, Math.floor(q.offset ?? 0));
+  const [{ rows }, count] = await Promise.all([
+    db.query<ObjectRow>(`${where} order by ${order}, o.id limit ${p(limit)} offset ${p(offset)}`, params),
+    db.query<{ n: number }>(`select count(*)::int n from (${where}) x`, countParams),
+  ]);
+  return { objects: rows.map(toObject), total: count.rows[0].n };
+}
+
+/**
+ * How many objects of a type each object is linked to through `link`, split by the value of
+ * one property when `by` is given: the results of every project, per review status.
+ */
+export async function countLinked(db: TenantDb, type: string, link: string, by?: string): Promise<{ id: string; value: string | null; n: number }[]> {
   if (!type.startsWith(`${CUSTOM}.`)) return [];
-  const link = opts.linkedTo && UUID.test(opts.linkedTo.id) ? opts.linkedTo : null;
-  if (opts.linkedTo && !link) return [];
-  const { rows } = await db.query<ObjectRow>(
-    `${SELECT_OBJECTS} and t.key = $4
-       and ($5::text is null or exists (select 1 from links l where l.tenant_id = $1 and l.src_id = o.id and l.type = $5 and l.dst_id = $6::uuid))
-     order by o.created_at desc, o.id limit $7`,
-    [db.tenantId, RESERVED_LINKS, CUSTOM, type.slice(CUSTOM.length + 1), link?.key ?? null, link?.id ?? null, Math.min(opts.limit ?? 500, 2000)],
+  const { rows } = await db.query<{ id: string; value: string | null; n: number }>(
+    `select l.dst_id id, case when $5::text is null then null else o.properties->>$5 end value, count(*)::int n
+       from objects o join object_types t on t.id = o.type_id
+       join links l on l.tenant_id = $1 and l.src_id = o.id and l.type = $4
+      where o.tenant_id = $1 and t.tenant_id = $1 and t.module = $2 and t.key = $3
+      group by 1, 2`,
+    [db.tenantId, CUSTOM, type.slice(CUSTOM.length + 1), link, by ?? null],
   );
-  return rows.map(toObject);
+  return rows;
+}
+
+export interface ObjectDocument {
+  id: string;
+  filename: string;
+  contentType: string | null;
+  size: number | null;
+  createdAt: Date;
+}
+
+/** The files attached to an object (plots, reports), newest first. */
+export async function objectDocuments(db: TenantDb, objectId: string): Promise<ObjectDocument[]> {
+  if (!UUID.test(objectId)) return [];
+  const { rows } = await db.query<{ id: string; filename: string; content_type: string | null; size: string | null; created_at: Date }>(
+    `select d.id, d.filename, d.content_type, d.size, d.created_at
+       from document_objects x join documents d on d.id = x.document_id and d.tenant_id = $1
+      where x.tenant_id = $1 and x.object_id = $2
+      order by d.created_at desc, d.id limit 200`,
+    [db.tenantId, objectId],
+  );
+  return rows.map((r) => ({ id: r.id, filename: r.filename, contentType: r.content_type, size: r.size === null ? null : Number(r.size), createdAt: r.created_at }));
 }
 
 async function found(db: TenantDb, id: string) {

@@ -1,0 +1,133 @@
+// What the Research console reads and writes: a project's results filtered by score and review,
+// counted per project, with their attachments, and a review that only touches what changed and
+// leaves its trace in the audit trail. Always inside one tenant.
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import type { Client } from "pg";
+vi.mock("server-only", () => ({}));
+import { freshDb } from "../db/setup";
+import { forTenant, type TenantDb } from "../../lib/engine/db";
+import type { Author } from "../../lib/engine/manual";
+import { createSource } from "../../lib/engine/sources";
+import { MemoryStore } from "../../lib/engine/store";
+import { countLinked, createObject, getObject, objectDocuments, searchObjects, updateObject } from "../../lib/engine/custom-objects";
+import { pushDocument } from "../../lib/engine/custom-ingest";
+import { listAudit } from "../../lib/engine/audit";
+import { getSettings } from "../../lib/engine/settings";
+import { inlineImage, resultFilters, reviewPatch, RESEARCH } from "../../lib/research";
+import { seedResearch } from "../../scripts/research/types";
+
+let db: Client;
+let drop: () => Promise<void>;
+let A: TenantDb, B: TenantDb;
+const ORG = "00000000-0000-0000-0000-00000000000a";
+const OTHER = "00000000-0000-0000-0000-00000000000b";
+const owner: Author = { id: "00000000-0000-0000-0000-0000000000f1", email: "o@x.it", role: "owner" };
+let tess: string, other: string, otherB: string;
+const ids: Record<string, string> = {};
+
+const result = (t: TenantDb, project: string, name: string, score: number, review = "to_review") =>
+  createObject(t, owner, { type: RESEARCH.result, name, externalId: name, links: { project }, properties: { score, review, extra: { tic_id: 1 } } });
+
+beforeAll(async () => {
+  ({ db, drop } = await freshDb());
+  await db.query(`insert into organizations (id, name, slug) values ($1, 'A', 'a'), ($2, 'B', 'b')`, [ORG, OTHER]);
+  A = forTenant(db, ORG);
+  B = forTenant(db, OTHER);
+  await seedResearch(A, owner);
+  await seedResearch(B, { ...owner, id: "00000000-0000-0000-0000-0000000000f3" });
+  const project = (t: TenantDb, name: string) => createObject(t, owner, {
+    type: RESEARCH.project, name, properties: { area: "astrofisica", stage: "running", result_schema: { tic_id: { type: "integer", required: true } } },
+  });
+  tess = await project(A, "TESS anomalie");
+  other = await project(A, "Altro");
+  otherB = await project(B, "TESS di B");
+  for (const [n, s, r] of [["a", 0.9, "to_review"], ["b", 0.4, "interesting"], ["c", 0.7, "to_review"], ["d", 0.1, "discarded"]] as const)
+    ids[n] = await result(A, tess, n, s, r);
+  ids.o = await result(A, other, "o", 0.95);
+  ids.x = await result(B, otherB, "x", 0.99);
+});
+afterAll(async () => drop?.());
+
+describe("research console", () => {
+  const names = (r: { objects: { name: string }[] }) => r.objects.map((o) => o.name);
+
+  it("filters a project's results by score and review, highest first, with the total", async () => {
+    const all = await searchObjects(A, RESEARCH.result, resultFilters({}, tess));
+    expect(names(all)).toEqual(["a", "c", "b", "d"]);
+    expect(all.total).toBe(4);
+    const some = await searchObjects(A, RESEARCH.result, resultFilters({ min: "0,4", max: "0.8", order: "asc" }, tess));
+    expect(names(some)).toEqual(["b", "c"]);
+    const pending = await searchObjects(A, RESEARCH.result, resultFilters({ review: "to_review" }, tess));
+    expect(names(pending)).toEqual(["a", "c"]);
+    expect(pending.total).toBe(2);
+  });
+
+  it("pages with a total over every page, and the page size is a setting", async () => {
+    const page = await searchObjects(A, RESEARCH.result, { ...resultFilters({}, tess), limit: 2, offset: 2 });
+    expect(names(page)).toEqual(["b", "d"]);
+    expect(page.total).toBe(4);
+    await db.query(`update engine_settings set value = '3' where key = 'objects.page_size'`);
+    await getSettings(db, true);
+    expect((await searchObjects(A, RESEARCH.result, { linkedTo: { key: "project", id: tess } })).objects).toHaveLength(3);
+    await db.query(`update engine_settings set value = '100' where key = 'objects.page_size'`);
+    await getSettings(db, true);
+  });
+
+  it("ignores keys the type does not declare or cannot compare", async () => {
+    const r = await searchObjects(A, RESEARCH.result, { linkedTo: { key: "project", id: tess }, where: { nope: "x", extra: "y" }, min: { review: 1 }, order: { by: "nope" } });
+    expect(r.total).toBe(4);
+    expect(await searchObjects(A, "custom.nope", {})).toEqual({ objects: [], total: 0 });
+  });
+
+  it("never returns another tenant's results", async () => {
+    expect((await searchObjects(A, RESEARCH.result, { min: { score: 0.98 } })).total).toBe(0);
+    expect(names(await searchObjects(B, RESEARCH.result, {}))).toEqual(["x"]);
+    expect(await searchObjects(B, RESEARCH.result, resultFilters({}, tess))).toEqual({ objects: [], total: 0 });
+  });
+
+  it("counts results per project and review", async () => {
+    const counts = await countLinked(A, RESEARCH.result, RESEARCH.link, RESEARCH.review);
+    const n = (id: string, v: string) => counts.find((c) => c.id === id && c.value === v)?.n ?? 0;
+    expect([n(tess, "to_review"), n(tess, "interesting"), n(tess, "discarded"), n(other, "to_review")]).toEqual([2, 1, 1, 1]);
+    expect(counts.some((c) => c.id === otherB)).toBe(false);
+  });
+
+  it("lists a result's attachments, only in its tenant", async () => {
+    const { source } = await createSource(db, { tenantId: ORG, name: "p", module: "custom", config: { scope: { link: "project", id: tess } } });
+    const store = new MemoryStore();
+    await pushDocument(db, store, source, { name: "lc.png", type: "image/png", bytes: new Uint8Array([1, 2, 3]) }, { type: RESEARCH.result, externalId: "a" });
+    await pushDocument(db, store, source, { name: "data.csv", type: "text/csv", bytes: new Uint8Array([4, 5]) }, { type: RESEARCH.result, externalId: "a" });
+    const docs = await objectDocuments(A, ids.a);
+    expect(docs.map((d) => [d.filename, d.contentType, d.size]).sort()).toEqual([["data.csv", "text/csv", 2], ["lc.png", "image/png", 3]]);
+    expect(await objectDocuments(B, ids.a)).toEqual([]);
+  });
+
+  it("a review changes only what differs, and is audited", async () => {
+    const o = (await getObject(A, ids.a))!;
+    expect(reviewPatch(o, "to_review", "")).toBeNull();
+    const patch = reviewPatch(o, "interesting", "  curva strana  ")!;
+    expect(patch).toEqual({ review: "interesting", note: "curva strana" });
+    await updateObject(A, owner, ids.a, { properties: patch });
+    const after = (await getObject(A, ids.a))!;
+    expect(after.properties).toMatchObject({ score: 0.9, review: "interesting", note: "curva strana" });
+    expect(reviewPatch(after, "interesting", "curva strana")).toBeNull();
+    // emptying the note removes it
+    await updateObject(A, owner, ids.a, { properties: reviewPatch(after, "interesting", "")! });
+    expect((await getObject(A, ids.a))!.properties.note).toBeUndefined();
+    const audit = await listAudit(A, { objectId: ids.a, limit: 10 });
+    const updates = audit.filter((e) => e.action === "object.update");
+    expect(updates).toHaveLength(2);
+    expect(updates.map((e) => (e.data as { changed: unknown }).changed)).toContainEqual({
+      review: { before: "to_review", after: "interesting" }, note: { before: null, after: "curva strana" },
+    });
+    await expect(updateObject(A, { ...owner, role: "viewer" }, ids.a, { properties: { review: "sent" } })).rejects.toMatchObject({ status: 403 });
+    await expect(updateObject(B, owner, ids.a, { properties: { review: "sent" } })).rejects.toMatchObject({ status: 404 });
+  });
+
+  it("reads the filters forgivingly and shows only raster images inline", () => {
+    const f = resultFilters({ min: "abc", max: "", page: "-3", review: ["a", "b"] }, tess);
+    expect(f).toMatchObject({ min: undefined, max: undefined, where: undefined, page: 1, order: { by: "score", desc: true } });
+    expect(["image/png", "IMAGE/JPEG; q=1", "image/webp"].map(inlineImage)).toEqual([true, true, true]);
+    expect(["image/svg+xml", "text/html", null].map(inlineImage)).toEqual([false, false, false]);
+  });
+});

@@ -459,6 +459,12 @@ const en = {
   objectName: "Name", externalId: "External id", noObjectsOfType: "No objects yet.", deleteObject: "Delete",
   deleteObjectConfirm: "Delete this object? It cannot be undone.", objectLinkedErr: "It has events or other objects linked to it.",
   edit: "Edit", archive: "Archive", archiveEnd: "End date", activeCrops: "Active crops", archivedCrops: "Archived crops",
+  research: "Research", projects: "Projects", project: "Project", results: "Results", runs: "Runs",
+  noProjects: "No projects yet.", noProjectType: "This organization has no project type yet: create it in the schema editor, or load the research types.",
+  noRuns: "No runs yet.", noResults: "No results match.", toReviewCount: "to review", scoreMin: "Score from", scoreMax: "to",
+  allReviews: "Any review", highestFirst: "Highest score first", lowestFirst: "Lowest score first", ofTotal: "of",
+  attachments: "Attachments", noAttachments: "No files attached.", review: "Review", saveReview: "Save review",
+  reviewUnchanged: "Nothing changed.", schemaEditor: "Schema editor", openRegister: "Open the register", resultsShown: "results",
 };
 export type Dict = typeof en;
 
@@ -918,6 +924,12 @@ const it: Dict = {
   objectName: "Nome", externalId: "Id esterno", noObjectsOfType: "Ancora nessun oggetto.", deleteObject: "Elimina",
   deleteObjectConfirm: "Eliminare questo oggetto? Non si può annullare.", objectLinkedErr: "Ha eventi o altri oggetti collegati.",
   edit: "Modifica", archive: "Archivia", archiveEnd: "Data di fine", activeCrops: "Colture attive", archivedCrops: "Colture archiviate",
+  research: "Ricerca", projects: "Progetti", project: "Progetto", results: "Risultati", runs: "Esecuzioni",
+  noProjects: "Ancora nessun progetto.", noProjectType: "Questa organizzazione non ha ancora un tipo progetto: crealo nell'editor degli schemi o carica i tipi della ricerca.",
+  noRuns: "Ancora nessuna esecuzione.", noResults: "Nessun risultato corrisponde.", toReviewCount: "da rivedere", scoreMin: "Punteggio da", scoreMax: "a",
+  allReviews: "Qualsiasi revisione", highestFirst: "Punteggio più alto prima", lowestFirst: "Punteggio più basso prima", ofTotal: "di",
+  attachments: "Allegati", noAttachments: "Nessun file allegato.", review: "Revisione", saveReview: "Salva revisione",
+  reviewUnchanged: "Nessuna modifica.", schemaEditor: "Editor degli schemi", openRegister: "Apri il registro", resultsShown: "risultati",
 };
 
 const DICTS: Record<Locale, Dict> = { en, it };
