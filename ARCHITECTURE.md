@@ -15,6 +15,8 @@ Il Core è diviso in due parti:
 
 Così l'engine resta uguale per ogni settore e per aggiungere un prodotto basta scrivere un nuovo modulo.
 
+Non sempre serve un modulo. Un cliente può definire i **propri tipi** di oggetto e di evento (modulo `custom`) dall'editor di schema e inviarli con `/api/push`. **VDX Research** è costruito così: i progetti, i dataset e i risultati di una pipeline (il primo è TESS, per le stelle anomale) sono solo configurazione (§11.6, §16).
+
 ---
 
 ## 2. Glossario minimo
@@ -33,6 +35,8 @@ Così l'engine resta uguale per ogni settore e per aggiungere un prodotto basta 
 | **Regola** | "Se la metrica X supera la soglia Y per Z secondi, apri un allarme". |
 | **Allarme** | Un problema aperto su un oggetto (`object_alerts`), che si chiude da solo quando il valore torna normale. |
 | **Raw** | Il messaggio originale, così com'è arrivato, prima di qualsiasi elaborazione. |
+| **Tipo personalizzato** | Un tipo di oggetto o di evento definito dal cliente nell'editor (`custom.<chiave>`), senza codice: proprietà, collegamenti, ordine dei campi. |
+| **Scope della source** | Il perimetro di una source `custom` (`sources.config.scope`): l'oggetto per cui lavora (es. un progetto), il collegamento che lo indica e gli altri tipi che può scrivere. Fuori dal perimetro, il messaggio è rifiutato. |
 
 ---
 
@@ -113,13 +117,14 @@ L'engine descrive il mondo con pochi concetti generici (migrazione `supabase/mig
 
 | Tabella | Cosa contiene |
 |---|---|
-| `object_types` | I tipi di oggetto, ciascuno di proprietà di un modulo (es. `lora.node`), con lo schema delle proprietà. Un trigger (`validate_properties`) verifica che le proprietà rispettino lo schema. |
+| `object_types` | I tipi di oggetto, ciascuno di proprietà di un modulo (es. `lora.node`, o `custom.result` per i tipi del cliente), con lo schema delle proprietà, i **collegamenti dichiarati** (`links`: chiave → tipo di destinazione, obbligatorio o no) e `field_order`. I trigger `validate_properties`, `objects_validate_schemas` e `links_validate_declared` verificano proprietà e collegamenti. |
 | `objects` | Gli oggetti concreti. `properties` contiene i dati descrittivi (nome, config, ultimo frame IR…). `state` contiene lo stato di calcolo: `state.derived` per l'engine e `state.pkg` per il modulo. `last_seen` indica quando l'oggetto ha inviato dati l'ultima volta. |
 | `links` | Relazioni tra oggetti. |
 | `metrics` | Una riga per ogni (oggetto, metrica, istante, valore). È **partizionata per giorno**, così cancellare dati vecchi significa eliminare una partizione intera, che è velocissimo. |
 | `metric_rollups` | I riassunti a 5 minuti e a 1 ora. |
 | `events` + `event_objects` | Gli eventi e gli oggetti che coinvolgono. |
-| `documents` | Documenti associati. |
+| `documents` + `document_objects` | Documenti (file su R2) e gli oggetti a cui sono allegati. |
+| `event_types` | I tipi di evento dei registri: `fields`, `subject`, `also` (altri tipi di oggetto che l'evento può citare), `field_order`. |
 | `sources` | I canali di ingresso (`push`, `pull`, `upload`). Il token **non è salvato in chiaro**: si salva il suo hash sha256 (`token_hash`) e solo gli ultimi caratteri (`token_hint`) per riconoscerlo. |
 | `raw_inbox` | I messaggi grezzi appena arrivati, in attesa di essere archiviati su R2. |
 | `rules`, `rule_state`, `object_alerts` | Regole, stato di valutazione e allarmi (vedi §7). |
@@ -127,6 +132,13 @@ L'engine descrive il mondo con pochi concetti generici (migrazione `supabase/mig
 | `engine_jobs`, `engine_usage`, `engine_notices` | Esito dei job, consumi (es. operazioni su R2) e notifiche email già inviate. |
 
 Le vecchie tabelle (`readings`, `alerts`, `gateways`, `devices`) sono state eliminate. Oggi tutto passa dagli oggetti dell'engine.
+
+Due formati di proprietà servono ai tipi personalizzati (`lib/engine/schema.ts`):
+
+- **`format: "schema"`**: la proprietà contiene a sua volta uno schema di campi. Esempio: il `result_schema` di un progetto (TIC id, periodo, settore…).
+- **`schemaFrom: "<collegamento>.<proprietà>"`**: la proprietà viene validata con lo schema contenuto nell'oggetto collegato. Esempio: `custom.result.extra` segue il `result_schema` del suo progetto. Così ogni progetto ha i propri campi di risultato, senza nuovi tipi né codice.
+
+La validazione sta nel database (trigger, migrazione `20261105000000_custom_object_types.sql`), quindi vale per la console, per il push e per gli script.
 
 ---
 
@@ -178,6 +190,25 @@ Se un messaggio non è valido (`ValidationError`), viene scartato **solo quel me
 - `sources.last_seen` e `last_error` vengono aggiornati.
 
 La risposta riporta: messaggi accettati e rifiutati, metriche ed eventi scritti, allarmi, configurazioni. Se **tutti** i messaggi sono stati rifiutati, lo stato è `422`.
+
+### 6.6b Push dei tipi personalizzati (`lib/engine/custom-ingest.ts`)
+
+Una source push con `module = 'custom'` non passa da un package: `ingestCustom` scrive direttamente oggetti ed eventi dei tipi del cliente.
+
+- **Oggetti** (`{kind: "object", type, externalId, name, properties, defaults, links}`): upsert per tipo + `externalId`, quindi **idempotente**. Gli stati restituiti sono `created`, `updated` e `unchanged`. I `defaults` contano solo alla creazione, così un reinvio non cancella la revisione fatta in console. Una proprietà a `null` viene rimossa.
+- **Eventi** (`{kind: "event", type, key, payload, objects}`): la `key` è obbligatoria e lo stesso evento si scrive una volta sola (stato `duplicate`). Gli oggetti si citano per id o per `{type, externalId}`.
+- **CSV**: `Content-Type: text/csv` e `?type=<tipo>`. Le colonne sono `external_id`, `name`, `link.<chiave>`, le proprietà (`prop.sub` dentro una proprietà oggetto) e `default.<prop>`. Separatore e decimali con virgola sono riconosciuti (`csvMessages`).
+- **Scope**: con `sources.config.scope = {link, id, also}` la source scrive solo oggetti collegati a `id` tramite `link` (il collegamento viene impostato da solo) e oggetti dei tipi in `also`. Non può modificare l'oggetto per cui lavora né citare altri progetti negli eventi.
+- **Audit**: ogni scrittura va in `audit_log` firmata `source:<nome>`.
+- **Limiti**: `custom.objects_max` per tenant, oltre ai limiti del push (§6.1).
+
+### 6.6c Allegati: `POST /api/push/document`
+
+Con lo stesso token una source `custom` allega file a un oggetto (form multipart: `file` più `objectId`, oppure `type` + `externalId`). Il file va su R2 in `docs/<tenant>/<source>/<sha256>-<nome>`, con una riga in `documents` e il collegamento in `document_objects`. Lo stesso contenuto sullo stesso oggetto restituisce `duplicate` con lo stesso `documentId`. Limiti: `push.document_max_bytes` (413) e `push.documents_per_day` (429). L'audit registra `document.create` e `document.attach`. In sviluppo, senza variabili R2, i file vanno in `.data/store` (`FileStore`, ignorato da git).
+
+### 6.6d Client Python (`clients/python/vdx_core_client`)
+
+È un client senza dipendenze per le pipeline: `Client(base_url, token)` offre `.send(messaggi)` (a blocchi di 500), `.send_csv(tipo, testo_o_file)` e `.attach(file, ref(tipo, external_id))`. Gli helper `obj`, `event` e `ref` costruiscono i messaggi. Sui `429` riprova rispettando `Retry-After`. Un `422` restituisce i motivi del rifiuto; gli altri errori sollevano `CoreError(status)`.
 
 ### 6.7 Sullo schermo
 
@@ -306,6 +337,11 @@ Tutti i valori sono modificabili da `/admin/settings` senza toccare il codice.
 | `upload.files_per_day` | 50 | File caricabili in 24 ore per ogni source upload |
 | `registers.types_max` | 50 | Tipi di evento che un cliente può creare nell'editor |
 | `registers.export_chunk` | 500 | Righe lette per query durante un export |
+| `registers.object_types_max` | 30 | Tipi di oggetto che un cliente può creare nell'editor |
+| `custom.objects_max` | 5000 | Oggetti dei tipi personalizzati per tenant |
+| `objects.page_size` | 100 | Righe per pagina negli elenchi di oggetti (es. risultati di un progetto) |
+| `push.document_max_bytes` | 3 MB | Dimensione massima di un allegato via `/api/push/document` |
+| `push.documents_per_day` | 200 | Allegati in 24 ore per ogni source |
 
 ---
 
@@ -406,6 +442,30 @@ Ogni tipo di evento con uno schema ha un registro, senza codice dedicato:
 - **Export** (`registers/[type]/export?format=csv|pdf|<extra>`): `allEvents` legge a blocchi di `registers.export_chunk` in ordine cronologico; il CSV è in streaming (chiavi come intestazioni, `;`, decimali con virgola, quantità in due colonne, BOM), il PDF passa da `tablePdf` (`lib/engine/pdf.ts`, pdf-lib, A4 orizzontale su più pagine). Gli export extra li dichiarano i pacchetti (`exportsOf`).
 - Owner e member registrano, viewer legge; ogni scrittura va in `audit_log`.
 
+### 11.6 Tipi oggetto personalizzati e VDX Research
+
+**Tipi oggetto** (`lib/engine/custom-objects.ts`, modulo `custom`):
+
+- L'editor di schema (`/terra/o/[slug]/registers/types?kind=object`) definisce proprietà, collegamenti dichiarati e ordine dei campi. `saveObjectType` usa `checkObjectType`, rispetta `registers.object_types_max` e scrive l'audit.
+- Oggetti: `createObject`, `upsertObject`, `updateObject`, `setLink` e `deleteObject`, sempre con filtro tenant e audit `object.*`.
+- Ricerca generica: `searchObjects` (filtro per collegamento, valori `where`, intervalli `min`/`max`, ordinamento su una proprietà, totale, pagine), `countLinked` e `objectDocuments`.
+- Le pagine generiche `/terra/o/[slug]/registers/objects` mostrano, creano e modificano gli oggetti di qualsiasi tipo personalizzato.
+
+**VDX Research** è configurazione più una console:
+
+- **Tipi** (`scripts/research/types.ts`, caricati con `scripts/seed-research.ts <org>` tramite le stesse API dell'editor):
+  - `custom.project`: area, domanda, ipotesi, stage, protocollo, `result_schema`;
+  - `custom.dataset`: fonte, descrizione, dimensione, URL, licenza;
+  - `custom.result`: score, review `to_review|discarded|interesting|sent`, note, run, `extra` che segue `project.result_schema`; collegamento `project` obbligatorio;
+  - eventi `custom.run` (commit, parametri, elementi, durata, esito; sul progetto e anche sul dataset) e `custom.lab_note`.
+- **Source**: `scripts/create-research-source.ts <org> <progetto>` crea la source push `custom` con scope sul progetto (`also: custom.dataset`) e stampa il token una volta.
+- **Console** (`/research/o/[slug]`):
+  - i progetti con stage, numero di risultati e ultima run;
+  - il progetto con lo storico delle run e i risultati filtrabili per score e revisione, con le colonne del suo `result_schema`;
+  - la scheda del risultato con proprietà, allegati (anteprima solo per immagini raster) e storico;
+  - la revisione (stato + nota) registrata nell'audit.
+- I nomi dei tipi e delle proprietà usati dalla console stanno **solo** in `lib/research.ts`. Il motore non conosce progetti o risultati.
+
 ---
 
 ## 12. La console web
@@ -430,7 +490,13 @@ Ogni tipo di evento con uno schema ha un registro, senza codice dedicato:
 | `/admin/orgs/[id]` | staff | gestione di un cliente (moduli, soglie, luoghi, membri, attività) |
 | `/admin/engine` | staff | stato dell'engine (job, quote, salute) e gestione delle source (nuova source, nuovo token, pausa) |
 | `/admin/settings` | staff | `engine_settings` e destinatari delle email di salute |
-| `/api/push` | gateway | ingresso dati |
+| `/terra/o/[slug]/registers/objects[/type]` | membri (viewer in sola lettura) | oggetti dei tipi personalizzati e i loro collegamenti |
+| `/research/o/[slug]` | membri | VDX Research: progetti |
+| `/research/o/[slug]/p/[id]` | membri | progetto: run, risultati filtrabili e ordinabili |
+| `/research/o/[slug]/r/[id]` | membri (revisione: owner e member) | risultato: proprietà, allegati, storico, revisione |
+| `/research/o/[slug]/doc/[id]` | membri | download o anteprima di un allegato |
+| `/api/push` | gateway, pipeline | ingresso dati (JSON, o CSV per le source `custom`) |
+| `/api/push/document` | pipeline | allegati agli oggetti dei tipi personalizzati |
 | `/api/health` | pubblico | stato di salute |
 
 ### 12.2 Come le pagine leggono i dati
@@ -454,6 +520,10 @@ Ogni tipo di evento con uno schema ha un registro, senza codice dedicato:
 | `health.ts` | Esegue il controllo di salute e invia le email. |
 | `replay.ts` | Rielabora l'archivio grezzo. |
 | `env.ts` | Carica `.env.local` per gli script. |
+| `seed-research.ts <org>` | Crea o aggiorna i tipi VDX Research di un'org (rieseguibile). |
+| `create-research-source.ts <org> <progetto> [nome]` | Crea la source push di una pipeline, vincolata a un progetto, e stampa il token. |
+
+Il client Python per le pipeline è in `clients/python/` (README con un esempio completo).
 
 ### 13.2 Automazioni
 
@@ -485,6 +555,10 @@ Si eseguono con `npm test` (vitest).
 - `tests/engine/`: ingest, regole, archivio, health, rollup e upload CSV.
 - `tests/packages/lora.test.ts`: i calcoli del modulo LoRa.
 - `tests/packages/agronomy.test.ts`: colture, permessi, registro, correzioni, isolamento tra tenant, export e limiti.
+- `tests/engine/custom-objects.test.ts`, `research-seed.test.ts`: tipi oggetto personalizzati, collegamenti, `schemaFrom`, limiti, audit, isolamento; i tipi Research.
+- `tests/engine/custom-ingest.test.ts`: push custom (idempotenza, chiavi degli eventi, scope, CSV, allegati, audit firmato dalla source).
+- `tests/engine/research-console.test.ts`: ricerca, filtri, ordinamento, conteggi, allegati e revisione.
+- `clients/python/tests/`: il client Python (`cd clients/python && python3 -m unittest discover -s tests`).
 - `tests/db/`: l'harness che crea un **database usa-e-getta** per ogni file di test, applicando tutte le migrazioni. Richiede un Postgres locale (`npx supabase start`) oppure `TEST_DATABASE_URL`.
 
 I test dell'archivio usano `MemoryStore`, quindi non toccano R2.
@@ -503,13 +577,43 @@ I test dell'archivio usano `MemoryStore`, quindi non toccano R2.
 
 L'engine non va toccato: è proprio questo il suo scopo.
 
+Un modulo serve quando ci sono **calcoli** sui dati (normalize, derivate, step, regole). Per dati che il cliente descrive e invia già pronti basta la configurazione (§16).
+
 ---
 
-## 16. Principi da ricordare
+## 16. Come aggiungere un settore senza codice
+
+Esempio: un progetto di **medicina** (varianti geniche di una coorte) accanto a TESS.
+
+**Caso A: un nuovo progetto di ricerca (nessuna riga di codice).**
+
+1. In console (`/terra/o/[slug]/registers/objects/custom.project`) crea il progetto: area `medicina`, domanda, ipotesi, stage.
+2. Nel suo `result_schema` metti i campi del settore, per esempio `gene` (testo, obbligatorio), `variant` (testo), `patient_id` (testo), `allele_freq` (numero) e `pathogenic` (enum). I risultati di quel progetto verranno validati con questi campi (`schemaFrom`) e la console li mostrerà come colonne.
+3. Crea la source: `npx tsx scripts/create-research-source.ts <org> <progetto>`.
+4. La pipeline invia dataset, run e risultati con il client Python (`send`, `send_csv`, `attach`). Score e revisione funzionano come per TESS.
+
+**Caso B: un settore con oggetti diversi** (es. pazienti, campioni, visite).
+
+1. Nell'editor di schema (`/terra/o/[slug]/registers/types`) crea i tipi oggetto: proprietà, collegamenti dichiarati (es. `sample.patient → custom.patient`, obbligatorio), ordine dei campi.
+2. Crea i tipi evento con soggetto e `also` (es. `custom.visit` sul paziente).
+3. Per una configurazione versionata, scrivi i tipi in un file come `scripts/research/types.ts` e caricali con le API dell'editor, come fa `seed-research.ts`.
+4. Crea una source push `custom` con `npx tsx scripts/create-source.ts <org> custom <nome>`: senza scope, può scrivere tutti i tipi personalizzati dell'org. Per vincolarla a un oggetto, imposta `sources.config.scope = {link, id, also}`, come fa `create-research-source.ts` per i progetti. Il form di `/admin/engine` elenca solo i moduli installati, quindi non offre `custom`.
+5. Invia con `/api/push` (JSON o CSV) e `/api/push/document`. Oggetti, collegamenti, registri ed export sono già nelle pagine generiche `registers/objects` e `registers/[type]`.
+
+Cosa resta codice, e perché:
+
+- **Una console dedicata** (come `/research`) è codice di presentazione: legge i nomi dei tipi da un file di nomi come `lib/research.ts` e usa solo funzioni generiche del motore (`searchObjects`, `countLinked`, `objectDocuments`).
+- **Calcoli automatici** sui dati (derivate, regole, allarmi) richiedono un modulo (§15).
+
+In entrambi i casi il motore non cambia.
+---
+
+## 17. Principi da ricordare
 
 - **L'originale non si perde mai**: prima `raw_inbox`, poi R2, senza sovrascritture.
 - **Idempotenza**: inviare due volte lo stesso dato non crea duplicati.
 - **Un errore non blocca tutto**: un messaggio invalido o un hook fallito non fermano il batch.
 - **Separazione dei clienti**: RLS, e `tenant_id` esplicito ovunque si usi il pool diretto.
-- **Engine generico, moduli specifici**: la conoscenza di settore sta solo nei package.
+- **Engine generico, moduli specifici**: la conoscenza di settore sta solo nei package, o nella configurazione dei tipi personalizzati.
+- **Audit su ogni scrittura**: utente o `source:<nome>`, con prima e dopo.
 - **Tutto è configurabile**: i limiti stanno in `engine_settings`, non nel codice.
