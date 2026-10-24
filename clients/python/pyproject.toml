@@ -1,0 +1,13 @@
+[project]
+name = "vdx-core-client"
+version = "0.1.0"
+description = "Send objects, events and files to VDX Core with a source token"
+requires-python = ">=3.9"
+dependencies = []
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["vdx_core_client"]

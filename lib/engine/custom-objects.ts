@@ -10,7 +10,7 @@ import type { Db, TenantDb } from "./db";
 import { forTenant, inTransaction } from "./db";
 import type { PropertySpec } from "./package";
 import { canRecord, ManualEventError, type Author } from "./manual";
-import { record } from "./audit";
+import { record, type Actor } from "./audit";
 import { getSettings, num } from "./settings";
 import { checkFields, KEY, validateProperties, type Schema } from "./schema";
 import { CUSTOM, FIELD_TYPES } from "./registers";
@@ -227,21 +227,110 @@ export async function createObject(
   await checkLinks(db, t, links);
   await checkProperties(db, t, input.properties, links);
   await objectLimit(db);
-  const id = await guarded(() =>
+  const id = await insertObject(db, t, input.externalId ?? null, name, input.properties, links);
+  await record(db, author, "object.create", { objectId: id, subject: name, data: { type: t.type, externalId: input.externalId ?? null, properties: input.properties, links } });
+  return id;
+}
+
+async function insertObject(db: TenantDb, t: ObjectTypeInfo, externalId: string | null, name: string, properties: Record<string, unknown>, links: Record<string, string>) {
+  return guarded(() =>
     inTransaction(db.shared, async (c) => {
       const tdb = scoped(db, c);
       const { rows } = await tdb.query<{ id: string }>(
         `insert into objects (tenant_id, type_id, external_id, name, properties)
          select $1, id, $3, $4, $5 from object_types where tenant_id = $1 and module = $2 and key = $6 returning id`,
-        [db.tenantId, CUSTOM, input.externalId ?? null, name, input.properties, t.key],
+        [db.tenantId, CUSTOM, externalId, name, properties, t.key],
       );
       for (const [k, dst] of Object.entries(links))
         await tdb.query(`insert into links (tenant_id, type, src_id, dst_id) values ($1, $2, $3, $4)`, [db.tenantId, k, rows[0].id, dst]);
       return rows[0].id;
     }),
   );
-  await record(db, author, "object.create", { objectId: id, subject: name, data: { type: t.type, externalId: input.externalId ?? null, properties: input.properties, links } });
-  return id;
+}
+
+/** The same JSON value, whatever the key order. */
+const canonical = (v: unknown): unknown =>
+  Array.isArray(v) ? v.map(canonical) : v && typeof v === "object" ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, canonical((v as Record<string, unknown>)[k])])) : v;
+const same = (a: unknown, b: unknown) => JSON.stringify(canonical(a)) === JSON.stringify(canonical(b));
+
+const withPatch = (base: Record<string, unknown>, patch: Record<string, unknown>) => {
+  const next = { ...base };
+  for (const [k, v] of Object.entries(patch)) {
+    if (v === null || v === undefined) delete next[k];
+    else next[k] = v;
+  }
+  return next;
+};
+
+export type UpsertStatus = "created" | "updated" | "unchanged";
+
+/**
+ * Creates the object of `type` with this external id, or changes the one already there: for
+ * machines that send the same objects again (a pipeline run after run). `properties` and
+ * `links` are applied each time (null removes a property); `defaults` only when the object is
+ * created, so what people changed since (a review status) stays. Nothing is written, nor
+ * audited, when nothing changes. The caller has authorized the writer (a source token).
+ */
+export async function upsertObject(
+  db: TenantDb,
+  actor: Actor,
+  input: {
+    type: string; externalId: string; name?: string | null;
+    properties?: Record<string, unknown>; defaults?: Record<string, unknown>; links?: Record<string, string>;
+  },
+): Promise<{ id: string; status: UpsertStatus }> {
+  const t = await getObjectType(db, input.type);
+  if (!t) throw new ManualEventError(400, `unknown object type "${input.type}"`);
+  const externalId = input.externalId?.trim();
+  if (!externalId || externalId.length > 200) throw new ManualEventError(400, "an external id is required");
+  const { rows } = await db.query<{ id: string }>(
+    `select o.id from objects o join object_types t on t.id = o.type_id
+      where o.tenant_id = $1 and t.tenant_id = $1 and t.module = $2 and t.key = $3 and o.external_id = $4`,
+    [db.tenantId, CUSTOM, t.key, externalId],
+  );
+  const prev = rows[0] ? await getObject(db, rows[0].id) : null;
+  const name = input.name?.trim() || prev?.name || externalId;
+  const properties = withPatch(prev ? prev.properties : withPatch({}, input.defaults ?? {}), input.properties ?? {});
+  const links = { ...prev?.links, ...input.links };
+  await checkLinks(db, t, links);
+  await checkProperties(db, t, properties, links);
+
+  if (!prev) {
+    await objectLimit(db);
+    const id = await insertObject(db, t, externalId, name, properties, links);
+    await record(db, actor, "object.create", { objectId: id, subject: name, data: { type: t.type, externalId, properties, links } });
+    return { id, status: "created" };
+  }
+  const changedLinks = Object.keys(links).filter((k) => links[k] !== prev.links[k]);
+  if (name === prev.name && same(properties, prev.properties) && !changedLinks.length) return { id: prev.id, status: "unchanged" };
+  await guarded(() =>
+    inTransaction(db.shared, async (c) => {
+      const tdb = scoped(db, c);
+      await tdb.query(`update objects set name = $3, properties = $4 where tenant_id = $1 and id = $2`, [db.tenantId, prev.id, name, properties]);
+      for (const k of changedLinks) {
+        await tdb.query(`delete from links where tenant_id = $1 and src_id = $2 and type = $3`, [db.tenantId, prev.id, k]);
+        await tdb.query(`insert into links (tenant_id, type, src_id, dst_id) values ($1, $2, $3, $4)`, [db.tenantId, k, prev.id, links[k]]);
+      }
+    }),
+  );
+  const keys = [...new Set([...Object.keys(prev.properties), ...Object.keys(properties)])].filter((k) => !same(prev.properties[k], properties[k]));
+  await record(db, actor, "object.update", {
+    objectId: prev.id, subject: name,
+    data: {
+      type: t.type, externalId,
+      changed: Object.fromEntries(keys.map((k) => [k, { before: prev.properties[k] ?? null, after: properties[k] ?? null }])),
+      ...(changedLinks.length ? { links: Object.fromEntries(changedLinks.map((k) => [k, { before: prev.links[k] ?? null, after: links[k] }])) } : {}),
+      ...(name !== prev.name ? { rename: { before: prev.name, after: name } } : {}),
+    },
+  });
+  return { id: prev.id, status: "updated" };
+}
+
+/** The object of a custom type with this external id, null when there is none. */
+export async function objectByExternalId(db: TenantDb, type: string, externalId: string): Promise<CustomObject | null> {
+  if (!type.startsWith(`${CUSTOM}.`)) return null;
+  const { rows } = await db.query<ObjectRow>(`${SELECT_OBJECTS} and t.key = $4 and o.external_id = $5`, [db.tenantId, RESERVED_LINKS, CUSTOM, type.slice(CUSTOM.length + 1), externalId]);
+  return rows[0] ? toObject(rows[0]) : null;
 }
 
 type ObjectRow = { id: string; key: string; name: string | null; external_id: string | null; properties: Record<string, unknown>; created_at: Date; links: Record<string, string> | null };

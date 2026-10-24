@@ -2,7 +2,7 @@
 // the table refuses updates and deletes (only the retention purge removes old rows).
 import type { Db, TenantDb } from "./db";
 
-export type Actor = { id: string; email?: string | null } | null;
+export type Actor = { id: string | null; email?: string | null } | null;
 
 export type AuditEntry = {
   id: number;

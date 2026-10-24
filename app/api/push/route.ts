@@ -1,11 +1,14 @@
 /**
  * POST /api/push - generic push ingestion.
  * Auth: "Authorization: Bearer <source token>". Body: one message or an array of messages,
- * interpreted by the source's module package.
+ * interpreted by the source's module package. A source of the tenant's own types (module
+ * "custom") also takes a CSV of objects: "Content-Type: text/csv" and "?type=<object type>".
  */
 import { crossTenantAccess, crossTenantDb } from "@/lib/engine/db";
 import { ConnectorError, pushConnector } from "@/lib/engine/connectors";
+import { csvMessages, ingestCustom } from "@/lib/engine/custom-ingest";
 import { ingestPush, takeIngestToken } from "@/lib/engine/ingest";
+import { CUSTOM } from "@/lib/engine/registers";
 import { ValidationError } from "@/lib/engine/package";
 import { sourceByToken } from "@/lib/engine/sources";
 import { getPackage } from "@/lib/packages";
@@ -22,15 +25,17 @@ export async function POST(request: Request) {
   if (!source) return Response.json({ error: "invalid source token" }, { status: 401 });
   if (source.connector !== "push") return Response.json({ error: "source does not accept push" }, { status: 403 });
   if (source.status === "paused") return Response.json({ error: "source is paused" }, { status: 403 });
-  const pkg = getPackage(source.module);
-  if (!pkg) return Response.json({ error: `module "${source.module}" is not installed` }, { status: 500 });
+  const custom = source.module === CUSTOM;
+  const pkg = custom ? null : getPackage(source.module);
+  if (!custom && !pkg) return Response.json({ error: `module "${source.module}" is not installed` }, { status: 500 });
 
   const wait = await takeIngestToken(db, source.id);
   if (wait > 0)
     return Response.json({ error: "rate limited" }, { status: 429, headers: { "Retry-After": String(Math.ceil(wait)) } });
 
   if (Number(request.headers.get("content-length") ?? 0) > MAX_BODY) return Response.json({ error: "body too large" }, { status: 413 });
-  let body: unknown;
+  const csv = custom && /^text\/csv\b/i.test(request.headers.get("content-type") ?? "");
+  let text: string;
   try {
     const reader = request.body?.getReader();
     if (!reader) return Response.json({ error: "invalid JSON" }, { status: 400 });
@@ -52,16 +57,28 @@ export async function POST(request: Request) {
       bytes.set(chunk, offset);
       offset += chunk.byteLength;
     }
-    body = JSON.parse(new TextDecoder().decode(bytes));
+    text = new TextDecoder().decode(bytes);
   } catch {
     return Response.json({ error: "invalid JSON" }, { status: 400 });
   }
+  let body: unknown;
+  if (!csv) {
+    try {
+      body = JSON.parse(text);
+    } catch {
+      return Response.json({ error: "invalid JSON" }, { status: 400 });
+    }
+  }
   try {
-    const result = await ingestPush(db, source, await pushConnector.messages(source, body), pkg);
+    const result = csv
+      ? await ingestCustom(db, source, await csvMessages(db, source, new URL(request.url).searchParams.get("type") ?? "", text))
+      : custom
+        ? await ingestCustom(db, source, await pushConnector.messages(source, body))
+        : await ingestPush(db, source, await pushConnector.messages(source, body), pkg!);
     return Response.json(result, { status: result.rejected.length && !result.accepted ? 422 : 200 });
   } catch (e) {
     if (e instanceof ConnectorError) return Response.json({ error: e.message }, { status: e.status });
-    if (e instanceof ValidationError) return Response.json({ error: e.message }, { status: 400 });
+    if (e instanceof ValidationError || e instanceof RangeError) return Response.json({ error: e.message }, { status: 400 });
     throw e;
   }
 }

@@ -66,6 +66,19 @@ type EventInput = { ts: Date; payload: Record<string, unknown>; objectIds: strin
 
 async function check(db: TenantDb, spec: EventSpec, author: Author, input: EventInput, now: Date) {
   if (!canRecord(author.role)) throw new ManualEventError(403, "viewers cannot record events");
+  const ids = await checkEvent(db, spec, input);
+  const day = await db.query<{ n: number }>(
+    `select count(*)::int n from events where tenant_id = $1 and author is not null and recorded_at > $2::timestamptz - interval '1 day'`,
+    [db.tenantId, now],
+  );
+  if (day.rows[0].n >= num(await getSettings(db.shared), "manual.events_per_day", 500)) throw new ManualEventError(429, "daily limit reached");
+
+  if (spec.pkg) await registerPackage(db.shared, spec.pkg);
+  return ids;
+}
+
+/** Time, payload and objects of an event of the spec's type, whoever brings it. Returns the object ids. */
+export async function checkEvent(db: TenantDb, spec: EventSpec, input: EventInput): Promise<string[]> {
   if (Number.isNaN(input.ts.getTime())) throw new ManualEventError(400, "invalid event time");
   const err = validateProperties(spec.fields, input.payload);
   if (err) throw new ManualEventError(400, err);
@@ -89,14 +102,6 @@ async function check(db: TenantDb, spec: EventSpec, author: Author, input: Event
       throw new ManualEventError(400, `objects must be of type "${spec.subject}"`);
   }
   if (rows.some((r) => r.archived)) throw new ManualEventError(409, "object is archived");
-
-  const day = await db.query<{ n: number }>(
-    `select count(*)::int n from events where tenant_id = $1 and author is not null and recorded_at > $2::timestamptz - interval '1 day'`,
-    [db.tenantId, now],
-  );
-  if (day.rows[0].n >= num(settings, "manual.events_per_day", 500)) throw new ManualEventError(429, "daily limit reached");
-
-  if (spec.pkg) await registerPackage(db.shared, spec.pkg);
   return ids;
 }
 
