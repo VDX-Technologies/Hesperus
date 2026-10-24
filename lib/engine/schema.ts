@@ -9,6 +9,23 @@ export type Quantity = { value: number; unit: string };
 
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 
+export const KEY = /^[a-z][a-z0-9_]{0,39}$/;
+
+/** Problems of a field schema written by people (the schema editor, a project's result fields), null when fine. */
+export function checkFields(fields: Schema, types: readonly string[]): string | null {
+  if (!isObject(fields)) return "fields must be an object";
+  const entries = Object.entries(fields);
+  if (entries.length > 40) return "too many fields";
+  for (const [k, s] of entries) {
+    if (!KEY.test(k) || k === "ts") return `invalid field key "${k}"`;
+    if (!isObject(s) || !types.includes(s.type)) return `invalid type for "${k}"`;
+    if (s.type === "quantity" && !s.units?.length) return `"${k}" needs at least one unit`;
+    if (s.min !== undefined && s.max !== undefined && s.min > s.max) return `"${k}": min is above max`;
+    if (s.enum && (s.type !== "string" || !Array.isArray(s.enum) || !s.enum.length)) return `invalid options for "${k}"`;
+  }
+  return null;
+}
+
 const pgList = (a: unknown[]) => `[${a.map((x) => JSON.stringify(x)).join(", ")}]`;
 
 const jsonType = (v: unknown) => (v === null ? "null" : Array.isArray(v) ? "array" : typeof v);

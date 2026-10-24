@@ -452,6 +452,12 @@ const en = {
   typeKey: "Key", typeNameIt: "Name (Italian)", typeNameEn: "Name (English)", typeSubject: "Recorded on", typeFields: "Fields",
   addField: "Add field", fieldLabel: "Label", fieldType: "Type", fieldUnits: "Units", fieldOptions: "Options, comma separated",
   fromSubject: "Fill from object property",
+  notJson: "Not valid JSON", typeAlso: "Can also be linked to", otherObjects: "Other objects",
+  objectTypes: "Object types", newObjectType: "New object type", editObjectType: "Edit object type", typeProperties: "Properties",
+  typeLinks: "Links", addLink: "Add link", linkType: "Points to", holdsSchema: "holds a field schema",
+  schemaFrom: "follows the schema of (link.property)", objects: "Objects", newObject: "New object", editObject: "Edit object",
+  objectName: "Name", externalId: "External id", noObjectsOfType: "No objects yet.", deleteObject: "Delete",
+  deleteObjectConfirm: "Delete this object? It cannot be undone.", objectLinkedErr: "It has events or other objects linked to it.",
   edit: "Edit", archive: "Archive", archiveEnd: "End date", activeCrops: "Active crops", archivedCrops: "Archived crops",
 };
 export type Dict = typeof en;
@@ -905,6 +911,12 @@ const it: Dict = {
   typeKey: "Chiave", typeNameIt: "Nome (italiano)", typeNameEn: "Nome (inglese)", typeSubject: "Si registra su", typeFields: "Campi",
   addField: "Aggiungi campo", fieldLabel: "Etichetta", fieldType: "Tipo", fieldUnits: "Unità", fieldOptions: "Opzioni, separate da virgola",
   fromSubject: "Compila dalla proprietà dell'oggetto",
+  notJson: "Non è un JSON valido", typeAlso: "Si può collegare anche a", otherObjects: "Altri oggetti",
+  objectTypes: "Tipi di oggetto", newObjectType: "Nuovo tipo di oggetto", editObjectType: "Modifica tipo di oggetto", typeProperties: "Proprietà",
+  typeLinks: "Collegamenti", addLink: "Aggiungi collegamento", linkType: "Punta a", holdsSchema: "contiene uno schema di campi",
+  schemaFrom: "segue lo schema di (collegamento.proprietà)", objects: "Oggetti", newObject: "Nuovo oggetto", editObject: "Modifica oggetto",
+  objectName: "Nome", externalId: "Id esterno", noObjectsOfType: "Ancora nessun oggetto.", deleteObject: "Elimina",
+  deleteObjectConfirm: "Eliminare questo oggetto? Non si può annullare.", objectLinkedErr: "Ha eventi o altri oggetti collegati.",
   edit: "Modifica", archive: "Archivia", archiveEnd: "Data di fine", activeCrops: "Colture attive", archivedCrops: "Colture archiviate",
 };
 

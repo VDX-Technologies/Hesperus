@@ -5,7 +5,7 @@ import { cursorOf, getEvent, lastEventBy, listEvents, parseCursor } from "@/lib/
 import { canRecord } from "@/lib/engine/manual";
 import {
   eventValues, fieldSuggestions, filterParams, filterable, filtersFrom, formSchema, label, registerCell, registerColumns, registerQuery,
-  subjectObjects, subjectValues, type EventTypeInfo, type Locale,
+  subjectObjects, subjectTypes, subjectValues, type EventTypeInfo, type Locale,
 } from "@/lib/engine/registers";
 import { exportsOf } from "@/lib/packages/exports";
 import { SectionTitle } from "@/components/ui";
@@ -15,7 +15,7 @@ import { voidEntry } from "../actions";
 import { registerContext, typeFrom } from "../context";
 
 const PAGE = 50;
-const ERRORS = ["required", "notNumber", "unitRequired", "notDate", "objectRequired", "manualErr_403", "manualErr_404", "manualErr_409", "manualErr_429"] as const;
+const ERRORS = ["required", "notNumber", "unitRequired", "notDate", "objectRequired", "manualErr_403", "manualErr_404", "manualErr_409", "manualErr_429", "notJson"] as const;
 
 function formText(t: Dict, type: EventTypeInfo, locale: Locale, submit: string) {
   const schema = formSchema(type);
@@ -38,18 +38,25 @@ export default async function Register(props: PageProps<"/terra/o/[slug]/registe
   const after = parseCursor(typeof sp.after === "string" ? sp.after : undefined);
   const editId = Number(sp.edit) || 0;
 
-  const [page, objects, sugg, last, editing, voided] = await Promise.all([
+  const [page, objects, sugg, last, editing, voided, alsoObjects, types] = await Promise.all([
     listEvents(ctx.db, { ...registerQuery(type, f), after, limit: PAGE + 1 }),
     subjectObjects(ctx.db, type.subject, { all: true }),
     fieldSuggestions(ctx.db, type),
     writer ? lastEventBy(ctx.db, ctx.user.id, type.type) : null,
     writer && editId ? getEvent(ctx.db, editId) : null,
     listEvents(ctx.db, { types: [type.type], voided: true, limit: 50 }),
+    Promise.all(type.also.map((a) => subjectObjects(ctx.db, a))),
+    type.also.length ? subjectTypes(ctx.db) : [],
   ]);
   const error = typeof sp.error === "string" && sp.error in t ? t[sp.error as keyof Dict] : null;
   const rows = page.slice(0, PAGE);
   const more = page.length > PAGE;
-  const names = new Map(objects.map((o) => [o.id, o.name]));
+  const names = new Map([...objects, ...alsoObjects.flat()].map((o) => [o.id, o.name]));
+  const also = type.also.map((a, i) => ({
+    type: a,
+    label: label(types.find((s) => s.type === a)?.name, locale, a),
+    objects: alsoObjects[i].filter((o) => !o.archived).map((o) => ({ id: o.id, label: o.name })),
+  }));
   const active = objects.filter((o) => !o.archived);
   const edit = editing && editing.type === type.type ? editing : null;
   const columns = registerColumns(type, locale, { date: t.date, object: t.object, author: t.recordedBy });
@@ -89,6 +96,7 @@ export default async function Register(props: PageProps<"/terra/o/[slug]/registe
               type={type.type}
               schema={formSchema(type)}
               objects={active.map((o) => ({ id: o.id, label: o.name, values: subjectValues(type, o) }))}
+              also={also}
               last={last ? eventValues(type, last) : null}
               initial={edit ? eventValues(type, edit) : undefined}
               editId={edit?.id}

@@ -47,10 +47,10 @@ describe("agronomy dashboard", () => {
     expect(all.products.map((p) => p.key)).toEqual(["Rame", "Zolfo"]);
   });
 
-  it("defaults to 90 days", () => {
-    expect(periodFrom(undefined)).toBe(90);
+  it("defaults to 30 days", () => {
+    expect(periodFrom(undefined)).toBe(30);
     expect(periodFrom("7")).toBe(7);
     expect(periodFrom("0")).toBe(0);
-    expect(periodFrom("13")).toBe(90);
+    expect(periodFrom("13")).toBe(30);
   });
 });

@@ -9,7 +9,7 @@ import { ManualEventError } from "./manual";
 import type { ModulePackage, PropertySpec } from "./package";
 import { record } from "./audit";
 import { getSettings, num } from "./settings";
-import { parseDecimal, type Quantity, type Schema } from "./schema";
+import { checkFields, KEY, parseDecimal, type Quantity, type Schema } from "./schema";
 
 export type Locale = "en" | "it";
 
@@ -22,13 +22,14 @@ export interface EventTypeInfo {
   fields: Schema;
   subject: string | null;
   fromSubject: Record<string, string>;
+  /** Other object types the event may be linked to after its subject. */
+  also: string[];
   /** Made in the schema editor (editable by the owner). */
   custom: boolean;
 }
 
 export const CUSTOM = "custom";
-const KEY = /^[a-z][a-z0-9_]{0,39}$/;
-export const FIELD_TYPES = ["string", "number", "integer", "boolean", "timestamp", "quantity"] as const;
+export const FIELD_TYPES = ["string", "number", "integer", "boolean", "timestamp", "quantity", "object"] as const;
 
 export const label = (text: Record<string, string> | undefined, locale: Locale, fallback: string) => text?.[locale] ?? text?.en ?? fallback;
 
@@ -40,15 +41,15 @@ const ordered = (fields: Schema, order: string[] | null): Schema =>
 export async function listEventTypes(db: TenantDb, pkgs: ModulePackage[]): Promise<EventTypeInfo[]> {
   const fromPkgs = pkgs.flatMap((p) =>
     (p.eventTypes ?? []).map((t) => ({
-      type: `${p.id}.${t.key}`, module: p.id, key: t.key, name: t.name, fields: t.fields, subject: t.subject ?? null, fromSubject: t.fromSubject ?? {}, custom: false,
+      type: `${p.id}.${t.key}`, module: p.id, key: t.key, name: t.name, fields: t.fields, subject: t.subject ?? null, fromSubject: t.fromSubject ?? {}, also: t.also ?? [], custom: false,
     })),
   );
-  const { rows } = await db.query<{ key: string; name: Record<string, string>; fields: Schema; subject: string | null; from_subject: Record<string, string>; field_order: string[] | null }>(
-    `select key, name, fields, subject, from_subject, field_order from event_types where tenant_id = $1 and module = $2 order by name->>'en', key`,
+  const { rows } = await db.query<{ key: string; name: Record<string, string>; fields: Schema; subject: string | null; from_subject: Record<string, string>; field_order: string[] | null; also: string[] }>(
+    `select key, name, fields, subject, from_subject, field_order, also from event_types where tenant_id = $1 and module = $2 order by name->>'en', key`,
     [db.tenantId, CUSTOM],
   );
   const own = rows.map((r) => ({
-    type: `${CUSTOM}.${r.key}`, module: CUSTOM, key: r.key, name: r.name, fields: ordered(r.fields, r.field_order), subject: r.subject, fromSubject: r.from_subject ?? {}, custom: true,
+    type: `${CUSTOM}.${r.key}`, module: CUSTOM, key: r.key, name: r.name, fields: ordered(r.fields, r.field_order), subject: r.subject, fromSubject: r.from_subject ?? {}, also: r.also ?? [], custom: true,
   }));
   return [...fromPkgs, ...own];
 }
@@ -58,14 +59,14 @@ export async function getEventType(db: TenantDb, pkgs: ModulePackage[], type: st
 }
 
 export const specOf = (t: EventTypeInfo, pkgs: ModulePackage[]): EventSpec => ({
-  type: t.type, module: t.module, fields: t.fields, subject: t.subject, pkg: pkgs.find((p) => p.id === t.module),
+  type: t.type, module: t.module, fields: t.fields, subject: t.subject, also: t.also, pkg: pkgs.find((p) => p.id === t.module),
 });
 
-/** Object types the tenant has objects of: what a custom type can be about. */
+/** Object types the tenant has objects of, and its own ones: what a custom type can be about. */
 export async function subjectTypes(db: TenantDb): Promise<{ type: string; name: Record<string, string> }[]> {
   const { rows } = await db.query<{ type: string; name: Record<string, string> }>(
-    `select distinct t.module || '.' || t.key type, t.name from objects o join object_types t on t.id = o.type_id
-      where o.tenant_id = $1 order by 1`,
+    `select distinct t.module || '.' || t.key type, t.name from object_types t
+      where t.tenant_id = $1 or exists (select 1 from objects o where o.tenant_id = $1 and o.type_id = t.id) order by 1`,
     [db.tenantId],
   );
   return rows;
@@ -189,7 +190,7 @@ export function fieldText(spec: PropertySpec | undefined, v: unknown, locale: Lo
   if (spec.type === "boolean") return v ? (locale === "it" ? "sì" : "yes") : "no";
   if (spec.type === "timestamp") return date(String(v).slice(0, 10), locale);
   if (spec.enum && typeof v === "string") return spec.options?.[v]?.[locale] ?? v;
-  return String(v);
+  return typeof v === "object" ? JSON.stringify(v) : String(v);
 }
 
 export interface RegisterColumn {
@@ -256,24 +257,23 @@ export interface EventTypeInput {
   fields: Schema;
   subject: string;
   fromSubject?: Record<string, string>;
+  also?: string[];
 }
+
+const TYPE = /^[a-z][a-z0-9_]{0,39}\.[a-z][a-z0-9_]{0,39}$/;
 
 /** Problems of a type definition, null when fine. */
 export function checkEventType(input: EventTypeInput): string | null {
   if (!KEY.test(input.key)) return "invalid key";
   if (!Object.values(input.name).some((n) => n?.trim())) return "a name is required";
   if (!input.subject?.trim()) return "a subject type is required";
-  const entries = Object.entries(input.fields);
-  if (!entries.length) return "at least one field is required";
-  if (entries.length > 40) return "too many fields";
-  for (const [k, s] of entries) {
-    if (!KEY.test(k) || k === "ts") return `invalid field key "${k}"`;
-    if (!(FIELD_TYPES as readonly string[]).includes(s.type)) return `invalid type for "${k}"`;
-    if (s.type === "quantity" && !s.units?.length) return `"${k}" needs at least one unit`;
-    if (s.min !== undefined && s.max !== undefined && s.min > s.max) return `"${k}": min is above max`;
-    if (s.enum && (s.type !== "string" || !s.enum.length)) return `invalid options for "${k}"`;
-  }
+  if (!Object.keys(input.fields).length) return "at least one field is required";
+  const err = checkFields(input.fields, FIELD_TYPES);
+  if (err) return err;
+  if (Object.values(input.fields).some((s) => s.format || s.schemaFrom)) return "schemas belong to object types";
   for (const k of Object.keys(input.fromSubject ?? {})) if (!input.fields[k]) return `unknown field "${k}"`;
+  for (const t of input.also ?? []) if (!TYPE.test(t) || t === input.subject) return `invalid linked type "${t}"`;
+  if ((input.also?.length ?? 0) > 5) return "too many linked types";
   return null;
 }
 
@@ -288,11 +288,11 @@ export async function saveEventType(db: TenantDb, author: Author, input: EventTy
     if (rows[0].n >= num(await getSettings(db.shared), "registers.types_max", 50)) throw new ManualEventError(429, "event type limit reached");
   }
   await db.query(
-    `insert into event_types (tenant_id, module, key, name, fields, subject, from_subject, field_order) values ($1, $2, $3, $4, $5, $6, $7, $8)
+    `insert into event_types (tenant_id, module, key, name, fields, subject, from_subject, field_order, also) values ($1, $2, $3, $4, $5, $6, $7, $8, $9)
      on conflict (tenant_id, module, key) where tenant_id is not null
      do update set name = excluded.name, fields = excluded.fields, subject = excluded.subject, from_subject = excluded.from_subject,
-                   field_order = excluded.field_order`,
-    [db.tenantId, CUSTOM, input.key, input.name, input.fields, input.subject, input.fromSubject ?? {}, Object.keys(input.fields)],
+                   field_order = excluded.field_order, also = excluded.also`,
+    [db.tenantId, CUSTOM, input.key, input.name, input.fields, input.subject, input.fromSubject ?? {}, Object.keys(input.fields), [...new Set(input.also ?? [])]],
   );
   const type = `${CUSTOM}.${input.key}`;
   await record(db, author, existing.length ? "event_type.update" : "event_type.create", { subject: type, data: { ...input } });
@@ -305,7 +305,7 @@ export async function saveEventType(db: TenantDb, author: Author, input: EventTy
 export const formSchema = (t: EventTypeInfo): Schema => ({ _ts: { type: "timestamp", required: true, label: { en: "Date", it: "Data" } }, ...t.fields });
 
 /** A value as form text: comma decimals, dates as yyyy-mm-dd. */
-function formText(spec: PropertySpec | undefined, v: unknown): Record<string, string> {
+export function formText(spec: PropertySpec | undefined, v: unknown): Record<string, string> {
   if (v === undefined || v === null) return {};
   const dec = (n: unknown) => (typeof n === "number" ? String(n).replace(".", ",") : "");
   if (spec?.type === "quantity") {
@@ -319,7 +319,7 @@ function formText(spec: PropertySpec | undefined, v: unknown): Record<string, st
 
 /** A recorded event back into form text, for "Repeat last" and corrections. */
 export function eventValues(t: EventTypeInfo, e: { ts: Date; payload: Record<string, unknown>; objectIds: string[] }): Record<string, string> {
-  const out: Record<string, string> = { _object: e.objectIds[0] ?? "", _ts: e.ts.toISOString().slice(0, 10) };
+  const out: Record<string, string> = { _object: e.objectIds[0] ?? "", _also: e.objectIds.slice(1).join(","), _ts: e.ts.toISOString().slice(0, 10) };
   for (const [k, s] of Object.entries(t.fields)) for (const [suffix, v] of Object.entries(formText(s, e.payload[k]))) out[k + suffix] = v;
   return out;
 }

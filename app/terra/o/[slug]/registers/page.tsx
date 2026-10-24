@@ -17,7 +17,10 @@ export default async function Registers(props: PageProps<"/terra/o/[slug]/regist
     <div>
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <h1 className="text-2xl font-semibold tracking-tight">{t.registers}</h1>
-        {ctx.author.role === "owner" && <Link href={`/terra/o/${slug}/registers/types`} className="text-xs text-frost hover:underline">+ {t.newType}</Link>}
+        <div className="flex gap-3 text-xs">
+          <Link href={`/terra/o/${slug}/registers/objects`} className="text-frost hover:underline">{t.objectTypes}</Link>
+          {ctx.author.role === "owner" && <Link href={`/terra/o/${slug}/registers/types`} className="text-frost hover:underline">+ {t.newType}</Link>}
+        </div>
       </div>
       {types.length ? (
         <ul className="mt-6 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">

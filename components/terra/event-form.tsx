@@ -1,6 +1,6 @@
 "use client";
 // Generic form for a typed event: one input per schema field, built from the event type's
-// schema (quantity = number plus unit, enum = select, timestamp = date). Values are plain text
+// schema (quantity = number plus unit, enum = select, timestamp = date, object = JSON). Values are plain text
 // (comma decimals allowed); the server action turns them into a payload with payloadFromForm
 // and validates it. Controlled from outside when a page fills fields (repeat last, defaults).
 import { useActionState, useState } from "react";
@@ -104,6 +104,8 @@ export function EventForm({
             input = <input {...common} inputMode={spec.type === "number" ? "decimal" : "numeric"} required={spec.required} className="mt-1 w-full" />;
           } else if (spec.type === "timestamp") {
             input = <input {...common} type="date" required={spec.required} className="mt-1 w-full" />;
+          } else if (spec.type === "object") {
+            input = <textarea {...common} rows={3} spellCheck={false} required={spec.required} placeholder="{ }" className="mt-1 w-full font-mono text-xs" />;
           } else if (spec.type === "boolean") {
             input = <input type="checkbox" name={k} checked={values[k] === "true"} onChange={(e) => set(k, String(e.target.checked))} className="mt-2 block" />;
           } else {

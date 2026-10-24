@@ -107,8 +107,9 @@ export async function tx<T>(pool: Pool, fn: (c: PoolClient) => Promise<T>): Prom
 
 /** Uses one connection for a batch; works with both the production Pool and an existing Client. */
 export async function inTransaction<T>(db: Db, fn: (connection: Db) => Promise<T>): Promise<T> {
-  const connect = (db as Db & { connect?: () => Promise<PoolClient> }).connect;
-  const client = connect ? await connect.call(db) : null;
+  // only a Pool hands out connections: a Client's connect() would try to open itself again
+  const pool = "totalCount" in db ? (db as unknown as { connect: () => Promise<PoolClient> }) : null;
+  const client = pool ? await pool.connect() : null;
   const connection = (client ?? db) as Db;
   try {
     await connection.query("begin");

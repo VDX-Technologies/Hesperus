@@ -135,12 +135,18 @@ describe("rules and alerts", () => {
     await push([msg("c", 20, 35)]);
     await push([msg("c", 21, 36)]);
     const { rows: [a] } = await db.query(`select id from object_alerts`);
+    // viewers see alerts but only owners and members acknowledge them
+    await asUser(db, USER, async () => {
+      await expect(db.query(`select ack_alert($1) ok`, [a.id])).rejects.toThrow("alert not found");
+    });
+    await db.query(`update memberships set role = 'member' where user_id = $1`, [USER]);
     await asUser(db, USER, async () => {
       expect((await db.query(`select ack_alert($1) ok`, [a.id])).rows[0].ok).toBe(true);
       expect((await db.query(`select ack_alert($1) ok`, [a.id])).rows[0].ok).toBe(false);
       await expect(db.query(`update object_alerts set status = 'resolved'`)).resolves.toMatchObject({ rowCount: 0 });
       expect((await db.query(`select status, acked_by from object_alerts`)).rows).toEqual([{ status: "acknowledged", acked_by: USER }]);
     }); // rolled back: the session ends
+    await db.query(`update memberships set role = 'viewer' where user_id = $1`, [USER]);
     await db.query(`update object_alerts set status = 'acknowledged'`);
     await push([msg("c", 22, 20)]);
     expect((await alerts("c")).map((x) => x.status)).toEqual(["resolved"]);

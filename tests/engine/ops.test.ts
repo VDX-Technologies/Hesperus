@@ -30,7 +30,7 @@ describe("operations", () => {
     expect(o.figures.yieldKg.value).toBe(9000);
     expect(o.figures.liters.value).toBe(6);
     expect(o.figures.kilos.value).toBe(3);
-    expect(o.figures.area.value).toBe(6);
+    expect(o.figures.area.value).toBe(4); // treated area only
     expect(o.registers.map((r) => [r.type, r.n.value])).toEqual([
       ["agronomy.treatment", 2], ["agronomy.sowing", 0], ["agronomy.harvest", 1], ["custom.pruning", 1],
     ]);

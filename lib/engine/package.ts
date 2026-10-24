@@ -16,6 +16,10 @@ export interface PropertySpec {
   label?: Record<string, string>;
   /** Text for enum values, {value: {"en": ..., "it": ...}}; ignored by validation. */
   options?: Record<string, Record<string, string>>;
+  /** "schema": an object property holding a field schema itself (a project's result fields). */
+  format?: "schema";
+  /** "link.property": an object property validated against the schema held by the linked object. */
+  schemaFrom?: string;
 }
 
 export interface ObjectTypeDef {
@@ -33,6 +37,8 @@ export interface EventTypeDef {
   subject?: string;
   /** Fields filled in from the chosen object: {field: property}. */
   fromSubject?: Record<string, string>;
+  /** Other object types an event may be linked to after its subject (a run's datasets). */
+  also?: string[];
 }
 
 export interface MetricDef {

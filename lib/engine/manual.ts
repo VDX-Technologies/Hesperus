@@ -50,6 +50,8 @@ export interface EventSpec {
   fields: Schema;
   /** Object type ("agronomy.crop") every object of the event must have. */
   subject?: string | null;
+  /** Object types the objects after the first may also have (a run's datasets, after its project). */
+  also?: string[];
   /** Registered before the first event, when the type comes from a package. */
   pkg?: ModulePackage;
 }
@@ -57,7 +59,7 @@ export interface EventSpec {
 const specOf = (pkg: ModulePackage, key: string): EventSpec => {
   const def = pkg.eventTypes?.find((t) => t.key === key);
   if (!def) throw new ManualEventError(400, `unknown event type "${key}"`);
-  return { type: `${pkg.id}.${key}`, module: pkg.id, fields: def.fields, subject: def.subject, pkg };
+  return { type: `${pkg.id}.${key}`, module: pkg.id, fields: def.fields, subject: def.subject, also: def.also, pkg };
 };
 
 type EventInput = { ts: Date; payload: Record<string, unknown>; objectIds: string[] };
@@ -73,16 +75,20 @@ async function check(db: TenantDb, spec: EventSpec, author: Author, input: Event
   if (!ids.length) throw new ManualEventError(400, "an event needs at least one object");
   if (ids.length > num(settings, "manual.max_objects", 20)) throw new ManualEventError(400, "too many objects");
   if (ids.some((id) => !/^[0-9a-f-]{36}$/i.test(id))) throw new ManualEventError(404, "object not found");
-  const { rows } = await db.query<{ n: number; ok: number; archived: number }>(
-    `select count(*)::int n,
-            count(*) filter (where $3::text is null or t.module || '.' || t.key = $3)::int ok,
-            count(*) filter (where o.properties->>'status' = 'archived')::int archived
+  const { rows } = await db.query<{ id: string; type: string; archived: boolean }>(
+    `select o.id, t.module || '.' || t.key type, coalesce(o.properties->>'status' = 'archived', false) archived
        from objects o join object_types t on t.id = o.type_id where o.tenant_id = $1 and o.id = any($2::uuid[])`,
-    [db.tenantId, ids, spec.subject ?? null],
+    [db.tenantId, ids],
   );
-  if (rows[0].n !== ids.length) throw new ManualEventError(404, "object not found");
-  if (rows[0].ok !== ids.length) throw new ManualEventError(400, `objects must be of type "${spec.subject}"`);
-  if (rows[0].archived) throw new ManualEventError(409, "object is archived");
+  if (rows.length !== ids.length) throw new ManualEventError(404, "object not found");
+  // the first object is the subject; the others are of the subject's type or of one the type also takes
+  if (spec.subject) {
+    const typeOf = new Map(rows.map((r) => [r.id, r.type]));
+    const others = [spec.subject, ...(spec.also ?? [])];
+    if (typeOf.get(ids[0]) !== spec.subject || ids.slice(1).some((id) => !others.includes(typeOf.get(id)!)))
+      throw new ManualEventError(400, `objects must be of type "${spec.subject}"`);
+  }
+  if (rows.some((r) => r.archived)) throw new ManualEventError(409, "object is archived");
 
   const day = await db.query<{ n: number }>(
     `select count(*)::int n from events where tenant_id = $1 and author is not null and recorded_at > $2::timestamptz - interval '1 day'`,

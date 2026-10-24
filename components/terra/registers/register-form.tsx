@@ -8,6 +8,8 @@ import type { Schema } from "@/lib/engine/schema";
 import { recordEntry } from "@/app/terra/o/[slug]/registers/actions";
 
 export type ObjectOption = { id: string; label: string; values: Record<string, string> };
+/** Objects of one `also` type the entry can be linked to besides its subject. */
+export type AlsoOption = { type: string; label: string; objects: { id: string; label: string }[] };
 
 const today = () => {
   const d = new Date();
@@ -15,12 +17,13 @@ const today = () => {
 };
 
 export function RegisterForm({
-  slug, type, schema, objects, last, initial, editId, suggestions, fieldLabels, optionLabels, labels, text,
+  slug, type, schema, objects, also = [], last, initial, editId, suggestions, fieldLabels, optionLabels, labels, text,
 }: {
   slug: string;
   type: string;
   schema: Schema;
   objects: ObjectOption[];
+  also?: AlsoOption[];
   /** Values of the user's last entry, for "Repeat last". */
   last: EventFormValues | null;
   /** Values of the entry being corrected. */
@@ -63,6 +66,25 @@ export function RegisterForm({
               ))}
             </select>
             <span className="mt-1 block text-xs text-dim">{text.comma}</span>
+            {also.map((a) => {
+              const own = new Set(a.objects.map((o) => o.id));
+              const chosen = (values._also ?? "").split(",").filter(Boolean);
+              return (
+                <span key={a.type} className="mt-3 block">
+                  <span className="text-dim">{a.label}</span>
+                  <select
+                    name="_also"
+                    multiple
+                    value={chosen.filter((id) => own.has(id))}
+                    onChange={(e) => set("_also", [...chosen.filter((id) => !own.has(id)), ...[...e.target.selectedOptions].map((o) => o.value)].join(","))}
+                    className="mt-1 w-full"
+                    size={Math.min(5, Math.max(2, a.objects.length))}
+                  >
+                    {a.objects.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
+                  </select>
+                </span>
+              );
+            })}
           </label>
         }
       />
