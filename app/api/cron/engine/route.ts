@@ -1,7 +1,7 @@
 /**
  * GET /api/cron/engine - the hourly maintenance (raw_inbox flush, then health) as a route, so it
- * does not depend on GitHub Actions alone. Called by Vercel Cron (vercel.json; once a day on the
- * Hobby plan) and by any external scheduler, with `Authorization: Bearer $CRON_SECRET`. Safe
+ * does not depend on GitHub Actions alone. Called hourly by an external scheduler (cron-job.org)
+ * with `Authorization: Bearer $CRON_SECRET`. Safe
  * next to scripts/flush-raw.ts and scripts/health.ts: the flush claims rows with skip locked and
  * a repeated health run only re-mails problems that are due.
  */
