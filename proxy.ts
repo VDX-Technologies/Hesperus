@@ -1,5 +1,9 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
+
+// reachable without signing in
+const PUBLIC = /^\/(?:login|status)(?:\/|$)/;
+
 function contentSecurityPolicy(nonce: string) {
   const dev = process.env.NODE_ENV === "development";
   let supabaseOrigin = "";
@@ -55,7 +59,7 @@ export async function proxy(request: NextRequest) {
   // Avoid initializing Supabase on signed-out visits. Protected pages still verify the JWT
   // in requireUser(), and authenticated requests still refresh cookies below when needed.
   if (!hasSessionCookie) {
-    if (path.startsWith("/login")) return response;
+    if (PUBLIC.test(path)) return response;
     return loginRedirect();
   }
   const supabase = createServerClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!, {
@@ -74,7 +78,7 @@ export async function proxy(request: NextRequest) {
   // getClaims refreshes the session when needed and verifies the JWT without calling the auth server
   const { data } = await supabase.auth.getClaims();
   const user = data?.claims.sub;
-  if (!user && !path.startsWith("/login")) return loginRedirect();
+  if (!user && !PUBLIC.test(path)) return loginRedirect();
   return response;
 }
 

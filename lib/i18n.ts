@@ -497,6 +497,13 @@ const en = {
   webhookSecretHint: "Each webhook post carries X-VDX-Timestamp and X-VDX-Signature: sha256=HMAC-SHA256(key, timestamp + \".\" + body). Check it and refuse old timestamps.",
   noPipeline: "No pipeline sends to this project yet: create its token with scripts/create-research-source.ts.",
   sourceStatus_active: "active", sourceStatus_paused: "paused", sourceStatus_error: "error",
+  statusTitle: "Platform status",
+  statusOverall_ok: "All systems operational", statusOverall_degraded: "Some systems are degraded",
+  statusOverall_down: "Major outage", statusOverall_unknown: "Status unknown",
+  statusLevel_ok: "Operational", statusLevel_degraded: "Degraded", statusLevel_down: "Outage", statusLevel_unknown: "Unknown",
+  statusComponent_database: "Database", statusComponent_ingest: "Data ingestion",
+  statusComponent_storage: "File storage", statusComponent_monitoring: "Monitoring",
+  statusCheckedAt: "Last check", statusRefresh: "Updated every minute.",
 };
 export type Dict = typeof en;
 
@@ -994,6 +1001,13 @@ const it: Dict = {
   webhookSecretHint: "Ogni invio al webhook porta X-VDX-Timestamp e X-VDX-Signature: sha256=HMAC-SHA256(chiave, timestamp + \".\" + corpo). Verificala e rifiuta i timestamp vecchi.",
   noPipeline: "Nessuna pipeline invia ancora a questo progetto: crea il suo token con scripts/create-research-source.ts.",
   sourceStatus_active: "attiva", sourceStatus_paused: "in pausa", sourceStatus_error: "in errore",
+  statusTitle: "Stato della piattaforma",
+  statusOverall_ok: "Tutti i sistemi sono operativi", statusOverall_degraded: "Alcuni sistemi sono degradati",
+  statusOverall_down: "Disservizio grave", statusOverall_unknown: "Stato sconosciuto",
+  statusLevel_ok: "Operativo", statusLevel_degraded: "Degradato", statusLevel_down: "Non disponibile", statusLevel_unknown: "Sconosciuto",
+  statusComponent_database: "Database", statusComponent_ingest: "Ricezione dati",
+  statusComponent_storage: "Archivio file", statusComponent_monitoring: "Monitoraggio",
+  statusCheckedAt: "Ultimo controllo", statusRefresh: "Aggiornato ogni minuto.",
 };
 
 const DICTS: Record<Locale, Dict> = { en, it };

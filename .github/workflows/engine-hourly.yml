@@ -4,8 +4,6 @@
 name: engine-hourly
 
 on:
-  schedule:
-    - cron: "5 * * * *" # a few minutes after the hour closes
   workflow_dispatch:
 
 concurrency: engine-hourly
