@@ -53,3 +53,24 @@ export async function flushRawInbox(pool: Pool, store: ObjectStore, now = new Da
 export function readArchive(gz: Uint8Array): { received_at: string; body: Record<string, unknown> }[] {
   return gunzipSync(gz).toString("utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l));
 }
+
+/**
+ * Deletes document bytes (docs/...) no documents row points at: left by a request that stored the
+ * file and then failed, or by a deleted document. Only objects older than grace go, so a request
+ * still between putNew and its insert keeps its file; each batch is checked against the table
+ * right before its deletes.
+ */
+export async function sweepOrphanDocuments(pool: Pool, store: ObjectStore, now = new Date(), graceMs = 24 * 3600_000) {
+  const old = (await store.entries("docs/")).filter((e) => now.getTime() - e.modified.getTime() > graceMs);
+  const deleted: string[] = [];
+  for (let i = 0; i < old.length; i += 500) {
+    const keys = old.slice(i, i + 500).map((e) => e.key);
+    const { rows } = await pool.query<{ storage_key: string }>(`select storage_key from documents where storage_key = any($1)`, [keys]);
+    const used = new Set(rows.map((r) => r.storage_key));
+    for (const key of keys.filter((k) => !used.has(k))) {
+      await store.delete(key);
+      deleted.push(key);
+    }
+  }
+  return { checked: old.length, deleted };
+}

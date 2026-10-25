@@ -2,9 +2,10 @@
 // rows go through the push path (raw archive, normalize, metrics, events, rules) in batches.
 // The same bytes uploaded twice to one source are refused, so a retry never doubles events.
 import { createHash } from "node:crypto";
-import { forTenant, inTransaction, type Db, type TenantDb } from "./db";
+import { forTenant, inTransaction, lockTenant, type Db, type TenantDb } from "./db";
 import type { ModulePackage } from "./package";
 import type { ObjectStore } from "./store";
+import { sniffType } from "./mime";
 import type { Source } from "./sources";
 import { decodeText, extract, ExtractLimitError } from "./extract";
 import { ConnectorError, uploadConnector, uploadConfig, type UploadConfig } from "./connectors";
@@ -57,11 +58,8 @@ export async function ingestUpload(
 
   if (!file.bytes.length) throw new ConnectorError(400, "file is empty");
   if (file.bytes.length > maxBytes) throw new ConnectorError(413, `file too large (max ${maxBytes} bytes)`);
-  const { rows: day } = await tdb.query<{ n: number }>(
-    `select count(*)::int n from documents where tenant_id = $1 and source_id = $2 and created_at > $3::timestamptz - interval '1 day'`,
-    [source.tenant_id, source.id, now],
-  );
-  if (!options.replaceDocumentId && day[0].n >= perDay) throw new ConnectorError(429, `too many uploads (max ${perDay} per day)`);
+  const overLimit = async (c: TenantDb) => !options.replaceDocumentId && (await documentsToday(c, source, now)) >= perDay;
+  if (await overLimit(tdb)) throw new ConnectorError(429, `too many uploads (max ${perDay} per day)`);
 
   const sha256 = createHash("sha256").update(file.bytes).digest("hex");
   const dup = await tdb.query(`select 1 from documents where tenant_id = $1 and source_id = $2 and sha256 = $3 and ($4::uuid is null or id <> $4)`, [
@@ -86,7 +84,8 @@ export async function ingestUpload(
 
   // Content-addressed key: putNew refuses an existing key, which also catches a concurrent retry.
   const key = `docs/${source.tenant_id}/${source.id}/${sha256}-${safeName(file.name)}`;
-  const contentType = file.type || (found.format === "csv" ? "text/csv" : "application/octet-stream");
+  // stored under the type its bytes show, never the one the browser claims
+  const contentType = sniffType(file.bytes, found.format === "csv" ? "text/csv" : file.type);
   // the archive never overwrites: a file deleted and loaded again finds its bytes already there
   if (await store.putNew(key, file.bytes, contentType)) await db.query(`select engine_count('r2.writes', 1, $1)`, [now]);
   else if ((await tdb.query(
@@ -103,6 +102,9 @@ export async function ingestUpload(
   try {
     const committed = await inTransaction(db, async (connection) => {
       const txdb = forTenant(connection, source.tenant_id);
+      // counted again under the lock: concurrent uploads cannot both take the last slot
+      await lockTenant(connection, source.tenant_id, `documents:${source.id}`);
+      if (await overLimit(txdb)) throw new ConnectorError(429, `too many uploads (max ${perDay} per day)`);
       if (options.replaceDocumentId) {
         const removed = await txdb.query(
           `delete from documents where tenant_id = $1 and id = $2 and source_id = $3 and metadata->>'kind' = 'upload' returning id`,
@@ -305,3 +307,12 @@ export async function reprocessUpload(
 }
 
 export { uploadConfig, decodeText };
+
+/** Documents a source stored in the day before now. */
+export async function documentsToday(db: TenantDb, source: Source, now: Date) {
+  const { rows } = await db.query<{ n: number }>(
+    `select count(*)::int n from documents where tenant_id = $1 and source_id = $2 and created_at > $3::timestamptz - interval '1 day'`,
+    [source.tenant_id, source.id, now],
+  );
+  return rows[0].n;
+}

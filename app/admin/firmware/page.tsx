@@ -5,6 +5,7 @@ import { getT, timeAgo } from "@/lib/i18n";
 import { crossTenantAccess, crossTenantDb } from "@/lib/engine/db";
 import { recordPlatform } from "@/lib/engine/audit";
 import { storeFromEnv } from "@/lib/engine/store";
+import { metered } from "@/lib/engine/health";
 import { addRelease, deleteRelease, FirmwareError, listReleases, setCurrent } from "@/lib/engine/firmware";
 import { SectionTitle } from "@/components/ui";
 import { ConfirmButton } from "@/components/confirm-button";
@@ -27,18 +28,20 @@ async function upload(formData: FormData) {
   const version = String(formData.get("version") ?? "").trim();
   let release;
   try {
-    release = await addRelease(db(), storeFromEnv(), {
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    release = await metered(db(), storeFromEnv(), (store) => addRelease(db(), store, {
       version,
-      bytes: new Uint8Array(await file.arrayBuffer()),
+      bytes,
+      signature: String(formData.get("signature") ?? ""),
       notes: String(formData.get("notes") ?? ""),
       current: formData.get("current") === "1",
       userId: user.id,
-    });
+    }));
   } catch (e) {
     if (e instanceof FirmwareError) return flash(`error: ${e.message}`);
     throw e;
   }
-  await recordPlatform(db(), user, "firmware.upload", { version, md5: release.md5, size: release.size, current: release.current });
+  await recordPlatform(db(), user, "firmware.upload", { version, sha256: release.sha256, signed: !!release.signature, size: release.size, current: release.current });
   await flash(`uploaded:${version}`);
 }
 
@@ -95,6 +98,11 @@ export default async function FirmwarePage() {
           <input name="version" placeholder="1.2.0" pattern="\d{1,3}\.\d{1,3}\.\d{1,3}" required className="num w-32" />
         </label>
         <label className="grid gap-1">
+          <span>{t.firmwareSignature}</span>
+          <input name="signature" placeholder="base64" className="num" autoComplete="off" />
+          <span className="text-xs text-dim">{t.firmwareSignatureHelp}</span>
+        </label>
+        <label className="grid gap-1">
           <span>{t.firmwareNotes}</span>
           <textarea name="notes" rows={2} />
         </label>
@@ -135,7 +143,8 @@ export default async function FirmwarePage() {
               </form>
             )}
             <span className="num w-20 text-xs text-dim">{kb(r.size)}</span>
-            <span className="num hidden text-xs text-dim sm:inline" title="MD5">{r.md5.slice(0, 8)}</span>
+            <span className="num hidden text-xs text-dim sm:inline" title={r.sha256 ? "SHA-256" : "MD5"}>{(r.sha256 ?? r.md5).slice(0, 8)}</span>
+            <span className={`text-xs ${r.signature ? "text-ok" : "text-warn"}`}>{r.signature ? t.firmwareSigned : t.firmwareUnsigned}</span>
             <span className="min-w-0 flex-1 truncate text-xs text-mist">{r.notes}</span>
             <span className="num w-28 text-xs text-dim">{timeAgo(r.created_at.toISOString(), locale, t)}</span>
             <form action={remove}>

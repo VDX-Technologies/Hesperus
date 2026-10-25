@@ -1,9 +1,9 @@
 // Two tenants on one pool: the TenantDb guard refuses unscoped queries, and every console,
 // series and rules read for org A returns nothing of org B.
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import type { Client } from "pg";
+import { Pool, type Client } from "pg";
 import { freshDb } from "../db/setup";
-import { forTenant, TenantScopeError } from "../../lib/engine/db";
+import { forTenant, inTransaction, TenantScopeError } from "../../lib/engine/db";
 import { createSource } from "../../lib/engine/sources";
 import { ingestPush, registerPackage } from "../../lib/engine/ingest";
 import { series } from "../../lib/engine/query";
@@ -14,6 +14,7 @@ vi.mock("server-only", () => ({}));
 const { listObjects, listAlerts, countOpenAlerts } = await import("../../lib/packages/console");
 
 let db: Client;
+let pool: Pool;
 let drop: () => Promise<void>;
 const A = "00000000-0000-0000-0000-00000000000a";
 const B = "00000000-0000-0000-0000-00000000000b";
@@ -21,7 +22,9 @@ const NOW = new Date();
 let objB: string;
 
 beforeAll(async () => {
-  ({ db, drop } = await freshDb());
+  const f = await freshDb();
+  ({ db, drop } = f);
+  pool = new Pool({ connectionString: f.url, max: 2 });
   await db.query(`insert into organizations (id, name, slug) values ($1, 'A', 'a'), ($2, 'B', 'b')`, [A, B]);
   await registerPackage(db, testPkg);
   for (const org of [A, B]) {
@@ -31,7 +34,10 @@ beforeAll(async () => {
   }
   objB = (await db.query(`select id from objects where tenant_id = $1`, [B])).rows[0].id;
 });
-afterAll(async () => drop?.());
+afterAll(async () => {
+  await pool?.end();
+  await drop?.();
+});
 
 describe("TenantDb guard", () => {
   it("refuses queries that do not name tenant_id", async () => {
@@ -43,6 +49,37 @@ describe("TenantDb guard", () => {
   });
   it("requires a tenant id", () => {
     expect(() => forTenant(db, "")).toThrow(TenantScopeError);
+  });
+});
+
+describe("RLS on the direct pool", () => {
+  // queries the guard lets through but that would read org B without the database policy
+  const leaky = `select b.tenant_id from objects a join objects b on true where a.tenant_id = $1 or $1 is not null`;
+  it("limits every table of a tenant query to that tenant", async () => {
+    const { rows } = await forTenant(pool, A).query(leaky, [A]);
+    expect(rows.length).toBeGreaterThan(0);
+    expect(rows.every((r) => r.tenant_id === A)).toBe(true);
+  });
+  it("applies inside a transaction and follows a change of tenant", async () => {
+    await inTransaction(pool, async (c) => {
+      expect((await forTenant(c, B).query(leaky, [B])).rows.every((r) => r.tenant_id === B)).toBe(true);
+      expect((await forTenant(c, A).query(leaky, [A])).rows.every((r) => r.tenant_id === A)).toBe(true);
+    });
+  });
+  it("refuses writes into another tenant", async () => {
+    await expect(forTenant(pool, A).query(
+      `update objects set name = 'x' where tenant_id = $1 or id = $2`, [A, objB],
+    )).resolves.toBeDefined();
+    expect((await db.query(`select name from objects where id = $1`, [objB])).rows[0].name).not.toBe("x");
+    await expect(forTenant(pool, A).query(
+      `insert into links (tenant_id, type, src_id, dst_id) select $1, 'x', id, id from objects where tenant_id = $1 and false
+       union all select $2::uuid, 'x', $3::uuid, $3::uuid`, [A, B, objB],
+    )).rejects.toThrow(/row-level security/);
+  });
+  it("leaves the privileged pool untouched afterwards", async () => {
+    const { rows } = await pool.query(`select current_user u, current_setting('app.tenant_id', true) t`);
+    expect(rows[0].u).toBe("postgres");
+    expect(rows[0].t || null).toBeNull();
   });
 });
 

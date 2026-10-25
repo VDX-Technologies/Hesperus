@@ -1,3 +1,6 @@
+# The same work runs as GET /api/cron/engine (Vercel Cron daily, or an external hourly scheduler),
+# so a stalled Actions schedule is not the only path. /api/health turns 503 when health is older
+# than 2h: point an uptime monitor at it.
 name: engine-hourly
 
 on:

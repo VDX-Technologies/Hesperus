@@ -7,6 +7,7 @@ import { ConnectorError } from "@/lib/engine/connectors";
 import { extract, ExtractLimitError, type FileFormat } from "@/lib/engine/extract";
 import { getSettings, num } from "@/lib/engine/settings";
 import { storeFromEnv } from "@/lib/engine/store";
+import { metered } from "@/lib/engine/health";
 import { deleteUpload, ingestUpload, knownSubjects, reprocessUpload, saveUploadConfig, uploadConfig, uploadSources, type UploadResult } from "@/lib/engine/upload";
 import { readMemory, recognize, type Recognition } from "@/lib/packages/records/recognize";
 import { getPackage } from "@/lib/packages";
@@ -33,14 +34,16 @@ export async function uploadFile(_prev: UploadState, formData: FormData): Promis
   for (const [k, v] of formData) if (k.startsWith("map_") && typeof v === "string" && v) mapping[k.slice(4)] = v;
   try {
     await saveUploadConfig(tdb, source.id, { mapping }, user);
-    const r = await ingestUpload(
-      crossTenantDb(crossTenantAccess.ingest),
-      storeFromEnv(),
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    const ingestDb = crossTenantDb(crossTenantAccess.ingest);
+    const r = await metered(ingestDb, storeFromEnv(), (store) => ingestUpload(
+      ingestDb,
+      store,
       { ...source, config: { ...source.config, mapping } },
-      { name: file.name, type: file.type, bytes: new Uint8Array(await file.arrayBuffer()) },
+      { name: file.name, type: file.type, bytes },
       pkg,
       user,
-    );
+    ));
     revalidatePath(`/terra/o/${slug}`, "layout");
     return { result: { table: r.table, register: r.register, rows: r.rows, accepted: r.accepted, rejected: r.rejected, metrics: r.metrics, events: r.events } };
   } catch (e) {
@@ -106,7 +109,8 @@ export async function reprocessDocument(formData: FormData) {
   const { user, org, slug, back } = await owner(formData);
   let to: string;
   try {
-    const r = await reprocessUpload(crossTenantDb(crossTenantAccess.ingest), storeFromEnv(), org.id, String(formData.get("id")), getPackage, user);
+    const ingestDb = crossTenantDb(crossTenantAccess.ingest);
+    const r = await metered(ingestDb, storeFromEnv(), (store) => reprocessUpload(ingestDb, store, org.id, String(formData.get("id")), getPackage, user));
     to = `${back}?done=reprocessed&n=${r.events}`;
   } catch (e) {
     if (!(e instanceof ConnectorError)) console.error("reprocess failed", e);

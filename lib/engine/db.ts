@@ -1,11 +1,13 @@
 // Plain Postgres access for the engine (no provider SDK): DATABASE_URL is any Postgres,
 // on Supabase the transaction pooler (port 6543) for serverless, direct for jobs.
-// The pool bypasses RLS, so application scoping is defense in depth, not a database boundary.
-// It is only handed out two ways:
-//   tenantDb(id)          every query must name tenant_id and bind that tenant as $1
-//   crossTenantDb(capability) an explicit capability for a reviewed cross-tenant call site
-// The tenant SQL guard is a heuristic; this privileged pool bypasses RLS and neither helper is
-// a database security boundary. Keep crossTenantAccess use audited and validate authorization first.
+// The pool's own role bypasses RLS. It is only handed out two ways:
+//   tenantDb(id)          every query runs as DATABASE_TENANT_ROLE (vdx_engine, no bypassrls) with
+//                         app.tenant_id set, so RLS limits it to that tenant (migration engine_rls);
+//                         the SQL guard (tenant_id = $1) stays as a linter on top
+//   crossTenantDb(capability) the privileged pool, for a reviewed cross-tenant call site
+// On a connection inside inTransaction/tx the role and tenant are set once per transaction (and
+// again when the tenant changes); a plain Client outside them (scripts, tests) gets the guard only.
+// Keep crossTenantAccess use audited and validate authorization first.
 import { Pool, type PoolClient } from "pg";
 
 export type Db = { query: Pool["query"] };
@@ -30,7 +32,40 @@ function scopedTenantStatement(sql: string) {
   return predicate || insert;
 }
 
-/** Refuses common accidentally unscoped queries; this heuristic does not replace database RLS. */
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const ROLE = /^[a-z_][a-z0-9_]*$/;
+
+/** Connections inside inTransaction/tx, with the tenant whose RLS context is set (null: none yet). */
+const transactions = new WeakMap<object, string | null>();
+
+const isPool = (db: Db): db is Db & Pick<Pool, "connect"> => "totalCount" in db;
+
+/** The statements that put the current transaction under RLS for a tenant, or null when disabled. */
+function rlsContext(tenantId: string): string | null {
+  const role = process.env.DATABASE_TENANT_ROLE ?? "vdx_engine";
+  if (role === "off") return null;
+  if (!ROLE.test(role)) throw new TenantScopeError("invalid DATABASE_TENANT_ROLE");
+  if (!UUID.test(tenantId)) throw new TenantScopeError("tenant id must be a uuid");
+  return `set local role ${role}; set local app.tenant_id = '${tenantId}'`;
+}
+
+/** Runs one query on a pooled connection in its own transaction, under the tenant's RLS context. */
+async function onPool(pool: Pick<Pool, "connect">, context: string, text: string, values?: unknown[]) {
+  const c = await pool.connect();
+  try {
+    await c.query(`begin; ${context}`);
+    const result = await c.query(text, values);
+    await c.query("commit");
+    return result;
+  } catch (e) {
+    await c.query("rollback").catch(() => undefined);
+    throw e;
+  } finally {
+    c.release();
+  }
+}
+
+/** A Db for one tenant: RLS on the database side, plus a guard refusing common unscoped queries. */
 export function forTenant(db: Db, tenantId: string): TenantDb {
   if (!tenantId) throw new TenantScopeError("tenant id is required");
   const query = ((sql: unknown, params?: unknown[]) => {
@@ -40,7 +75,16 @@ export function forTenant(db: Db, tenantId: string): TenantDb {
     if (!TENANT_COLUMN.test(text) || !scopedTenantStatement(text))
       return Promise.reject(new TenantScopeError(`query must bind tenant_id to $1: ${text.slice(0, 80)}`));
     if (values?.[0] !== tenantId) return Promise.reject(new TenantScopeError("$1 must be the bound tenant id"));
-    return db.query(text, values);
+    const inTx = transactions.has(db);
+    if (!inTx && !isPool(db)) return db.query(text, values);
+    let context: string | null;
+    try { context = rlsContext(tenantId); } catch (e) { return Promise.reject(e); }
+    if (!context) return db.query(text, values);
+    if (!inTx && isPool(db)) return onPool(db, context, text, values);
+    if (transactions.get(db) === tenantId) return db.query(text, values);
+    // both queued now, in order, so a concurrent query for another tenant cannot slip in between
+    transactions.set(db, tenantId);
+    return Promise.all([db.query(context), db.query(text, values)]).then(([, result]) => result);
   }) as Db["query"];
   return { tenantId, query, shared: db };
 }
@@ -94,6 +138,7 @@ export async function tx<T>(pool: Pool, fn: (c: PoolClient) => Promise<T>): Prom
   const c = await pool.connect();
   try {
     await c.query("begin");
+    transactions.set(c, null);
     const out = await fn(c);
     await c.query("commit");
     return out;
@@ -101,6 +146,7 @@ export async function tx<T>(pool: Pool, fn: (c: PoolClient) => Promise<T>): Prom
     await c.query("rollback");
     throw e;
   } finally {
+    transactions.delete(c);
     c.release();
   }
 }
@@ -108,18 +154,39 @@ export async function tx<T>(pool: Pool, fn: (c: PoolClient) => Promise<T>): Prom
 /** Uses one connection for a batch; works with both the production Pool and an existing Client. */
 export async function inTransaction<T>(db: Db, fn: (connection: Db) => Promise<T>): Promise<T> {
   // only a Pool hands out connections: a Client's connect() would try to open itself again
-  const pool = "totalCount" in db ? (db as unknown as { connect: () => Promise<PoolClient> }) : null;
-  const client = pool ? await pool.connect() : null;
+  const client = isPool(db) ? await db.connect() : null;
   const connection = (client ?? db) as Db;
+  // inside an outer transaction on the same connection: a savepoint, so the outer one stays open
+  // and keeps its own RLS bookkeeping
+  const owner = !transactions.has(connection);
   try {
-    await connection.query("begin");
+    await connection.query(owner ? "begin" : "savepoint nested");
+    if (owner) transactions.set(connection, null);
     const result = await fn(connection);
-    await connection.query("commit");
+    await connection.query(owner ? "commit" : "release savepoint nested");
     return result;
   } catch (e) {
-    await connection.query("rollback").catch(() => undefined);
+    await connection.query(owner ? "rollback" : "rollback to savepoint nested").catch(() => undefined);
     throw e;
   } finally {
+    if (owner) transactions.delete(connection);
     client?.release();
   }
+}
+
+/**
+ * Takes a per-tenant advisory lock on key until the current transaction ends, so a
+ * count-then-insert limit check cannot be passed by two concurrent requests.
+ */
+export async function lockTenant(connection: Db, tenantId: string, key: string) {
+  if (!transactions.has(connection)) throw new Error("lockTenant needs a transaction");
+  await connection.query("select pg_advisory_xact_lock(hashtextextended($1, 0))", [`${tenantId}:${key}`]);
+}
+
+/** Runs fn in a transaction holding lockTenant(key). */
+export function withTenantLock<T>(db: TenantDb, key: string, fn: (txdb: TenantDb) => Promise<T>): Promise<T> {
+  return inTransaction(db.shared, async (connection) => {
+    await lockTenant(connection, db.tenantId, key);
+    return fn(forTenant(connection, db.tenantId));
+  });
 }

@@ -1,7 +1,8 @@
 // Object storage for the immutable raw archive. R2 (or any S3 API) in production, a local folder in development, memory in
-// tests. Writes never overwrite: put fails with "exists" so the caller picks another key.
-import { PutObjectCommand, GetObjectCommand, ListObjectsV2Command, S3Client } from "@aws-sdk/client-s3";
-import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
+// tests. Writes never overwrite: put fails with "exists" so the caller picks another key. Only the
+// orphan sweep deletes (sweepOrphanDocuments, lib/engine/archive.ts).
+import { DeleteObjectCommand, GetObjectCommand, ListObjectsV2Command, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, join, relative, resolve, sep } from "node:path";
 
 export interface ObjectStore {
@@ -11,20 +12,36 @@ export interface ObjectStore {
   list(prefix: string): Promise<string[]>;
   /** Total objects and bytes under prefix. */
   usage(prefix: string): Promise<{ objects: number; bytes: number }>;
+  /** Keys under prefix with their size and when they were written. */
+  entries(prefix: string): Promise<StoreEntry[]>;
+  /** Removes key; a missing key is not an error. */
+  delete(key: string): Promise<void>;
 }
+
+export interface StoreEntry { key: string; size: number; modified: Date }
 
 export interface StoreOps {
   writes: number; // class A: put, list
   reads: number; // class B: get
+  bytes: number; // written by successful putNew
+  objects: number; // created by successful putNew
 }
 
-/** Counts the operations made through a store, for the monthly quota (engine_usage). */
+/**
+ * Counts the operations made through a store, for the monthly quota (engine_usage), and the bytes
+ * it added, for the storage size (engine_gauges).
+ */
 export class MeteredStore implements ObjectStore {
-  ops: StoreOps = { writes: 0, reads: 0 };
+  ops: StoreOps = { writes: 0, reads: 0, bytes: 0, objects: 0 };
   constructor(private inner: ObjectStore) {}
-  putNew(key: string, body: Uint8Array, contentType: string) {
+  async putNew(key: string, body: Uint8Array, contentType: string) {
     this.ops.writes++;
-    return this.inner.putNew(key, body, contentType);
+    const created = await this.inner.putNew(key, body, contentType);
+    if (created) {
+      this.ops.bytes += body.length;
+      this.ops.objects++;
+    }
+    return created;
   }
   get(key: string) {
     this.ops.reads++;
@@ -38,13 +55,23 @@ export class MeteredStore implements ObjectStore {
     this.ops.writes++;
     return this.inner.usage(prefix);
   }
+  entries(prefix: string) {
+    this.ops.writes++;
+    return this.inner.entries(prefix);
+  }
+  // deletes are free on R2
+  delete(key: string) {
+    return this.inner.delete(key);
+  }
 }
 
 export class MemoryStore implements ObjectStore {
   objects = new Map<string, Uint8Array>();
+  modified = new Map<string, Date>();
   async putNew(key: string, body: Uint8Array) {
     if (this.objects.has(key)) return false;
     this.objects.set(key, body);
+    this.modified.set(key, new Date());
     return true;
   }
   async get(key: string) {
@@ -56,6 +83,13 @@ export class MemoryStore implements ObjectStore {
   async usage(prefix: string) {
     const keys = await this.list(prefix);
     return { objects: keys.length, bytes: keys.reduce((n, k) => n + this.objects.get(k)!.length, 0) };
+  }
+  async entries(prefix: string) {
+    return (await this.list(prefix)).map((key) => ({ key, size: this.objects.get(key)!.length, modified: this.modified.get(key)! }));
+  }
+  async delete(key: string) {
+    this.objects.delete(key);
+    this.modified.delete(key);
   }
 }
 
@@ -116,6 +150,23 @@ export class S3Store implements ObjectStore {
     } while (token);
     return { objects, bytes };
   }
+
+  async entries(prefix: string) {
+    const entries: StoreEntry[] = [];
+    let token: string | undefined;
+    do {
+      const out = await this.s3.send(
+        new ListObjectsV2Command({ Bucket: this.bucket, Prefix: prefix, ContinuationToken: token }),
+      );
+      for (const o of out.Contents ?? []) if (o.Key) entries.push({ key: o.Key, size: o.Size ?? 0, modified: o.LastModified ?? new Date() });
+      token = out.NextContinuationToken;
+    } while (token);
+    return entries;
+  }
+
+  async delete(key: string) {
+    await this.s3.send(new DeleteObjectCommand({ Bucket: this.bucket, Key: key }));
+  }
 }
 
 /** Objects as files under a folder: for development with no R2 at hand. */
@@ -164,6 +215,19 @@ export class FileStore implements ObjectStore {
       bytes += (await stat(this.path(k))).size;
     }
     return { objects, bytes };
+  }
+
+  async entries(prefix: string) {
+    const entries: StoreEntry[] = [];
+    for (const key of await this.list(prefix)) {
+      const s = await stat(this.path(key));
+      entries.push({ key, size: s.size, modified: s.mtime });
+    }
+    return entries;
+  }
+
+  async delete(key: string) {
+    await rm(this.path(key), { force: true });
   }
 }
 

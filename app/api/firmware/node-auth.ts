@@ -1,21 +1,11 @@
-// The firmware endpoints answer only Heltec nodes: a push source of the lora module, with its token.
-import { crossTenantAccess, crossTenantDb, type Db } from "@/lib/engine/db";
+// The firmware endpoints answer only Heltec nodes: a push source of the lora module, with a token
+// of the write scope (the one the node pushes with).
+import type { Db } from "@/lib/engine/db";
 import { FIRMWARE_MODULE } from "@/lib/engine/firmware";
-import { takeIngestToken } from "@/lib/engine/ingest";
-import { sourceByToken } from "@/lib/engine/sources";
+import { authSource } from "@/lib/engine/source-auth";
 
 export async function nodeSource(request: Request): Promise<{ db: Db } | { error: Response }> {
-  const auth = request.headers.get("authorization");
-  const token = auth?.startsWith("Bearer ") ? auth.slice(7) : null;
-  if (!token) return { error: Response.json({ error: "missing source token" }, { status: 401 }) };
-  const db = crossTenantDb(crossTenantAccess.ingest);
-  const source = await sourceByToken(db, token);
-  if (!source) return { error: Response.json({ error: "invalid source token" }, { status: 401 }) };
-  if (source.connector !== "push" || source.module !== FIRMWARE_MODULE)
-    return { error: Response.json({ error: "no firmware for this source" }, { status: 403 }) };
-  if (source.status === "paused") return { error: Response.json({ error: "source is paused" }, { status: 403 }) };
-  const wait = await takeIngestToken(db, source.id);
-  if (wait > 0)
-    return { error: Response.json({ error: "rate limited" }, { status: 429, headers: { "Retry-After": String(Math.ceil(wait)) } }) };
-  return { db };
+  const auth = await authSource(request, "write", (s) =>
+    s.connector === "push" && s.module === FIRMWARE_MODULE ? null : "no firmware for this source");
+  return "error" in auth ? auth : { db: auth.db };
 }

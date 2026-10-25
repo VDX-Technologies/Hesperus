@@ -2,7 +2,7 @@
 // (raw copy first, then the event), plus who recorded it and when. Nothing is ever edited:
 // a correction is a new version that supersedes the previous one, and the chain stays
 // readable. Each tenant gets one manual source per module, created on first use.
-import type { TenantDb } from "./db";
+import { withTenantLock, type TenantDb } from "./db";
 import type { ModulePackage, Severity } from "./package";
 import type { Source } from "./sources";
 import { record } from "./audit";
@@ -136,25 +136,40 @@ async function insert(
 }
 
 /** Records an event of any type entered by a person, linked to one or more objects. Returns its id. */
-export async function recordEvent(db: TenantDb, spec: EventSpec, author: Author, input: EventInput & { severity?: Severity }, now = new Date()): Promise<number> {
-  const objectIds = await check(db, spec, author, input, now);
-  const source = await manualSource(db, spec.module);
-  const id = await insert(db, source, author, { type: spec.type, ts: input.ts, severity: input.severity ?? "info", payload: input.payload, objectIds, supersedes: null }, now);
-  await record(db, author, "event.create", { objectId: objectIds[0], subject: spec.type, data: { event: id, ts: input.ts.toISOString(), payload: input.payload, objects: objectIds } });
-  return id;
+export function recordEvent(tenant: TenantDb, spec: EventSpec, author: Author, input: EventInput & { severity?: Severity }, now = new Date()): Promise<number> {
+  // the daily limit is counted and taken under one lock
+  return withTenantLock(tenant, "manual.events", async (db) => {
+    const objectIds = await check(db, spec, author, input, now);
+    const source = await manualSource(db, spec.module);
+    const id = await insert(db, source, author, { type: spec.type, ts: input.ts, severity: input.severity ?? "info", payload: input.payload, objectIds, supersedes: null }, now);
+    await record(db, author, "event.create", { objectId: objectIds[0], subject: spec.type, data: { event: id, ts: input.ts.toISOString(), payload: input.payload, objects: objectIds } });
+    return id;
+  });
 }
 
 /**
  * Records a new version of a manual event of the spec's type. Only the latest version can be
  * corrected; the objects stay the same unless given. Returns the new version's id.
  */
-export async function correctEvent(
+export function correctEvent(
   db: TenantDb,
   spec: EventSpec,
   author: Author,
   eventId: number,
   input: { ts: Date; payload: Record<string, unknown>; objectIds?: string[] },
   now = new Date(),
+): Promise<number> {
+  // one lock for the daily limit and the latest-version check
+  return withTenantLock(db, "manual.events", (txdb) => correctLocked(txdb, spec, author, eventId, input, now));
+}
+
+async function correctLocked(
+  db: TenantDb,
+  spec: EventSpec,
+  author: Author,
+  eventId: number,
+  input: { ts: Date; payload: Record<string, unknown>; objectIds?: string[] },
+  now: Date,
 ): Promise<number> {
   const { rows } = await db.query<{ type: string; severity: Severity; author: string | null; objects: string[]; latest: boolean; voided: string | null }>(
     `select e.type, e.severity, e.author, e.voided,
@@ -234,7 +249,17 @@ async function checkObject(db: TenantDb, pkg: ModulePackage, author: Author, typ
 }
 
 /** Creates an object entered by hand (a crop, ...), optionally located in a place. Returns its id. */
-export async function createManualObject(
+export function createManualObject(
+  db: TenantDb,
+  pkg: ModulePackage,
+  author: Author,
+  input: { type: string; name: string; properties: Record<string, unknown>; placeId?: string | null },
+): Promise<string> {
+  // the object limit is counted and taken under one lock
+  return withTenantLock(db, `manual.objects:${pkg.id}`, (txdb) => createObjectLocked(txdb, pkg, author, input));
+}
+
+async function createObjectLocked(
   db: TenantDb,
   pkg: ModulePackage,
   author: Author,

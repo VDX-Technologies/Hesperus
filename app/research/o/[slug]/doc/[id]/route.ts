@@ -1,5 +1,6 @@
 // A result's attachment: raster images inline (the console's preview), a PDF inline when asked
-// for with `?view=1` (its frame on the result page), anything else downloaded.
+// for with `?view=1` (its frame on the result page), anything else downloaded. Stored types come
+// from the file's bytes (lib/engine/mime.ts); the CSP sandbox covers rows stored before that.
 import { inlineImage, isPdf } from "@/lib/research";
 import { researchContext } from "../../context";
 import { readDocument } from "../../documents";
@@ -16,6 +17,9 @@ export async function GET(req: Request, rctx: RouteContext<"/research/o/[slug]/d
       "content-type": pdf ? "application/pdf" : inline ? d.contentType! : "application/octet-stream",
       "content-disposition": `${inline ? "inline" : "attachment"}; filename*=UTF-8''${encodeURIComponent(d.filename ?? "file")}`,
       "x-content-type-options": "nosniff",
+      // a file that still runs script (an SVG, an HTML page) runs it sandboxed, without the console's
+      // origin; not the PDF view, which browsers refuse to render in a sandbox
+      ...(pdf ? {} : { "content-security-policy": "sandbox; default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'" }),
       "cache-control": "private, max-age=3600",
     },
   });

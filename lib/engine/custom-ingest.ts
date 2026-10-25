@@ -4,8 +4,10 @@
 // sender's, so the same run sent twice is stored once. A source can be bound to one object (a
 // project): what it writes is then linked to that object and nothing else.
 import { createHash } from "node:crypto";
-import { forTenant, inTransaction, type Db, type TenantDb } from "./db";
+import { forTenant, inTransaction, lockTenant, type Db, type TenantDb } from "./db";
+import { documentsToday } from "./upload";
 import type { ObjectStore } from "./store";
+import { sniffType } from "./mime";
 import { markSeen, type Source } from "./sources";
 import type { Actor } from "./audit";
 import { record } from "./audit";
@@ -47,13 +49,30 @@ export const sourceActor = (source: Source): Actor => ({ id: null, email: `sourc
 
 const isObject = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
 
-async function resolve(db: TenantDb, ref: unknown, what: string): Promise<string> {
-  if (typeof ref === "string") return ref;
-  if (isObject(ref) && typeof ref.type === "string" && typeof ref.externalId === "string") {
-    const o = await objectByExternalId(db, ref.type, ref.externalId);
-    if (o) return o.id;
+/** Keys that would reach Object.prototype when used as a property name. */
+const UNSAFE_KEYS = new Set(["__proto__", "constructor", "prototype"]);
+
+function safeKeys(v: unknown, what: string) {
+  if (!isObject(v)) return;
+  for (const k of Object.keys(v)) {
+    if (UNSAFE_KEYS.has(k)) throw new ManualEventError(400, `${what}: "${k}" is not a valid key`);
+    safeKeys(v[k], what);
   }
-  throw new ManualEventError(404, `${what}: object not found`);
+}
+
+/**
+ * An object by id or `{type, externalId}`, which must exist in the tenant and, for a scoped source,
+ * be in its scope: the object it works for, one linked to it, or one of the `also` types (those can
+ * be linked to, not written).
+ */
+async function resolve(db: TenantDb, ref: unknown, what: string, scope: SourceScope | null = null): Promise<string> {
+  const o = typeof ref === "string" ? (/^[0-9a-f-]{36}$/i.test(ref) ? await getObject(db, ref) : null)
+    : isObject(ref) && typeof ref.type === "string" && typeof ref.externalId === "string" ? await objectByExternalId(db, ref.type, ref.externalId)
+    : null;
+  if (!o) throw new ManualEventError(404, `${what}: object not found`);
+  if (scope && o.id !== scope.id && o.links[scope.link] !== scope.id && !scope.also?.includes(o.type))
+    throw new ManualEventError(403, `${what}: object is outside this source's scope`);
+  return o.id;
 }
 
 async function pushObject(db: TenantDb, source: Source, scope: SourceScope | null, scopeType: string | null, m: RawMessage) {
@@ -61,18 +80,25 @@ async function pushObject(db: TenantDb, source: Source, scope: SourceScope | nul
   if (!type.startsWith(`${CUSTOM}.`)) throw new ManualEventError(400, `unknown object type "${type}"`);
   const t = await getObjectType(db, type);
   if (!t) throw new ManualEventError(400, `unknown object type "${type}"`);
-  for (const k of ["properties", "defaults", "links"] as const)
+  for (const k of ["properties", "defaults", "links"] as const) {
     if (m[k] !== undefined && !isObject(m[k])) throw new ManualEventError(400, `"${k}" must be an object`);
-  const links: Record<string, string> = {};
-  for (const [k, ref] of Object.entries((m.links as Record<string, unknown>) ?? {})) links[k] = await resolve(db, ref, `link "${k}"`);
+    safeKeys(m[k], `"${k}"`);
+  }
   if (scope) {
     if (type === scopeType) throw new ManualEventError(403, "this source cannot change the object it works for");
-    if (t.links[scope.link]) {
-      if (links[scope.link] && links[scope.link] !== scope.id) throw new ManualEventError(403, `link "${scope.link}" is outside this source's scope`);
-      links[scope.link] = scope.id;
-    } else if (!scope.also?.includes(type)) throw new ManualEventError(403, `${type} is outside this source's scope`);
+    // the also types (shared datasets) can be linked to, never written by one project's source
+    if (!t.links[scope.link]) throw new ManualEventError(403, `${type} is outside this source's scope`);
   }
-  if (scope && t.links[scope.link]) {
+  const links: Record<string, string> = Object.create(null);
+  for (const [k, ref] of Object.entries((m.links as Record<string, unknown>) ?? {})) {
+    if (scope && k === scope.link) {
+      if (ref !== scope.id) throw new ManualEventError(403, `link "${scope.link}" is outside this source's scope`);
+      continue;
+    }
+    links[k] = await resolve(db, ref, `link "${k}"`, scope);
+  }
+  if (scope) {
+    links[scope.link] = scope.id;
     // an object already there that belongs to another project stays out of reach
     const prev = await objectByExternalId(db, type, String(m.externalId ?? ""));
     if (prev && prev.links[scope.link] && prev.links[scope.link] !== scope.id) throw new ManualEventError(403, "this object is outside this source's scope");
@@ -90,15 +116,20 @@ async function pushEvent(db: TenantDb, source: Source, scope: SourceScope | null
   const t = type.startsWith(`${CUSTOM}.`) ? await getEventType(db, [], type) : null;
   if (!t) throw new ManualEventError(400, `unknown event type "${type}"`);
   if (m.payload !== undefined && !isObject(m.payload)) throw new ManualEventError(400, `"payload" must be an object`);
+  safeKeys(m.payload, `"payload"`);
   if (!Array.isArray(m.objects)) throw new ManualEventError(400, `"objects" must be a list`);
+  const ts = new Date(typeof m.ts === "string" || typeof m.ts === "number" ? m.ts : now);
+  if (Number.isNaN(ts.getTime())) throw new ManualEventError(400, "invalid event time");
+  // the same bound as device ingest: a run dated years ahead would top every timeline
+  if (ts.getTime() - now.getTime() > num(await getSettings(db.shared), "ingest.max_future_s", 300) * 1000)
+    throw new ManualEventError(400, "ts is in the future");
   const objectIds: string[] = [];
-  for (const ref of m.objects) objectIds.push(await resolve(db, ref, "objects"));
+  for (const ref of m.objects) objectIds.push(await resolve(db, ref, "objects", scope));
   if (scope && !objectIds.includes(scope.id)) throw new ManualEventError(403, "the event must be about the object this source works for");
 
   const known = await db.query<{ id: string }>(`select id from events where tenant_id = $1 and source_id = $2 and idempotency_key = $3`, [db.tenantId, source.id, key]);
   if (known.rows[0]) return { id: String(known.rows[0].id), status: "duplicate" as const };
 
-  const ts = new Date(typeof m.ts === "string" || typeof m.ts === "number" ? m.ts : now);
   const payload = (m.payload as Record<string, unknown>) ?? {};
   const ids = await checkEvent(db, specOf(t, []), { ts, payload, objectIds });
   const { rows } = await db.query<{ id: string }>(
@@ -136,22 +167,31 @@ export async function ingestCustom(db: Db, source: Source, messages: RawMessage[
   ]);
 
   const scope = sourceScope(source);
-  const scoped = scope ? await getObject(tdb, scope.id) : null;
-  if (scope && !scoped) throw new ConnectorError(409, "the object this source works for is gone");
-
   const out: CustomPushResult = { accepted: 0, rejected: [], results: [] };
-  for (const [index, m] of messages.entries()) {
-    try {
-      const r = m.kind === "object" ? await pushObject(tdb, source, scope, scoped?.type ?? null, m)
-        : m.kind === "event" ? await pushEvent(tdb, source, scope, m, now)
-        : (() => { throw new ManualEventError(400, `"kind" must be "object" or "event"`); })();
-      out.accepted++;
-      out.results.push({ index, ...r });
-    } catch (e) {
-      if (!(e instanceof ManualEventError)) throw e;
-      out.rejected.push({ index, error: e.message });
+  // one connection for the batch, a savepoint per message: a message that fails halfway leaves
+  // nothing behind (no object without its links or audit), and the others still count
+  await inTransaction(db, async (connection) => {
+    const c = forTenant(connection, source.tenant_id);
+    // the first tenant query sets the RLS context, before any savepoint whose rollback would undo it
+    const scoped = scope ? await getObject(c, scope.id)
+      : (await c.query(`select 1 from sources where tenant_id = $1 and id = $2`, [source.tenant_id, source.id]), null);
+    if (scope && !scoped) throw new ConnectorError(409, "the object this source works for is gone");
+    for (const [index, m] of messages.entries()) {
+      await connection.query("savepoint message");
+      try {
+        const r = m.kind === "object" ? await pushObject(c, source, scope, scoped?.type ?? null, m)
+          : m.kind === "event" ? await pushEvent(c, source, scope, m, now)
+          : (() => { throw new ManualEventError(400, `"kind" must be "object" or "event"`); })();
+        await connection.query("release savepoint message");
+        out.accepted++;
+        out.results.push({ index, ...r });
+      } catch (e) {
+        if (!(e instanceof ManualEventError)) throw e;
+        await connection.query("rollback to savepoint message");
+        out.rejected.push({ index, error: e.message });
+      }
     }
-  }
+  });
   await markSeen(db, source, out.rejected.length ? `${out.rejected.length} rejected: ${out.rejected[0].error}` : null, now);
   return out;
 }
@@ -183,7 +223,7 @@ export async function pushDocument(
 
   let objectId: string;
   try {
-    objectId = await resolve(tdb, object, "object");
+    objectId = await resolve(tdb, object, "object", sourceScope(source));
   } catch (e) {
     throw e instanceof ManualEventError ? new ConnectorError(e.status, e.message) : e;
   }
@@ -206,17 +246,18 @@ export async function pushDocument(
     await attach(tdb, known.rows[0].id);
     return { documentId: known.rows[0].id, objectId, status: "duplicate" };
   }
-  const { rows: day } = await tdb.query<{ n: number }>(
-    `select count(*)::int n from documents where tenant_id = $1 and source_id = $2 and created_at > $3::timestamptz - interval '1 day'`,
-    [source.tenant_id, source.id, now],
-  );
-  if (day[0].n >= perDay) throw new ConnectorError(429, `too many files (max ${perDay} per day)`);
+  if ((await documentsToday(tdb, source, now)) >= perDay) throw new ConnectorError(429, `too many files (max ${perDay} per day)`);
 
   const key = `docs/${source.tenant_id}/${source.id}/${sha256}-${safeName(file.name)}`;
-  const contentType = file.type || "application/octet-stream";
+  // served by the type its bytes show, never the one the sender claims
+  const contentType = sniffType(file.bytes, file.type);
   if (await store.putNew(key, file.bytes, contentType)) await db.query(`select engine_count('r2.writes', 1, $1)`, [now]);
   const documentId = await inTransaction(db, async (connection) => {
     const c = forTenant(connection, source.tenant_id);
+    // counted again under the lock: concurrent pushes cannot both take the last slot
+    await lockTenant(connection, source.tenant_id, `documents:${source.id}`);
+    const same = await c.query<{ id: string }>(`select id from documents where tenant_id = $1 and source_id = $2 and sha256 = $3`, [source.tenant_id, source.id, sha256]);
+    if (!same.rows[0] && (await documentsToday(c, source, now)) >= perDay) throw new ConnectorError(429, `too many files (max ${perDay} per day)`);
     const { rows } = await c.query<{ id: string }>(
       `insert into documents (tenant_id, storage_key, filename, content_type, size, sha256, metadata, source_id, created_at)
        values ($1, $2, $3, $4, $5, $6, $7, $8, $9)
@@ -262,6 +303,8 @@ export async function csvMessages(db: Db, source: Source, type: string, text: st
   if (!t) throw new ConnectorError(400, `unknown object type "${type}"`);
   const csv = parseCsv(text, num(await getSettings(db), "upload.max_rows", 5000), 200);
   if (!csv.headers.includes("external_id")) throw new ConnectorError(400, `the file needs an "external_id" column`);
+  const unsafe = csv.headers.find((h) => h.split(".").some((part) => UNSAFE_KEYS.has(part)));
+  if (unsafe) throw new ConnectorError(400, `"${unsafe}" is not a valid column`);
   const scope = sourceScope(source);
   const schemas = new Map<string, Schema>();
   // the schema a "schemaFrom" property follows, from the object the row links to (or the scope's)
@@ -281,12 +324,12 @@ export async function csvMessages(db: Db, source: Source, type: string, text: st
   const messages: RawMessage[] = [];
   for (const row of csv.rows) {
     const value = (h: string) => row[csv.headers.indexOf(h)] ?? "";
-    const links: Record<string, string> = {};
+    const links: Record<string, string> = Object.create(null);
     for (const h of csv.headers.filter((h) => h.startsWith("link.") && value(h).trim())) {
       const k = h.slice(5), v = value(h).trim();
       links[k] = /^[0-9a-f-]{36}$/i.test(v) || !t.links[k] ? v : (await objectByExternalId(tdb, t.links[k].type, v))?.id ?? v;
     }
-    const properties: Record<string, unknown> = {}, defaults: Record<string, unknown> = {};
+    const properties: Record<string, unknown> = Object.create(null), defaults: Record<string, unknown> = Object.create(null);
     for (const h of csv.headers) {
       const raw = value(h);
       if (!raw.trim() || h === "external_id" || h === "name" || h.startsWith("link.")) continue;
@@ -294,7 +337,7 @@ export async function csvMessages(db: Db, source: Source, type: string, text: st
       const [prop, sub] = (h.startsWith("default.") ? h.slice(8) : h).split(".", 2);
       if (sub === undefined) target[prop] = cell(t.properties[prop], raw);
       else {
-        const nested = (target[prop] ??= {}) as Record<string, unknown>;
+        const nested = (target[prop] ??= Object.create(null)) as Record<string, unknown>;
         nested[sub] = cell((await nestedSchema(prop, links))[sub], raw);
       }
     }

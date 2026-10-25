@@ -82,4 +82,12 @@ describe("file reading", () => {
     expect((await extract("rotto.xlsx", "", enc("not a zip"))).table).toBeNull();
     expect((await extract("x.bin", "", new Uint8Array(200).map((_, i) => i % 7))).text).toBeNull();
   });
+
+  it("refuses a zip that inflates past the limit before parsing it", async () => {
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([["a", "b"], ...Array.from({ length: 2000 }, () => ["x".repeat(50), 1])]), "S");
+    const bytes = new Uint8Array(XLSX.write(wb, { type: "array", bookType: "xlsx", compression: true }));
+    await expect(extract("bomba.xlsx", "", bytes, { maxInflatedBytes: 50_000 })).rejects.toMatchObject({ limit: "inflated" });
+    expect((await extract("bomba.xlsx", "", bytes)).table).not.toBeNull();
+  });
 });

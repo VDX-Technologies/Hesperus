@@ -124,10 +124,10 @@ describe("research console", () => {
   it("lists a result's attachments, only in its tenant", async () => {
     const { source } = await createSource(db, { tenantId: ORG, name: "p", module: "custom", config: { scope: { link: "project", id: tess } } });
     const store = new MemoryStore();
-    await pushDocument(db, store, source, { name: "lc.png", type: "image/png", bytes: new Uint8Array([1, 2, 3]) }, { type: RESEARCH.result, externalId: "a" });
+    await pushDocument(db, store, source, { name: "lc.png", type: "image/png", bytes: new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1]) }, { type: RESEARCH.result, externalId: "a" });
     await pushDocument(db, store, source, { name: "data.csv", type: "text/csv", bytes: new Uint8Array([4, 5]) }, { type: RESEARCH.result, externalId: "a" });
     const docs = await objectDocuments(A, ids.a);
-    expect(docs.map((d) => [d.filename, d.contentType, d.size]).sort()).toEqual([["data.csv", "text/csv", 2], ["lc.png", "image/png", 3]]);
+    expect(docs.map((d) => [d.filename, d.contentType, d.size]).sort()).toEqual([["data.csv", "text/csv", 2], ["lc.png", "image/png", 9]]);
     expect(await objectDocuments(B, ids.a)).toEqual([]);
   });
 

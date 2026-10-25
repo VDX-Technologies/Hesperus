@@ -9,6 +9,7 @@ import { canRecord } from "@/lib/engine/manual";
 import { scopedSources } from "@/lib/engine/sources";
 import type { PropertySpec } from "@/lib/engine/package";
 import { filterQuery, projectFields, RESEARCH, resultFilters, shownColumns } from "@/lib/research";
+import { webhookSecret } from "@/lib/research-pipeline";
 import { CheckAll } from "@/components/check-all";
 import { Flash } from "@/components/flash";
 import { SubmitButton } from "@/components/submit-button";
@@ -62,6 +63,8 @@ export default async function Project(props: PageProps<"/research/o/[slug]/p/[id
 
   const members = assignable ? await assignees(org.id) : [];
   const editor = canRecord(author.role);
+  // the key webhook posts are signed with, for the people who set the webhook
+  const hookSecret = project.properties[RESEARCH.notifyWebhook] ? webhookSecret(project.id) : null;
   const shown = Object.entries(type.properties).filter(([k, s]) => s.type !== "object" && project.properties[k] !== undefined);
   const runCols = Object.entries(runType?.fields ?? {}).filter(([, s]) => s.type !== "object");
   // the result's own scalar properties, then the project's fields held in `extra`
@@ -183,6 +186,13 @@ export default async function Project(props: PageProps<"/research/o/[slug]/p/[id
           </ul>
         ) : (
           <p className="mt-3 text-sm text-dim">{t.noPipeline}</p>
+        )}
+        {editor && hookSecret && (
+          <details className="mt-3 text-xs text-dim">
+            <summary className="cursor-pointer">{t.webhookSecret}</summary>
+            <p className="mt-1">{t.webhookSecretHint}</p>
+            <code className="num mt-1 block break-all text-mist">{hookSecret}</code>
+          </details>
         )}
       </section>
 

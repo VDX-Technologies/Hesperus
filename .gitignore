@@ -45,3 +45,6 @@ next-env.d.ts
 # python
 __pycache__/
 *.egg-info/
+
+# supabase studio snippets (scratch queries, the migrations are the source of truth)
+/supabase/snippets/

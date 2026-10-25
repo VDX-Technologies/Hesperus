@@ -13,7 +13,8 @@ import { createSource, scopedSources, type Source } from "../../lib/engine/sourc
 import { createObject, updateObject } from "../../lib/engine/custom-objects";
 import { ingestCustom } from "../../lib/engine/custom-ingest";
 import { RESEARCH } from "../../lib/research";
-import { newsMail, notifyPush, pipelineResults, pushNews } from "../../lib/research-pipeline";
+import { createHmac } from "node:crypto";
+import { newsMail, notifyPush, pipelineResults, privateAddress, pushNews, webhookSecret } from "../../lib/research-pipeline";
 import { seedResearch } from "../../scripts/research/types";
 
 let db: Client;
@@ -33,6 +34,7 @@ const run = (key: string): RawMessage => ({
   kind: "event", type: RESEARCH.run, key, objects: [tess], payload: { commit: "abc", items: 3, outcome: "ok" },
 });
 const query = (s: string) => new URLSearchParams(s);
+const publicDns = async () => ["93.184.216.34"];
 
 beforeAll(async () => {
   ({ db, drop } = await freshDb());
@@ -121,7 +123,7 @@ describe("research pipeline", () => {
       posts.push({ url, body: JSON.parse(String(init.body)) });
       return new Response(null, { status: 204 });
     }) as unknown as typeof globalThis.fetch;
-    const deps = { mailer, origin: "https://core.example.com", fetch };
+    const deps = { mailer, origin: "https://core.example.com", fetch, lookup: publicDns };
     const push = async (messages: RawMessage[]) => notifyPush(db, src, messages, await ingestCustom(db, src, messages), deps);
 
     // nobody to tell yet
@@ -154,7 +156,7 @@ describe("research pipeline", () => {
     const ok = (async (url: string) => (posts.push(url), new Response(null, { status: 204 }))) as unknown as typeof fetch;
     const mails: Mail[] = [];
     const sent = await notifyPush(db, src, [run("h1")], await ingestCustom(db, src, [run("h1")]), {
-      mailer: { send: async (m) => void mails.push(m) }, origin: "https://core", fetch: ok,
+      mailer: { send: async (m) => void mails.push(m) }, origin: "https://core", fetch: ok, lookup: publicDns,
     });
     expect(sent).toEqual({ mailed: 2, webhook: false });
     expect(posts).toEqual([]);
@@ -162,8 +164,43 @@ describe("research pipeline", () => {
     await updateObject(A, owner, tess, { properties: { notify_webhook: "https://hooks.example.com/r" } });
     const down = (async () => new Response("no", { status: 500 })) as unknown as typeof fetch;
     await expect(notifyPush(db, src, [run("h2")], await ingestCustom(db, src, [run("h2")]), {
-      mailer: { send: async (m) => void mails.push(m) }, origin: "https://core", fetch: down,
+      mailer: { send: async (m) => void mails.push(m) }, origin: "https://core", fetch: down, lookup: publicDns,
     })).rejects.toThrow(/webhook answered 500/);
     expect(mails).toHaveLength(2);
+  });
+
+  it("refuses webhooks reaching private addresses and signs the ones it posts", async () => {
+    const posts: { url: string; headers: Record<string, string>; body: string }[] = [];
+    const fetch = (async (url: string, init: RequestInit) => {
+      posts.push({ url, headers: init.headers as Record<string, string>, body: String(init.body) });
+      return new Response(null, { status: 204 });
+    }) as unknown as typeof globalThis.fetch;
+    const send = (key: string, hook: string, lookup = publicDns) =>
+      updateObject(A, owner, tess, { properties: { notify_email: "", notify_webhook: hook } }).then(async () =>
+        notifyPush(db, src, [run(key)], await ingestCustom(db, src, [run(key)]), { mailer: null, origin: "https://core", fetch, lookup }));
+
+    for (const [i, hook] of ["https://127.0.0.1/x", "https://169.254.169.254/latest", "https://[::1]/x", "https://[::ffff:10.0.0.1]/x"].entries())
+      await expect(send(`p${i}`, hook)).rejects.toThrow(/not a public address/);
+    await expect(send("p9", "https://hooks.example.com/r", async () => ["93.184.216.34", "10.1.2.3"])).rejects.toThrow(/not a public address/);
+    expect(posts).toEqual([]);
+
+    vi.stubEnv("RESEARCH_WEBHOOK_SECRET", "root-secret");
+    try {
+      await send("s1", "https://hooks.example.com/r");
+      expect(posts).toHaveLength(1);
+      const { headers, body } = posts[0];
+      const secret = webhookSecret(tess)!;
+      expect(secret).not.toBe(webhookSecret("other"));
+      const expected = createHmac("sha256", secret).update(`${headers["x-vdx-timestamp"]}.${body}`).digest("hex");
+      expect(headers["x-vdx-signature"]).toBe(`sha256=${expected}`);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("knows private addresses", () => {
+    for (const a of ["10.0.0.1", "172.16.5.4", "192.168.1.1", "100.64.0.1", "0.0.0.0", "224.0.0.1", "::", "::1", "fd00::1", "fe80::1", "::ffff:7f00:1", "64:ff9b::a00:1", "nope"])
+      expect(privateAddress(a), a).toBe(true);
+    for (const a of ["93.184.216.34", "8.8.8.8", "2606:4700::1111", "::ffff:8.8.8.8"]) expect(privateAddress(a), a).toBe(false);
   });
 });

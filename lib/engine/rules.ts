@@ -78,8 +78,9 @@ export async function evaluateRules(
 
   const ruleIds = pairs.map((p) => p.rule.id), objIds = pairs.map((p) => p.pts[0].objectId);
   const { rows: states } = await db.query<{ rule_id: string; object_id: string; breach_since: Date | null; last_ts: Date }>(
-    `select s.* from rule_state s join unnest($1::uuid[], $2::uuid[]) u(r, o) on s.rule_id = u.r and s.object_id = u.o`,
-    [ruleIds, objIds],
+    `select s.* from rule_state s join unnest($1::uuid[], $2::uuid[]) u(r, o) on s.rule_id = u.r and s.object_id = u.o
+     join rules r on r.id = s.rule_id and r.tenant_id = $3`,
+    [ruleIds, objIds, tenantId],
   );
   const { rows: active } = await db.query<{ id: string; rule_id: string; object_id: string; peak: number }>(
     `select a.id, a.rule_id, a.object_id, a.peak from object_alerts a

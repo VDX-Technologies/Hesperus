@@ -1,7 +1,9 @@
 // Firmware releases for the Heltec nodes. The admin uploads a .bin from /admin/firmware; the nodes
 // read /api/firmware/manifest with their source token and flash the current release when it is
-// newer than theirs (the node checks the MD5 before switching OTA slot).
-import { createHash } from "node:crypto";
+// newer than theirs. The node checks the SHA-256 and the Ed25519 signature (MD5 on older nodes)
+// before switching OTA slot. Releases are signed offline with scripts/sign-firmware.ts: the server
+// holds only the public key (FIRMWARE_PUBLIC_KEY), so neither it nor the store can sign a binary.
+import { createHash, createPublicKey, verify } from "node:crypto";
 import type { Db } from "./db";
 import type { ObjectStore } from "./store";
 
@@ -13,6 +15,8 @@ export const FIRMWARE_MODULE = "lora";
 export type FirmwareRelease = {
   version: string;
   md5: string;
+  sha256: string | null;
+  signature: string | null;
   size: number;
   storage_key: string;
   notes: string | null;
@@ -32,9 +36,23 @@ export function checkImage(bytes: Uint8Array): string | null {
 
 export const validVersion = (v: string) => /^\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(v);
 
+/** What a release signature signs: the version too, so a signed binary cannot be relabelled. */
+export const signedMessage = (version: string, sha256: string) => `vdx-firmware-v1\n${version}\n${sha256}`;
+
+/** Whether signature (base64) is publicKey's (base64 of the raw 32 bytes) over the release. */
+export function verifySignature(version: string, sha256: string, signature: string, publicKey: string): boolean {
+  const raw = Buffer.from(publicKey, "base64");
+  const sig = Buffer.from(signature, "base64");
+  if (raw.length !== 32 || sig.length !== 64) return false;
+  const key = createPublicKey({ key: { kty: "OKP", crv: "Ed25519", x: raw.toString("base64url") }, format: "jwk" });
+  return verify(null, Buffer.from(signedMessage(version, sha256)), key, sig);
+}
+
+const COLUMNS = "version, md5, sha256, signature, size, storage_key, notes, current, created_at";
+
 export async function listReleases(db: Db): Promise<FirmwareRelease[]> {
   const { rows } = await db.query<FirmwareRelease>(
-    `select version, md5, size, storage_key, notes, current, created_at from firmware_releases
+    `select ${COLUMNS} from firmware_releases
       order by string_to_array(version, '.')::int[] desc`,
   );
   return rows;
@@ -42,7 +60,7 @@ export async function listReleases(db: Db): Promise<FirmwareRelease[]> {
 
 export async function currentRelease(db: Db): Promise<FirmwareRelease | null> {
   const { rows } = await db.query<FirmwareRelease>(
-    `select version, md5, size, storage_key, notes, current, created_at from firmware_releases where current`,
+    `select ${COLUMNS} from firmware_releases where current`,
   );
   return rows[0] ?? null;
 }
@@ -50,32 +68,42 @@ export async function currentRelease(db: Db): Promise<FirmwareRelease | null> {
 export async function getRelease(db: Db, version: string): Promise<FirmwareRelease | null> {
   if (!validVersion(version)) return null;
   const { rows } = await db.query<FirmwareRelease>(
-    `select version, md5, size, storage_key, notes, current, created_at from firmware_releases where version = $1`,
+    `select ${COLUMNS} from firmware_releases where version = $1`,
     [version],
   );
   return rows[0] ?? null;
 }
 
-/** Stores the binary and adds the release; current=true makes it the one the nodes install. */
+/**
+ * Stores the binary and adds the release; current=true makes it the one the nodes install. With a
+ * public key configured the release must carry a valid signature.
+ */
 export async function addRelease(
   db: Db,
   store: ObjectStore,
-  input: { version: string; bytes: Uint8Array; notes?: string; current: boolean; userId: string | null },
+  input: { version: string; bytes: Uint8Array; signature?: string; notes?: string; current: boolean; userId: string | null },
+  publicKey = process.env.FIRMWARE_PUBLIC_KEY || null,
 ): Promise<FirmwareRelease> {
   if (!validVersion(input.version)) throw new FirmwareError("version must look like 1.2.0");
   const bad = checkImage(input.bytes);
   if (bad) throw new FirmwareError(bad);
   if (await getRelease(db, input.version)) throw new FirmwareError(`version ${input.version} already exists`);
   const md5 = createHash("md5").update(input.bytes).digest("hex");
+  const sha256 = createHash("sha256").update(input.bytes).digest("hex");
+  const signature = input.signature?.trim() || null;
+  if (signature && !publicKey) throw new FirmwareError("FIRMWARE_PUBLIC_KEY is not set: cannot check the signature");
+  if (publicKey && !signature) throw new FirmwareError("signature required (scripts/sign-firmware.ts)");
+  if (signature && !verifySignature(input.version, sha256, signature, publicKey!))
+    throw new FirmwareError("invalid signature for this file and version");
   // The store never overwrites: the md5 in the key lets a deleted version be uploaded again.
   const key = `firmware/heltec/${input.version}-${md5}.bin`;
   await store.putNew(key, input.bytes, "application/octet-stream");
   if (input.current) await db.query(`update firmware_releases set current = false where current`);
   const { rows } = await db.query<FirmwareRelease>(
-    `insert into firmware_releases (version, md5, size, storage_key, notes, current, created_by)
-     values ($1, $2, $3, $4, $5, $6, $7)
-     returning version, md5, size, storage_key, notes, current, created_at`,
-    [input.version, md5, input.bytes.length, key, input.notes?.trim() || null, input.current, input.userId],
+    `insert into firmware_releases (version, md5, sha256, signature, size, storage_key, notes, current, created_by)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+     returning ${COLUMNS}`,
+    [input.version, md5, sha256, signature, input.bytes.length, key, input.notes?.trim() || null, input.current, input.userId],
   );
   return rows[0];
 }

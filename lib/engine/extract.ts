@@ -27,9 +27,10 @@ export interface ExtractOptions {
   maxPages?: number;
   maxCells?: number;
   maxTextChars?: number;
+  maxInflatedBytes?: number;
 }
 
-export type ExtractLimit = "bytes" | "rows" | "columns" | "sheets" | "pages" | "cells" | "text";
+export type ExtractLimit = "bytes" | "rows" | "columns" | "sheets" | "pages" | "cells" | "text" | "inflated";
 
 export class ExtractLimitError extends Error {
   constructor(public readonly limit: ExtractLimit, max: number) {
@@ -46,6 +47,7 @@ const limits = (options: ExtractOptions = {}) => ({
   maxPages: options.maxPages ?? 500,
   maxCells: options.maxCells ?? 1_000_000,
   maxTextChars: options.maxTextChars ?? 500_000,
+  maxInflatedBytes: options.maxInflatedBytes ?? 100 * 1024 ** 2,
 });
 
 function checkText(text: string, maxTextChars: number) {
@@ -129,7 +131,30 @@ function cellText(v: unknown): string {
   return v == null ? "" : String(v);
 }
 
+/**
+ * Refuses a zip (xlsx, docx) whose entries add up to more than max bytes once inflated, read from
+ * its central directory before any parser inflates it: a few hundred KB can declare gigabytes.
+ * Not a zip, or no directory found: left to the parser. Zip64 sizes count as over the limit.
+ */
+function checkZip(bytes: Uint8Array, max: number) {
+  if (bytes[0] !== 0x50 || bytes[1] !== 0x4b) return;
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  let end = -1;
+  for (let i = bytes.length - 22; i >= Math.max(0, bytes.length - 65_557); i--)
+    if (view.getUint32(i, true) === 0x06054b50) { end = i; break; }
+  if (end < 0) return;
+  const entries = view.getUint16(end + 10, true);
+  let at = view.getUint32(end + 16, true), total = 0;
+  for (let n = 0; n < entries && at + 46 <= bytes.length && view.getUint32(at, true) === 0x02014b50; n++) {
+    const size = view.getUint32(at + 24, true);
+    total += size === 0xffffffff ? Infinity : size;
+    if (total > max) throw new ExtractLimitError("inflated", max);
+    at += 46 + view.getUint16(at + 28, true) + view.getUint16(at + 30, true) + view.getUint16(at + 32, true);
+  }
+}
+
 function readSheet(bytes: Uint8Array, max: ReturnType<typeof limits>): Extracted {
+  checkZip(bytes, max.maxInflatedBytes);
   const book = XLSX.read(bytes, { type: "array", cellDates: true, UTC: true, dense: true, sheetRows: max.maxRows + 31 });
   if (book.SheetNames.length > max.maxSheets) throw new ExtractLimitError("sheets", max.maxSheets);
   let table: Table | null = null;
@@ -308,6 +333,7 @@ const unescape = (s: string) =>
     .trim();
 
 async function readWord(bytes: Uint8Array, max: ReturnType<typeof limits>): Promise<Extracted> {
+  checkZip(bytes, max.maxInflatedBytes);
   const mammoth = await import("mammoth");
   const buffer = Buffer.from(bytes);
   const [{ value: html }, { value: text }] = await Promise.all([mammoth.convertToHtml({ buffer }), mammoth.extractRawText({ buffer })]);

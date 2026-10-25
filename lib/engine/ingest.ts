@@ -6,7 +6,7 @@ import { forTenant, inTransaction, type Db } from "./db";
 import type { ModulePackage, Normalized } from "./package";
 import { ValidationError } from "./package";
 import type { RawMessage } from "./connectors";
-import type { Source } from "./sources";
+import { markSeen, type Source } from "./sources";
 import { getSettings, num } from "./settings";
 import { applyDerived, type DerivedState } from "./derived";
 import { deviceConfig, evaluateRules, loadRules, type DeviceConfig, type Point } from "./rules";
@@ -23,6 +23,8 @@ export interface IngestResult {
   configs: ({ type: string; externalId: string } & DeviceConfig)[];
   /** Objects written by the batch. */
   objectIds: string[];
+  /** Metric keys the package does not declare, with how many values were dropped. */
+  undeclared?: Record<string, number>;
 }
 
 type Registry = { types: Map<string, string>; metrics: Map<string, number> };
@@ -38,11 +40,22 @@ function canonical(value: unknown): string {
 
 const hash = (value: string) => createHash("sha256").update(value).digest("hex");
 
-/** Upserts the package's object types, event types and metric keys once per process and database. */
+/**
+ * Properties a message may write. `config` holds the per-object thresholds the step reads and
+ * is set from the console only, so a device cannot override its own thresholds and models.
+ */
+function deviceProperties(properties: Record<string, unknown> | undefined): Record<string, unknown> {
+  if (!properties || !("config" in properties)) return properties ?? {};
+  return Object.fromEntries(Object.entries(properties).filter(([key]) => key !== "config"));
+}
+
+/** Upserts the package's object types, event types and metric keys once per declaration and database. */
 export async function registerPackage(db: Db, pkg: ModulePackage, cache = true): Promise<Registry> {
   let byPkg = registries.get(db);
   if (cache && !byPkg) registries.set(db, (byPkg = new Map()));
-  const cached = cache ? byPkg?.get(pkg.id) : undefined;
+  // keyed by what the package declares, so a changed package registers again on a warm instance
+  const key = `${pkg.id}\u0000${hash(canonical([pkg.objectTypes, pkg.eventTypes ?? [], pkg.metrics, pkg.derived ?? []]))}`;
+  const cached = cache ? byPkg?.get(key) : undefined;
   if (cached) return cached;
 
   const reg: Registry = { types: new Map(), metrics: new Map() };
@@ -73,7 +86,7 @@ export async function registerPackage(db: Db, pkg: ModulePackage, cache = true):
     );
     reg.metrics.set(m.key, rows[0].id);
   }
-  if (cache) byPkg?.set(pkg.id, reg);
+  if (cache) byPkg?.set(key, reg);
   return reg;
 }
 
@@ -121,12 +134,14 @@ async function ingestPushWork(
     }
   });
 
-  // 2. Objects, once per (type, externalId); later messages win on name and properties.
+  // 2. Objects, once per (type, externalId); the newest message by ts wins on name and properties
+  // (a stable sort, so equal times keep arrival order), not the last one in the batch.
   type Obj = {
     type: string; typeId: string; externalId: string; name?: string; properties: object; ts: Date; configAck?: number;
   };
   const objects = new Map<string, Obj>();
-  for (const { n } of items) {
+  const byTime = [...items].sort((a, b) => (a.n.ts ?? now).getTime() - (b.n.ts ?? now).getTime());
+  for (const { n } of byTime) {
     const k = `${n.object.type}\u0000${n.object.externalId}`;
     const prev = objects.get(k);
     objects.set(k, {
@@ -134,7 +149,7 @@ async function ingestPushWork(
       typeId: reg.types.get(n.object.type)!,
       externalId: n.object.externalId,
       name: n.object.name ?? prev?.name,
-      properties: { ...prev?.properties, ...n.object.properties },
+      properties: { ...prev?.properties, ...deviceProperties(n.object.properties) },
       ts: n.ts && prev && prev.ts > n.ts ? prev.ts : (n.ts ?? now),
       configAck: n.configAck ?? prev?.configAck,
     });
@@ -160,8 +175,11 @@ async function ingestPushWork(
          from unnest($2::uuid[], $3::text[], $4::text[], $5::jsonb[], $6::timestamptz[])
               as x(type_id, external_id, name, properties, last_seen)
        on conflict (tenant_id, type_id, external_id) do update set
-         name = coalesce(excluded.name, objects.name),
-         properties = objects.properties || excluded.properties,
+         -- an older batch (late retransmission, replay) fills gaps but does not overwrite newer values
+         name = case when objects.last_seen is null or excluded.last_seen >= objects.last_seen then coalesce(excluded.name, objects.name)
+                     else coalesce(objects.name, excluded.name) end,
+         properties = case when objects.last_seen is null or excluded.last_seen >= objects.last_seen then objects.properties || excluded.properties
+                           else excluded.properties || objects.properties end,
          last_seen = greatest(objects.last_seen, excluded.last_seen)
        returning id, type_id, external_id, state, properties`,
       [source.tenant_id, entries.map(([, o]) => o.typeId), entries.map(([, o]) => o.externalId), entries.map(([, o]) => o.name ?? null),
@@ -220,7 +238,11 @@ async function ingestPushWork(
     for (const [key, value] of Object.entries(n.metrics)) {
       if (typeof value !== "number" || !Number.isFinite(value)) continue;
       const metricId = reg.metrics.get(key);
-      if (metricId === undefined) continue; // undeclared metrics stay in the raw archive only
+      if (metricId === undefined) {
+        // undeclared metrics stay in the raw archive only, counted so the source shows them
+        (result.undeclared ??= {})[key] = (result.undeclared[key] ?? 0) + 1;
+        continue;
+      }
       mObj.push(objectId); mKey.push(metricId); mTs.push(n.ts ?? now); mVal.push(value);
       points.push({ objectId, type: n.object.type, metric: key, ts: n.ts ?? now, value });
     }
@@ -287,9 +309,12 @@ async function ingestPushWork(
     }
   }
 
-  if (!opts.replay) await db.query(`update sources set last_seen = $2, last_error = $3 where id = $1 and tenant_id = $4`, [
-    source.id, now, result.rejected.length ? `${result.rejected.length} rejected: ${result.rejected[0].error}` : null, source.tenant_id,
-  ]);
+  if (!opts.replay) {
+    const undeclared = Object.keys(result.undeclared ?? {});
+    const error = result.rejected.length ? `${result.rejected.length} rejected: ${result.rejected[0].error}`
+      : undeclared.length ? `undeclared metrics ignored: ${undeclared.slice(0, 10).join(", ")}` : null;
+    await markSeen(db, source, error, now);
+  }
   return { result, transitions };
 }
 

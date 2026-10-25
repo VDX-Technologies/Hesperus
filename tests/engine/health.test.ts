@@ -1,8 +1,9 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { Client } from "pg";
 import { freshDb } from "../db/setup";
-import { createSource, hashToken, rotateToken, sourceByToken, type Source } from "../../lib/engine/sources";
-import { alertRecipients, collectHealth, monthUsage, recordUsage, runHealth, updateNotices } from "../../lib/engine/health";
+import { forTenant } from "../../lib/engine/db";
+import { createSource, createToken, deleteToken, hashToken, rotateToken, sourceByToken, sourceTokens, type Source } from "../../lib/engine/sources";
+import { alertRecipients, collectHealth, metered, monthUsage, reconcileStorage, recordUsage, runHealth, updateNotices } from "../../lib/engine/health";
 import { ResendMailer, type Mail, type Mailer } from "../../lib/engine/mail";
 import { MemoryStore, MeteredStore } from "../../lib/engine/store";
 
@@ -35,7 +36,7 @@ afterAll(async () => {
   await drop?.();
 });
 beforeEach(async () => {
-  await db.query(`delete from engine_notices; delete from raw_inbox; update sources set last_seen = null`);
+  await db.query(`delete from engine_notices; delete from raw_inbox; delete from engine_gauges; update sources set last_seen = null`);
   await set("quota.db_bytes", 1e12);
 });
 
@@ -144,24 +145,81 @@ describe("usage metering", () => {
     await store.putNew("a", new Uint8Array(1), "x");
     await store.list("");
     await store.get("a");
-    expect(store.ops).toEqual({ writes: 2, reads: 1 });
+    expect(store.ops).toEqual({ writes: 2, reads: 1, bytes: 1, objects: 1 });
     await recordUsage(db, store.ops, at("10:00:00"));
     await recordUsage(db, store.ops, at("11:00:00"));
-    await recordUsage(db, { writes: 7, reads: 0 }, new Date("2026-11-01T00:00:00Z"));
+    await recordUsage(db, { writes: 7, reads: 0, bytes: 0, objects: 0 }, new Date("2026-11-01T00:00:00Z"));
     expect(await monthUsage(db, at("12:00:00"))).toEqual({ "r2.writes": 4, "r2.reads": 2 });
     expect(await monthUsage(db, new Date("2026-11-02T00:00:00Z"))).toEqual({ "r2.writes": 7 });
+  });
+
+  it("keeps the storage size from writes and the daily listing, without listing every hour", async () => {
+    const inner = new MemoryStore();
+    await inner.putNew("docs/old", new Uint8Array(100));
+    expect(await reconcileStorage(db, inner, at("03:00:00"))).toEqual({ objects: 1, bytes: 100 });
+    await metered(db, inner, async (s) => {
+      await s.putNew("docs/a", new Uint8Array(20), "x");
+      await s.putNew("docs/a", new Uint8Array(20), "x"); // already there: no bytes added
+    });
+    const listing = new MeteredStore(inner);
+    const r2 = (await collectHealth(db, listing, at("10:00:00"))).r2;
+    expect(r2).toEqual({ objects: 2, bytes: 120, measured_at: at("03:00:00").toISOString() });
+    expect(listing.ops.writes).toBe(0); // read from the gauge, not the bucket
+    await inner.delete("docs/old");
+    await reconcileStorage(db, inner, at("04:00:00"));
+    expect((await collectHealth(db, undefined, at("10:00:00"))).r2).toEqual({ objects: 1, bytes: 20, measured_at: at("04:00:00").toISOString() });
+  });
+
+  it("records what a metered call wrote even when it fails", async () => {
+    await reconcileStorage(db, new MemoryStore(), at("03:00:00"));
+    await expect(metered(db, new MemoryStore(), async (s) => {
+      await s.putNew("docs/b", new Uint8Array(7), "x");
+      throw new Error("boom");
+    })).rejects.toThrow("boom");
+    expect((await collectHealth(db, undefined, at("10:00:00"))).r2?.bytes).toBe(7);
   });
 });
 
 describe("sources", () => {
   it("rotates a token: the old one stops working", async () => {
     const { source: s, token: old } = await createSource(db, { tenantId: ORG, name: "rot", module: "testmod" });
-    const token = await rotateToken(db, s.id);
+    const token = await rotateToken(forTenant(db, ORG), s.id);
     expect(await sourceByToken(db, old)).toBeNull();
     expect((await sourceByToken(db, token))?.id).toBe(s.id);
     const { rows } = await db.query(`select token_hash, token_hint from sources where id = $1`, [s.id]);
     expect(rows[0].token_hash).toBe(hashToken(token));
     expect(token.endsWith(rows[0].token_hint)).toBe(true);
+  });
+
+  it("keeps the old token for the grace period after a rotation", async () => {
+    const { source: s, token: old } = await createSource(db, { tenantId: ORG, name: "grace", module: "testmod" });
+    const token = await rotateToken(forTenant(db, ORG), s.id, 60);
+    expect((await sourceByToken(db, old))?.id).toBe(s.id);
+    expect((await sourceByToken(db, token))?.id).toBe(s.id);
+    await db.query(`update source_tokens set expires_at = now() - interval '1 second' where source_id = $1`, [s.id]);
+    expect(await sourceByToken(db, old)).toBeNull();
+  });
+
+  it("refuses a rotation of another tenant's source", async () => {
+    const { source: s } = await createSource(db, { tenantId: ORG, name: "other", module: "testmod" });
+    await db.query(`insert into organizations (id, name, slug) values ('00000000-0000-0000-0000-00000000000b', 'B', 'b') on conflict do nothing`);
+    await expect(rotateToken(forTenant(db, "00000000-0000-0000-0000-00000000000b"), s.id)).rejects.toThrow(/no source/);
+  });
+
+  it("checks the scope, expiry and format of a token and notes where it was used", async () => {
+    const { source: s, token: primary } = await createSource(db, { tenantId: ORG, name: "scoped", module: "testmod" });
+    const tdb = forTenant(db, ORG);
+    const { id, token } = await createToken(tdb, s.id, { scopes: ["write"] });
+    expect((await sourceByToken(db, token, "write", "203.0.113.7"))?.id).toBe(s.id);
+    expect(await sourceByToken(db, token, "read")).toBeNull();
+    expect(await sourceByToken(db, token, "documents")).toBeNull();
+    expect((await sourceByToken(db, primary, "read"))?.id).toBe(s.id);
+    expect((await sourceTokens(tdb, s.id))[0]).toMatchObject({ id, scopes: ["write"], lastUsedIp: "203.0.113.7" });
+    const { token: expired } = await createToken(tdb, s.id, { scopes: ["read"], expiresAt: new Date(Date.now() - 1000) });
+    expect(await sourceByToken(db, expired, "read")).toBeNull();
+    expect(await sourceByToken(db, "not-a-token")).toBeNull();
+    expect(await deleteToken(tdb, id)).toBe(true);
+    expect(await sourceByToken(db, token, "write")).toBeNull();
   });
 });
 

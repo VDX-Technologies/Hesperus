@@ -1,7 +1,9 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { Client } from "pg";
 import { freshDb } from "../db/setup";
-import { createSource, sourceByToken, type Source } from "../../lib/engine/sources";
+import { createSource, markSeen, sourceByToken, sourceErrors, type Source } from "../../lib/engine/sources";
+import { forTenant } from "../../lib/engine/db";
+import type { ModulePackage } from "../../lib/engine/package";
 import { ingestPush } from "../../lib/engine/ingest";
 import { pushConnector } from "../../lib/engine/connectors";
 import { testPkg } from "./fixture";
@@ -84,5 +86,46 @@ describe("ingestPush", () => {
   it("registers package types and metrics globally, once", async () => {
     expect(await count(`select count(*)::int n from object_types where module = 'testmod' and tenant_id is null`)).toBe(1);
     expect(await count(`select count(*)::int n from metric_keys where module = 'testmod'`)).toBe(2);
+  });
+});
+
+describe("ingest ordering and limits on what a message writes", () => {
+  const props = (id: string) => db.query(`select properties, last_seen from objects where external_id = $1`, [id]).then((r) => r.rows[0]);
+
+  it("lets the newest message win, wherever it sits in the batch and across batches", async () => {
+    await ingestPush(db, source, [
+      { sensor: "o1", model: "new", t: "2026-10-17T10:29:00Z" },
+      { sensor: "o1", model: "old", t: "2026-10-17T10:20:00Z" },
+    ], testPkg, NOW);
+    expect(await props("o1")).toEqual({ properties: { model: "new" }, last_seen: new Date("2026-10-17T10:29:00Z") });
+    // a late batch with older data does not overwrite newer values or move last_seen back
+    await ingestPush(db, source, [{ sensor: "o1", model: "older", t: "2026-10-17T10:10:00Z" }], testPkg, NOW);
+    expect(await props("o1")).toEqual({ properties: { model: "new" }, last_seen: new Date("2026-10-17T10:29:00Z") });
+  });
+
+  it("ignores a config sent by a device", async () => {
+    const pkg: ModulePackage = {
+      ...testPkg,
+      normalize: (m) => ({ ...testPkg.normalize(m), object: { type: "sensor", externalId: m.sensor as string, properties: m.props as Record<string, unknown> } }),
+    };
+    await ingestPush(db, source, [{ sensor: "c1", props: { model: "y", config: { temp: { max: 1 } } } }], pkg, NOW);
+    expect((await props("c1")).properties).toEqual({ model: "y" });
+  });
+
+  it("counts undeclared metrics and shows them as the source's error", async () => {
+    const r = await ingestPush(db, source, [{ sensor: "u1", temp: 1 }, { sensor: "u2", temp: 2 }], testPkg, NOW);
+    expect(r.undeclared).toEqual({ other: 2 });
+    const { rows } = await db.query(`select last_error from sources where id = $1`, [source.id]);
+    expect(rows[0].last_error).toBe("undeclared metrics ignored: other");
+  });
+
+  it("keeps the newest 50 errors per source", async () => {
+    const { source: s } = await createSource(db, { tenantId: ORG, name: "noisy", module: "testmod" });
+    for (let i = 0; i < 55; i++) await markSeen(db, s, `error ${i}`, new Date(NOW.getTime() + i * 1000));
+    expect(await count(`select count(*)::int n from source_errors where source_id = $1`, [s.id])).toBe(50);
+    const recent = await sourceErrors(forTenant(db, ORG), s.id, 3);
+    expect(recent.map((e) => e.error)).toEqual(["error 54", "error 53", "error 52"]);
+    await markSeen(db, s, null, NOW);
+    expect(await count(`select count(*)::int n from source_errors where source_id = $1`, [s.id])).toBe(50);
   });
 });

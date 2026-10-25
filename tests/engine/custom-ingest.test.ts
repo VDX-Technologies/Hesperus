@@ -99,11 +99,38 @@ describe("custom push", () => {
       { ...run("run-3"), objects: [other] },
       { kind: "object", type: "custom.dataset", externalId: "S71", name: "TESS S71", properties: { source: "MAST" } },
     ]);
-    expect(out.rejected.map((r) => r.index)).toEqual([0, 1, 2]);
+    // the dataset is shared by every project: linked to, not written
+    expect(out.rejected.map((r) => r.index)).toEqual([0, 1, 2, 3]);
     expect(out.rejected.every((r) => /scope|works for/.test(r.error))).toBe(true);
     // a result of the other project with the same external id stays out of reach
     await createObject(A, owner, { type: "custom.result", externalId: "tic-9", name: "TIC 9", links: { project: other }, properties: { score: 1, review: "sent", extra: { tic_id: 9 } } });
     expect((await ingestCustom(db, src, [result("9", 0.1)])).rejected[0].error).toMatch(/scope/);
+  });
+
+  it("checks every reference by id against the scope", async () => {
+    const theirs = await createObject(A, owner, { type: "custom.result", externalId: "tic-8", name: "TIC 8", links: { project: other }, properties: { score: 1, review: "sent", extra: { tic_id: 8 } } });
+    const out = await ingestCustom(db, src, [
+      { ...result("6", 0.5), links: { parent: theirs } },
+      { ...run("run-4"), objects: [tess, theirs] },
+      { ...run("run-5"), objects: ["not-a-uuid"] },
+    ]);
+    expect(out.rejected.map((r) => r.error)).toEqual([expect.stringMatching(/scope/), expect.stringMatching(/scope/), expect.stringMatching(/not found/)]);
+    expect(await objectByExternalId(A, "custom.result", "tic-6")).toBeNull();
+  });
+
+  it("refuses an event time in the future or not a time", async () => {
+    const out = await ingestCustom(db, src, [{ ...run("run-6"), ts: "2099-01-01T00:00:00Z" }, { ...run("run-7"), ts: "domani" }]);
+    expect(out.rejected.map((r) => r.error)).toEqual([expect.stringMatching(/future/), expect.stringMatching(/invalid/)]);
+    const { rows } = await db.query(`select count(*)::int n from events where tenant_id = $1 and payload->>'commit' = 'abc123' and ts > '2027-01-01'`, [ORG]);
+    expect(rows[0].n).toBe(0);
+  });
+
+  it("refuses keys that reach the prototype", async () => {
+    const out = await ingestCustom(db, src, [JSON.parse(`{"kind":"object","type":"custom.result","externalId":"tic-7","name":"x","properties":{"score":1,"extra":{"tic_id":7,"__proto__":{"polluted":1}}}}`)]);
+    expect(out.rejected[0].error).toMatch(/not a valid key/);
+    await expect(csvMessages(db, src, "custom.result", "external_id;__proto__.polluted\ntic-7;1\n")).rejects.toMatchObject({ status: 400 });
+    await expect(csvMessages(db, src, "custom.result", "external_id;extra.constructor\ntic-7;1\n")).rejects.toMatchObject({ status: 400 });
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined();
   });
 
   it("never reaches another tenant", async () => {

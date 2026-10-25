@@ -40,8 +40,13 @@ async function addSource(formData: FormData) {
 
 async function newToken(formData: FormData) {
   "use server";
-  await requireAdmin();
-  await showToken(await rotateToken(crossTenantDb(crossTenantAccess.admin), String(formData.get("id"))));
+  const { user } = await requireAdmin();
+  const org = String(formData.get("org"));
+  const id = String(formData.get("id"));
+  // the old token keeps working for a day, so devices can be moved to the new one
+  const token = await rotateToken(tenantDb(org), id, 86_400);
+  await record(tenantDb(org), user, "token.rotate", { objectId: id, subject: String(formData.get("name")), data: { grace: 86_400 } });
+  await showToken(token);
 }
 
 async function deleteToken(formData: FormData) {
@@ -188,7 +193,9 @@ export default async function EnginePage() {
                       <button className="btn text-xs">{r.status === "paused" ? t.resume : t.pause}</button>
                     </form>
                     <form action={newToken}>
+                      <input type="hidden" name="org" value={r.tenant_id} />
                       <input type="hidden" name="id" value={r.id} />
+                      <input type="hidden" name="name" value={r.name} />
                       <button className="btn text-xs">{t.newToken}</button>
                     </form>
                     {r.token_hint && (

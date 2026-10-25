@@ -15,6 +15,8 @@ export async function GET(request: Request, rctx: RouteContext<"/api/firmware/[v
       "content-length": String(bytes.byteLength),
       "cache-control": "no-store",
       "x-md5": release.md5,
+      ...(release.sha256 && { "x-sha256": release.sha256 }),
+      ...(release.signature && { "x-signature": release.signature }),
     },
   });
 }

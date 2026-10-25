@@ -3,7 +3,7 @@
 import type { Db } from "./db";
 import type { Mailer } from "./mail";
 import { getSettings, num, type Settings } from "./settings";
-import type { ObjectStore, StoreOps } from "./store";
+import { MeteredStore, type ObjectStore, type StoreOps } from "./store";
 
 export interface Check {
   key: string; // stable: 'quota.db', 'source.<id>', ...
@@ -23,16 +23,53 @@ export interface HealthReport {
   at: string;
   ok: boolean;
   quotas: Quota[];
-  r2?: { objects: number; bytes: number };
+  /** From engine_gauges: the last daily listing plus the writes since (measured_at: that listing). */
+  r2?: { objects: number; bytes: number; measured_at: string | null };
   checks: Check[];
 }
 
 const month = (now: Date) => new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
 
-/** Adds the operations made through a metered store to this month's counters. */
+/** Adds the operations made through a metered store to this month's counters and its bytes to the size. */
 export async function recordUsage(db: Db, ops: StoreOps, now = new Date()): Promise<void> {
   if (ops.writes) await db.query(`select engine_count('r2.writes', $1, $2)`, [ops.writes, now]);
   if (ops.reads) await db.query(`select engine_count('r2.reads', $1, $2)`, [ops.reads, now]);
+  if (ops.bytes || ops.objects)
+    await db.query(
+      `insert into engine_gauges (key, n) values ('r2.bytes', $1), ('r2.objects', $2)
+       on conflict (key) do update set n = engine_gauges.n + excluded.n`,
+      [ops.bytes, ops.objects],
+    );
+}
+
+/** Runs fn with a metered view of store and records what it did, also when fn fails. */
+export async function metered<T>(db: Db, store: ObjectStore, fn: (store: ObjectStore) => Promise<T>): Promise<T> {
+  const m = new MeteredStore(store);
+  try {
+    return await fn(m);
+  } finally {
+    await recordUsage(db, m.ops).catch((e) => console.error("store usage not recorded", e));
+  }
+}
+
+/** Lists the whole store once and sets the size to what is really there (the daily job). */
+export async function reconcileStorage(db: Db, store: ObjectStore, now = new Date()) {
+  const u = await store.usage("");
+  await db.query(
+    `insert into engine_gauges (key, n, measured_at) values ('r2.bytes', $1, $3), ('r2.objects', $2, $3)
+     on conflict (key) do update set n = excluded.n, measured_at = excluded.measured_at`,
+    [u.bytes, u.objects, now],
+  );
+  return u;
+}
+
+async function storageGauge(db: Db): Promise<HealthReport["r2"]> {
+  const { rows } = await db.query<{ key: string; n: string; measured_at: Date | null }>(
+    `select key, n, measured_at from engine_gauges where key in ('r2.bytes', 'r2.objects')`,
+  );
+  const g = Object.fromEntries(rows.map((r) => [r.key, r]));
+  if (!g["r2.bytes"]?.measured_at) return undefined;
+  return { bytes: Number(g["r2.bytes"].n), objects: Number(g["r2.objects"]?.n ?? 0), measured_at: g["r2.bytes"].measured_at.toISOString() };
 }
 
 export async function monthUsage(db: Db, now = new Date()): Promise<Record<string, number>> {
@@ -65,11 +102,18 @@ function quotaCheck(q: Quota, ratio: number): Check {
   };
 }
 
-/** Measures everything. store is optional: without it the object storage size is not checked. */
+/**
+ * Measures everything. The object storage size comes from engine_gauges; store is only listed
+ * when it was never measured (without a store the size is then not checked).
+ */
 export async function collectHealth(db: Db, store?: ObjectStore, now = new Date()): Promise<HealthReport> {
   const s: Settings = await getSettings(db, true);
   const usage = await monthUsage(db, now);
-  const r2 = store ? await store.usage("") : undefined;
+  let r2 = await storageGauge(db);
+  if (!r2 && store) {
+    await reconcileStorage(db, store, now);
+    r2 = await storageGauge(db);
+  }
 
   const quotas: Quota[] = [
     { key: "db_bytes", used: await dbBytes(db), limit: num(s, "quota.db_bytes", 524288000) },

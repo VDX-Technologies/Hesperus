@@ -3,7 +3,7 @@ import { Pool, type Client } from "pg";
 import { freshDb } from "../db/setup";
 import { createSource, type Source } from "../../lib/engine/sources";
 import { ingestPush } from "../../lib/engine/ingest";
-import { archiveKey, flushRawInbox, readArchive } from "../../lib/engine/archive";
+import { archiveKey, flushRawInbox, readArchive, sweepOrphanDocuments } from "../../lib/engine/archive";
 import { replaySource } from "../../lib/engine/replay";
 import { MemoryStore } from "../../lib/engine/store";
 import { testPkg } from "./fixture";
@@ -86,5 +86,25 @@ describe("raw archive", () => {
     expect((await replaySource(db, store, source, testPkg)).total.metrics).toBe(0);
     expect(await inbox()).toBe(0); // replay does not re-archive
     expect((await db.query(`select count(*)::int n from events`)).rows[0].n).toBe(0);
+  });
+});
+
+describe("orphan sweep", () => {
+  it("deletes old document bytes no document points at, and nothing else", async () => {
+    const store = new MemoryStore();
+    const now = new Date("2026-10-20T12:00:00Z");
+    const old = new Date("2026-10-18T12:00:00Z");
+    const key = (n: string) => `docs/${ORG}/${source.id}/${n}`;
+    for (const [k, at] of [[key("kept"), old], [key("orphan"), old], [key("young"), now], ["raw/x.jsonl.gz", old]] as const) {
+      await store.putNew(k, new Uint8Array([1]));
+      store.modified.set(k, at);
+    }
+    await db.query(
+      `insert into documents (tenant_id, storage_key, filename, content_type, size, sha256, metadata, source_id) values ($1, $2, 'k', 'text/plain', 1, 'aa', '{}', $3)`,
+      [ORG, key("kept"), source.id],
+    );
+    const out = await sweepOrphanDocuments(pool, store, now);
+    expect(out).toEqual({ checked: 2, deleted: [key("orphan")] });
+    expect([...store.objects.keys()].sort()).toEqual(["raw/x.jsonl.gz", key("kept"), key("young")].sort());
   });
 });

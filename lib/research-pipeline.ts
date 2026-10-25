@@ -1,6 +1,9 @@
 // The research pipeline's side of the console, through its source token: it reads back its
 // project's results with their human reviews (to retrain on them), and the people named on the
 // project hear by email or webhook when a run ends or a result scores high enough.
+import { createHmac } from "node:crypto";
+import { lookup as dnsLookup } from "node:dns/promises";
+import { BlockList, isIP } from "node:net";
 import { forTenant, type Db } from "./engine/db";
 import type { Source } from "./engine/sources";
 import type { RawMessage } from "./engine/connectors";
@@ -93,6 +96,8 @@ export interface NotifyDeps {
   /** where the console is served, for the links: the push request's origin */
   origin: string;
   fetch?: typeof fetch;
+  /** the addresses a host name resolves to (node:dns by default) */
+  lookup?: (host: string) => Promise<string[]>;
 }
 
 const emails = (v: unknown) =>
@@ -109,9 +114,67 @@ const webhook = (v: unknown) => {
   }
 };
 
+// addresses a webhook may not reach: this network, loopback, private, CGNAT, link-local (cloud
+// metadata), benchmarking, multicast and reserved; IPv6 loopback, unspecified, ULA, link-local,
+// multicast, and IPv4-mapped/NAT64 forms of the IPv4 ranges
+const PRIVATE = new BlockList();
+for (const [net, bits] of [["0.0.0.0", 8], ["10.0.0.0", 8], ["100.64.0.0", 10], ["127.0.0.0", 8], ["169.254.0.0", 16],
+  ["172.16.0.0", 12], ["192.0.0.0", 24], ["192.168.0.0", 16], ["198.18.0.0", 15], ["224.0.0.0", 3]] as const)
+  PRIVATE.addSubnet(net, bits, "ipv4");
+for (const [net, bits] of [["::", 127], ["fc00::", 7], ["fe80::", 10], ["ff00::", 8]] as const) PRIVATE.addSubnet(net, bits, "ipv6");
+
+/** Whether an address is one a webhook may not reach (IPv4-mapped and NAT64 forms checked as IPv4). */
+export function privateAddress(address: string): boolean {
+  const family = isIP(address);
+  if (family === 4) return PRIVATE.check(address, "ipv4");
+  if (family !== 6) return true;
+  const v6 = address.toLowerCase();
+  const embedded = v6.match(/^(?:::ffff:|64:ff9b::)(\d+\.\d+\.\d+\.\d+)$/)?.[1];
+  if (embedded) return PRIVATE.check(embedded, "ipv4");
+  const hex = v6.match(/^(?:::ffff:|64:ff9b::)([0-9a-f]{1,4}):([0-9a-f]{1,4})$/);
+  if (hex) {
+    const [hi, lo] = [parseInt(hex[1], 16), parseInt(hex[2], 16)];
+    return PRIVATE.check(`${hi >> 8}.${hi & 255}.${lo >> 8}.${lo & 255}`, "ipv4");
+  }
+  return PRIVATE.check(address, "ipv6");
+}
+
+const resolveAll = async (host: string) => (await dnsLookup(host, { all: true, verbatim: true })).map((a) => a.address);
+
+/**
+ * Refuses a webhook whose host is, or resolves to, a private address. Checked just before the
+ * post; a DNS answer changing between this check and the connection is not covered (pinning the
+ * address needs a custom dispatcher), and redirects are refused by the post itself.
+ */
+async function publicHost(url: string, lookup: (host: string) => Promise<string[]>) {
+  const host = new URL(url).hostname.replace(/^\[|\]$/g, "");
+  const addresses = isIP(host) ? [host] : await lookup(host);
+  if (!addresses.length || addresses.some(privateAddress)) throw new Error("webhook host is not a public address");
+}
+
+/**
+ * The key a project's webhook posts are signed with: derived from RESEARCH_WEBHOOK_SECRET and the
+ * project id, so each project has its own and none is stored. Null when the secret is not set.
+ */
+export function webhookSecret(projectId: string): string | null {
+  const root = process.env.RESEARCH_WEBHOOK_SECRET;
+  return root ? createHmac("sha256", root).update(`research-webhook:${projectId}`).digest("hex") : null;
+}
+
+/** Signature headers for a webhook body: HMAC-SHA256 of `<timestamp>.<body>` with the project's key. */
+export function webhookSignature(projectId: string, body: string, now = Date.now()): Record<string, string> {
+  const secret = webhookSecret(projectId);
+  if (!secret) return {};
+  const timestamp = String(Math.floor(now / 1000));
+  const signature = createHmac("sha256", secret).update(`${timestamp}.${body}`).digest("hex");
+  return { "x-vdx-timestamp": timestamp, "x-vdx-signature": `sha256=${signature}` };
+}
+
 /**
  * Tells the project's emails and webhook what a push brought (see pushNews). Run after the
- * response; returns what was sent. A webhook gets `{project, url, runs, results}` as JSON.
+ * response; returns what was sent. A webhook gets `{project, url, runs, results}` as JSON, signed
+ * (X-VDX-Signature, X-VDX-Timestamp: see webhookSignature) when RESEARCH_WEBHOOK_SECRET is set,
+ * and only when its host is a public address.
  */
 export async function notifyPush(db: Db, source: Source, messages: RawMessage[], result: CustomPushResult, deps: NotifyDeps) {
   const sent = { mailed: 0, webhook: false };
@@ -133,10 +196,12 @@ export async function notifyPush(db: Db, source: Source, messages: RawMessage[],
   const errors: string[] = [];
   if (hook) {
     try {
+      await publicHost(hook, deps.lookup ?? resolveAll);
+      const body = JSON.stringify({ project: { id: project.id, name: project.name }, url, ...news });
       const res = await (deps.fetch ?? fetch)(hook, {
         method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ project: { id: project.id, name: project.name }, url, ...news }),
+        headers: { "content-type": "application/json", ...webhookSignature(project.id, body) },
+        body,
         redirect: "error",
         signal: AbortSignal.timeout(5000),
       });
