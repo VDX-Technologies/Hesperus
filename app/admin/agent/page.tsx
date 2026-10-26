@@ -3,8 +3,8 @@ import { getT, timeAgo } from "@/lib/i18n";
 import { crossTenantAccess, crossTenantDb } from "@/lib/engine/db";
 import { SectionTitle } from "@/components/ui";
 
-// Anonymous, opt-in telemetry sent by VDX Agent installs (custom.agent_install objects and
-// custom.agent_turn events, see scripts/agent/types.ts). Read across all organisations.
+// Anonymous, opt-in telemetry sent by VDX Agent installs (tables agent_installs / agent_turns,
+// written by POST /api/agent/telemetry). Not tied to any organisation.
 
 const RANGES = [7, 30, 90] as const;
 
@@ -13,7 +13,7 @@ type ModelRow = {
   p50_ms: number | null; p95_ms: number | null; load_ms: number | null; gpu_ms: number | null; cpu_ms: number | null; ok_rate: number;
 };
 type ChipRow = { chip: string; ram_gb: number; model: string; turns: number; tps: number | null; p50_ms: number | null };
-type InstallRow = { name: string; props: Record<string, unknown>; last_seen: Date | null; turns: number };
+type InstallRow = { id: string; mac_model: string; chip: string; ram_gb: number; macos: string; app_version: string; ollama: string; last_seen: Date; turns: number };
 
 const ms = (v: number | null) => (v == null ? "—" : v >= 1000 ? `${(v / 1000).toFixed(1)} s` : `${Math.round(v)} ms`);
 const n1 = (v: number | null) => (v == null ? "—" : v.toFixed(1));
@@ -25,42 +25,38 @@ export default async function AgentTelemetryPage({ searchParams }: { searchParam
   const days = RANGES.includes(d as never) ? d : 30;
   const db = crossTenantDb(crossTenantAccess.admin);
   const since = `now() - make_interval(days => $1)`;
-  const num = (k: string) => `(e.payload->>'${k}')::numeric`;
-
+  
   const [totals, models, chips, installs] = await Promise.all([
     db.query<{ turns: number; installs: number; tokens: number; ok_rate: number | null; tps: number | null }>(
-      `select count(*)::int turns, count(distinct eo.object_id)::int installs,
-              coalesce(sum(${num("completion_tokens")}), 0)::float tokens,
-              avg(case when (e.payload->>'ok')::boolean then 1 else 0 end)::float ok_rate,
-              percentile_cont(0.5) within group (order by ${num("tokens_per_s")}) filter (where ${num("tokens_per_s")} > 0) tps
-       from events e left join event_objects eo on eo.event_id = e.id
-       where e.type = 'custom.agent_turn' and e.ts > ${since}`, [days]),
+      `select count(*)::int turns, count(distinct e.install_id)::int installs,
+              coalesce(sum(e.completion_tokens), 0)::float tokens,
+              avg(case when e.ok then 1 else 0 end)::float ok_rate,
+              percentile_cont(0.5) within group (order by e.tokens_per_s) filter (where e.tokens_per_s > 0) tps
+       from agent_turns e
+       where e.ts > ${since}`, [days]),
     db.query<ModelRow>(
-      `select e.payload->>'model' model, coalesce(e.payload->>'quantization', '') quantization,
-              count(*)::int turns, count(distinct eo.object_id)::int installs,
-              percentile_cont(0.5) within group (order by ${num("tokens_per_s")}) filter (where ${num("tokens_per_s")} > 0) tps,
-              percentile_cont(0.5) within group (order by ${num("duration_ms")}) p50_ms,
-              percentile_cont(0.95) within group (order by ${num("duration_ms")}) p95_ms,
-              avg(${num("load_ms")})::float load_ms, avg(${num("gpu_ms")})::float gpu_ms, avg(${num("cpu_ms")})::float cpu_ms,
-              avg(case when (e.payload->>'ok')::boolean then 1 else 0 end)::float ok_rate
-       from events e left join event_objects eo on eo.event_id = e.id
-       where e.type = 'custom.agent_turn' and e.ts > ${since}
+      `select e.model, e.quantization,
+              count(*)::int turns, count(distinct e.install_id)::int installs,
+              percentile_cont(0.5) within group (order by e.tokens_per_s) filter (where e.tokens_per_s > 0) tps,
+              percentile_cont(0.5) within group (order by e.duration_ms) p50_ms,
+              percentile_cont(0.95) within group (order by e.duration_ms) p95_ms,
+              avg(e.load_ms)::float load_ms, avg(e.gpu_ms)::float gpu_ms, avg(e.cpu_ms)::float cpu_ms,
+              avg(case when e.ok then 1 else 0 end)::float ok_rate
+       from agent_turns e
+       where e.ts > ${since}
        group by 1, 2 order by turns desc limit 50`, [days]),
     db.query<ChipRow>(
-      `select coalesce(o.properties->>'chip', '?') chip, coalesce((o.properties->>'ram_gb')::int, 0) ram_gb,
-              e.payload->>'model' model, count(*)::int turns,
-              percentile_cont(0.5) within group (order by ${num("tokens_per_s")}) filter (where ${num("tokens_per_s")} > 0) tps,
-              percentile_cont(0.5) within group (order by ${num("duration_ms")}) p50_ms
-       from events e join event_objects eo on eo.event_id = e.id join objects o on o.id = eo.object_id
-       where e.type = 'custom.agent_turn' and e.ts > ${since}
+      `select coalesce(nullif(i.chip, ''), '?') chip, round(i.ram_gb)::int ram_gb, e.model, count(*)::int turns,
+              percentile_cont(0.5) within group (order by e.tokens_per_s) filter (where e.tokens_per_s > 0) tps,
+              percentile_cont(0.5) within group (order by e.duration_ms) p50_ms
+       from agent_turns e join agent_installs i on i.id = e.install_id
+       where e.ts > ${since}
        group by 1, 2, 3 order by turns desc limit 50`, [days]),
     db.query<InstallRow>(
-      `select o.name, o.properties props, max(e.ts) last_seen, count(e.id)::int turns
-       from objects o join object_types t on t.id = o.type_id
-       left join event_objects eo on eo.object_id = o.id
-       left join events e on e.id = eo.event_id and e.ts > ${since}
-       where t.module = 'custom' and t.key = 'agent_install'
-       group by o.id order by last_seen desc nulls last limit 100`, [days]),
+      `select i.id, i.mac_model, i.chip, i.ram_gb::float ram_gb, i.macos, i.app_version, i.ollama, i.last_seen,
+              count(e.id)::int turns
+       from agent_installs i left join agent_turns e on e.install_id = i.id and e.ts > ${since}
+       group by i.id order by i.last_seen desc limit 100`, [days]),
   ]);
   const tot = totals.rows[0];
 
@@ -147,16 +143,16 @@ export default async function AgentTelemetryPage({ searchParams }: { searchParam
           </thead>
           <tbody>
             {installs.rows.map((i) => (
-              <tr key={i.name} className="border-t border-white/5">
-                <td className="px-3 py-2 font-mono text-xs">{i.name}</td>
-                <td className="px-3 py-2">{String(i.props.mac_model ?? "")}</td>
-                <td className="px-3 py-2">{String(i.props.chip ?? "")}</td>
-                <td className="num px-3 py-2">{String(i.props.ram_gb ?? "")} GB</td>
-                <td className="px-3 py-2">{String(i.props.macos ?? "")}</td>
-                <td className="px-3 py-2">{String(i.props.app_version ?? "")}</td>
-                <td className="px-3 py-2">{String(i.props.ollama ?? "")}</td>
+              <tr key={i.id} className="border-t border-white/5">
+                <td className="px-3 py-2 font-mono text-xs">{i.id.slice(0, 8)}</td>
+                <td className="px-3 py-2">{i.mac_model}</td>
+                <td className="px-3 py-2">{i.chip}</td>
+                <td className="num px-3 py-2">{i.ram_gb} GB</td>
+                <td className="px-3 py-2">{i.macos}</td>
+                <td className="px-3 py-2">{i.app_version}</td>
+                <td className="px-3 py-2">{i.ollama}</td>
                 <td className="num px-3 py-2">{i.turns}</td>
-                <td className="px-3 py-2 text-dim">{i.last_seen ? timeAgo(new Date(i.last_seen).toISOString(), locale, t) : "—"}</td>
+                <td className="px-3 py-2 text-dim">{timeAgo(new Date(i.last_seen).toISOString(), locale, t)}</td>
               </tr>
             ))}
           </tbody>
