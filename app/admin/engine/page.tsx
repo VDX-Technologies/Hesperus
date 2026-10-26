@@ -9,6 +9,7 @@ import { getSettings, num } from "@/lib/engine/settings";
 import { createSource, revokeTokens, rotateToken } from "@/lib/engine/sources";
 import { record } from "@/lib/engine/audit";
 import { tenantDb } from "@/lib/engine/db";
+import { createResearchSource } from "@/lib/research-source";
 import { ConfirmButton } from "@/components/confirm-button";
 import { packageIds } from "@/lib/packages";
 import { SectionTitle } from "@/components/ui";
@@ -35,6 +36,18 @@ async function addSource(formData: FormData) {
   });
   // upload sources are used from the console, their token is never needed
   if (upload) redirect(PATH);
+  await showToken(token);
+}
+
+async function addResearchSource(formData: FormData) {
+  "use server";
+  const { user } = await requireAdmin();
+  // "<tenant id>:<project id>"
+  const [org, project] = String(formData.get("project")).split(":");
+  const { token } = await createResearchSource(crossTenantDb(crossTenantAccess.admin), org, project, {
+    name: String(formData.get("name") ?? ""),
+    actor: user,
+  });
   await showToken(token);
 }
 
@@ -98,7 +111,7 @@ export default async function EnginePage() {
   const { t, locale } = await getT();
   const db = crossTenantDb(crossTenantAccess.admin);
   const s = await getSettings(db);
-  const [usage, dbSize, sources, jobs, notices, orgs] = await Promise.all([
+  const [usage, dbSize, sources, jobs, notices, orgs, projects] = await Promise.all([
     monthUsage(db),
     dbBytes(db),
     db.query<{ id: string; tenant_id: string; name: string; org: string; module: string; connector: string; status: string; token_hint: string | null; last_seen: Date | null; last_error: string | null }>(
@@ -112,6 +125,11 @@ export default async function EnginePage() {
       `select key, message, opened_at from engine_notices where resolved_at is null order by opened_at`,
     ),
     db.query<{ id: string; name: string }>(`select id, name from organizations order by name`),
+    db.query<{ id: string; tenant_id: string; name: string; org: string }>(
+      `select o.id, o.tenant_id, o.name, g.name org
+       from objects o join object_types t on t.id = o.type_id join organizations g on g.id = o.tenant_id
+       where t.module = 'custom' and t.key = 'project' order by g.name, o.name`,
+    ),
   ]);
   const health = jobs.rows.find((j) => j.name === "health")?.last_result as HealthReport | undefined;
   const ratio = num(s, "quota.alert_ratio", 0.8);
@@ -235,6 +253,19 @@ export default async function EnginePage() {
           <input name="kind" placeholder={t.sourceKind} className="w-36" />
           <button className="btn">{t.create}</button>
         </form>
+        {projects.rows.length > 0 && (
+          <form action={addResearchSource} className="mt-3 flex flex-wrap items-end gap-2" title={t.researchHint}>
+            <input name="name" placeholder={t.researchSource} className="w-72" />
+            <select name="project" required>
+              {projects.rows.map((p) => (
+                <option key={p.id} value={`${p.tenant_id}:${p.id}`}>
+                  {p.org} · {p.name}
+                </option>
+              ))}
+            </select>
+            <button className="btn">{t.create}</button>
+          </form>
+        )}
       </div>
 
       <SectionTitle>{t.jobs}</SectionTitle>
