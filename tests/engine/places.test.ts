@@ -95,7 +95,7 @@ describe("sites and zones migration", () => {
     await setObjectPlace(A, sensors[1], null);
     await db.query(`update objects set properties = properties || jsonb_build_object('zone_id', $2::text) where id = $1`, [sensors[1], zone]);
 
-    const sql = readFileSync(join(__dirname, "../../supabase/migrations-pushed/20261020010000_places_data.sql"), "utf8");
+    const sql = readFileSync(join(__dirname, "../../supabase/migrations/20261020010000_places_data.sql"), "utf8");
     await db.query(sql);
     await db.query(sql); // re-running is harmless
 
@@ -105,7 +105,7 @@ describe("sites and zones migration", () => {
     expect(s2.properties.zone_id).toBeUndefined();
 
     // with everything moved the drop goes through; a row left behind stops it
-    const drop = readFileSync(join(__dirname, "../../supabase/migrations-pushed/20261023000000_drop_sites_zones.sql"), "utf8");
+    const drop = readFileSync(join(__dirname, "../../supabase/migrations/20261023000000_drop_sites_zones.sql"), "utf8");
     await db.query(`insert into sites (org_id, name) values ($1, 'Never moved')`, [ORG]);
     await expect(db.query(drop)).rejects.toThrow(/1 rows not moved/);
     await db.query(`delete from sites where name = 'Never moved'`);
