@@ -3,6 +3,7 @@ name = "vdx-core-client"
 version = "0.1.0"
 description = "Send objects, events and files to VDX Core with a source token"
 requires-python = ">=3.9"
+license = { text = "AGPL-3.0-only" }
 dependencies = []
 
 [build-system]

@@ -1,0 +1,22 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      # The DB tests need Supabase's Postgres (pg_cron) on 127.0.0.1:54322, the default of tests/db/setup.ts
+      - run: npx supabase db start
+      - run: npm test
+      - run: npm run build

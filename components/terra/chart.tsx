@@ -350,7 +350,7 @@ export function StackChart({
                   );
                 }} />
               {shown.map((s, i) => <ReferenceLine key={`lane-${s.key}`} y={i + 0.5} stroke="#20252b" />)}
-              {shown.map((s, i) => (
+              {shown.map((s) => (
                 <Scatter key={s.key} name={s.label} data={timelinePoints.filter((p) => p.key === s.key)} fill={s.color}
                   isAnimationActive={false} shape="circle" />
               ))}
@@ -509,8 +509,9 @@ export function SensorMetricGrid({ panels, locale, minMaxLabel, emptyLabel, labe
   const series = panels[0].series;
   const shown = series.filter((s) => !off.has(s.key));
   const allRows = panels[0].rows;
-  const lastRow = allRows[allRows.length - 1];
-  const end = typeof lastRow?.t === "number" ? lastRow.t : Date.now();
+  // The window ends at the newest reading (not the clock, which would make render impure); with no
+  // timed rows nothing is visible anyway.
+  const end = allRows.reduce((max, row) => typeof row.t === "number" && row.t > max ? row.t : max, -Infinity);
   const from = end - hours * 60 * 60_000;
   const visiblePanels = panels.map((panel) => ({
     ...panel,
