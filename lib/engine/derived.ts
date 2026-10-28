@@ -1,12 +1,9 @@
-// Declarative derived metrics. Stateless functions use the current message only; delta and
-// rate keep the previous input value per object in objects.state.derived.
 import type { DerivedDef } from "./package";
 
 export type DerivedState = Record<string, { ts: number; v: number }>;
 
 const finite = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
 
-/** Adds derived values to `metrics` (in place) and updates `state`. Out-of-order points never move state back. */
 export function applyDerived(
   defs: DerivedDef[], metrics: Record<string, number | null | undefined>, ts: Date, state: DerivedState,
 ): void {

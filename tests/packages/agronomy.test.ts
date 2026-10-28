@@ -1,5 +1,3 @@
-// Agronomy: crops as manual objects in an area, the treatments register (validation, filters,
-// corrections, exports) and the LoRa sensors seen from a crop, all within one tenant.
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { Client } from "pg";
 vi.mock("server-only", () => ({}));

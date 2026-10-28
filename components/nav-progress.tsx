@@ -2,16 +2,10 @@
 import { useEffect, useRef, useState } from "react";
 import { usePathname, useSearchParams } from "next/navigation";
 
-/**
- * Thin top bar while a navigation or a form action is in flight, and a busy state on the
- * button that submitted. Starts on internal link clicks and form submits; ends when the URL
- * changes or React resets the form after its action (with a safety timeout).
- */
 export function NavProgress() {
   const pathname = usePathname();
   const search = useSearchParams();
   const url = `${pathname}?${search}`;
-  // the URL a navigation or action started on: the bar shows until the URL moves on
   const [startedOn, setStartedOn] = useState<string | null>(null);
   const active = startedOn === url;
   const busy = useRef<HTMLElement | null>(null);

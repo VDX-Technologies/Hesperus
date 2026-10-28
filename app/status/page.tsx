@@ -7,7 +7,6 @@ import { readStatus, type Component, type Level } from "@/lib/engine/status";
 
 export const metadata: Metadata = { title: "Status" };
 
-// public and unauthenticated: one query a minute at most, whatever the traffic
 const status = unstable_cache(() => readStatus(crossTenantDb(crossTenantAccess.maintenance)), ["platform-status"], { revalidate: 60 });
 
 const COMPONENTS: Component[] = ["database", "ingest", "storage", "monitoring"];

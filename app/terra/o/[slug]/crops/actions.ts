@@ -17,7 +17,6 @@ async function context(form: FormData) {
   return { slug, db: tenantDb(org.id), author: { id: user.id, email: user.email, role: role as Role } };
 }
 
-/** Server error to a form state: validation text as is, the rest as a translated code. */
 function fail(e: unknown): EventFormState {
   if (!(e instanceof ManualEventError)) throw e;
   if (e.status === 400) {
@@ -27,7 +26,6 @@ function fail(e: unknown): EventFormState {
   return { error: `manualErr_${e.status}` };
 }
 
-/** New crop, or with `id` new properties for an existing one (its status and events stay). */
 export async function saveCrop(_prev: EventFormState, form: FormData): Promise<EventFormState> {
   const { slug, db, author } = await context(form);
   if (!canRecord(author.role)) return { error: "manualErr_403" };
@@ -48,7 +46,6 @@ export async function saveCrop(_prev: EventFormState, form: FormData): Promise<E
   return { ok: Date.now() };
 }
 
-/** Archive (end day + status) or delete; delete only works on a crop with no events. */
 export async function cropAction(form: FormData): Promise<void> {
   const { slug, db, author } = await context(form);
   const id = String(form.get("id") ?? "");

@@ -1,7 +1,3 @@
-// Places: objects of the global types core.site and core.area, arranged by links.
-//   part_of     area -> site | area   (the tree; one parent each)
-//   located_in  object -> place       (where an object is; one place each)
-// The links trigger refuses wrong kinds and cycles; this module only shapes the calls.
 import type { TenantDb } from "./db";
 
 export type PlaceKind = "site" | "area";
@@ -19,7 +15,6 @@ const typeId = (db: TenantDb, kind: PlaceKind) =>
     `select id from object_types where module = 'core' and key = $1 and tenant_id is null`, [kind],
   ).then((r) => r.rows[0].id);
 
-/** Creates a site (no parent) or an area under parentId. */
 export async function createPlace(db: TenantDb, p: { kind: PlaceKind; name: string; parentId?: string | null }): Promise<string> {
   if (p.kind === "area" && !p.parentId) throw new Error("an area needs a parent place");
   const { rows } = await db.query<{ id: string }>(
@@ -38,7 +33,6 @@ export async function renamePlace(db: TenantDb, id: string, name: string): Promi
   );
 }
 
-/** Puts an area under another place. */
 export async function movePlace(db: TenantDb, id: string, parentId: string): Promise<void> {
   await db.query(
     `insert into links (tenant_id, type, src_id, dst_id) values ($1, 'part_of', $2, $3)
@@ -47,7 +41,6 @@ export async function movePlace(db: TenantDb, id: string, parentId: string): Pro
   );
 }
 
-/** Deletes a place: its areas and objects move up to its parent (or lose their place). */
 export async function deletePlace(db: TenantDb, id: string): Promise<void> {
   const parent = (await db.query<{ dst_id: string }>(
     `select dst_id from links where tenant_id = $1 and type = 'part_of' and src_id = $2`, [db.tenantId, id],
@@ -57,7 +50,6 @@ export async function deletePlace(db: TenantDb, id: string): Promise<void> {
       `update links set dst_id = $3 where tenant_id = $1 and dst_id = $2 and type in ('part_of', 'located_in')`,
       [db.tenantId, id, parent],
     );
-  // without a parent the links go with the object (on delete cascade)
   await db.query(
     `delete from objects where tenant_id = $1 and id = $2
        and type_id in (select id from object_types where module = 'core' and key in ('site', 'area'))`,
@@ -65,7 +57,6 @@ export async function deletePlace(db: TenantDb, id: string): Promise<void> {
   );
 }
 
-/** Sets where an object is; null clears it. */
 export async function setObjectPlace(db: TenantDb, objectId: string, placeId: string | null): Promise<void> {
   if (!placeId) {
     await db.query(`delete from links where tenant_id = $1 and type = 'located_in' and src_id = $2`, [db.tenantId, objectId]);
@@ -78,7 +69,6 @@ export async function setObjectPlace(db: TenantDb, objectId: string, placeId: st
   );
 }
 
-/** All places of the tenant as a tree, sites first, by name. Areas whose parent is gone sit at the root. */
 export async function placeTree(db: TenantDb): Promise<Place[]> {
   const { rows } = await db.query<{ id: string; kind: PlaceKind; name: string | null; parent: string | null }>(
     `select o.id, t.key kind, o.name, l.dst_id parent
@@ -99,7 +89,6 @@ export async function placeTree(db: TenantDb): Promise<Place[]> {
   return roots;
 }
 
-/** Flattens a tree to [place, path from the root] pairs, depth first. */
 export function flattenPlaces(tree: Place[], path: string[] = []): { place: Place; path: string[] }[] {
   return tree.flatMap((p) => [{ place: p, path: [...path, p.name] }, ...flattenPlaces(p.children, [...path, p.name])]);
 }

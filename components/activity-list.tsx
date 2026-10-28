@@ -2,7 +2,6 @@ import type { AuditEntry } from "@/lib/engine/audit";
 import type { Locale } from "@/lib/packages/types";
 import type { Dict } from "@/lib/i18n";
 
-/** Audit rows as a list: when, who, what and on which target. Unknown actions show their key. */
 export function ActivityList({ entries, t, locale, names = {} }: { entries: AuditEntry[]; t: Dict; locale: Locale; names?: Record<string, string> }) {
   if (!entries.length) return <p className="text-sm text-mist">{t.noActivity}</p>;
   return (

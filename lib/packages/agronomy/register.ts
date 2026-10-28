@@ -1,7 +1,3 @@
-// The treatments register as the paper one: columns in its order, then the three exports.
-// CSV and JSON follow the fields the official register asks for (crop and variety, treated
-// area, phenological phase, adversity, commercial product, quantity and unit, date, operator)
-// so they can be handed over as they are. No server imports: tests use it directly.
 import type { Quantity } from "../../engine/schema";
 import { PHASE_LABELS, type Phase } from "./index";
 
@@ -16,7 +12,6 @@ export interface CropInfo {
   placePath: string[];
   start: string | null;
   end: string | null;
-  /** Archived crops stay readable (their rows, their page) but leave active lists and menus. */
   archived: boolean;
 }
 
@@ -87,7 +82,6 @@ export function toRegisterRow(e: EventLike, crops: Map<string, CropInfo>): Regis
 const num = (v: number | null, locale: "en" | "it") => (v === null ? "" : v.toLocaleString(locale === "it" ? "it-IT" : "en-GB", { maximumFractionDigits: 3 }));
 const day = (iso: string, locale: "en" | "it") => (locale === "it" ? iso.split("-").reverse().join("/") : iso);
 
-/** The text of one cell, as written on paper. */
 export function cell(r: RegisterRow, c: Column, locale: "en" | "it"): string {
   switch (c) {
     case "crop": return r.crop;
@@ -101,7 +95,6 @@ export function cell(r: RegisterRow, c: Column, locale: "en" | "it"): string {
   }
 }
 
-/** Field names of the CSV, one per official requirement; separate columns for value and unit. */
 export const CSV_FIELDS = [
   "data", "coltura", "specie", "varieta", "appezzamento", "superficie_ha", "fase_fenologica", "avversita",
   "prodotto_commerciale", "quantita", "unita", "operatore", "note", "registrato_da", "registrato_il", "versione",
@@ -109,7 +102,6 @@ export const CSV_FIELDS = [
 
 const csvCell = (v: string) => (/[";\n\r]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v);
 
-/** Semicolon separated, comma decimals, UTF-8 with BOM: opens as is in a spreadsheet set to Italian. */
 export function registerCsv(rows: RegisterRow[]): string {
   const dec = (v: number | null) => (v === null ? "" : String(v).replace(".", ","));
   const lines = rows.map((r) =>

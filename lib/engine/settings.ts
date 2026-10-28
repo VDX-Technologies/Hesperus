@@ -1,5 +1,3 @@
-// engine_settings, the single place for limits, windows and frequencies (jobs in SQL read
-// the same table). Cached briefly per process.
 import type { Db } from "./db";
 
 export type Settings = Record<string, unknown>;

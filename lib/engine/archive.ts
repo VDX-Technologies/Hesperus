@@ -1,7 +1,3 @@
-// Raw inbox -> object storage. Closed hours are written as one gzipped JSONL object per
-// source and hour: raw/{tenant}/{source}/{yyyy}/{mm}/{dd}/{hh}.jsonl.gz. Objects are never
-// overwritten; a late batch for an already flushed hour gets a suffix (hh-1, hh-2, ...).
-// Rows leave the inbox only after their object is stored.
 import { gunzipSync, gzipSync } from "node:zlib";
 import type { Pool } from "pg";
 import type { ObjectStore } from "./store";
@@ -36,7 +32,7 @@ export async function flushRawInbox(pool: Pool, store: ObjectStore, now = new Da
          order by id for update skip locked`,
         [g.source_id, g.hour],
       );
-      if (!rows.length) return; // another flusher has it
+      if (!rows.length) return;
       const lines = rows.map((r) => JSON.stringify({ received_at: r.received_at.toISOString(), body: r.body }));
       const body = gzipSync(lines.join("\n") + "\n");
       let suffix = 0;
@@ -54,12 +50,6 @@ export function readArchive(gz: Uint8Array): { received_at: string; body: Record
   return gunzipSync(gz).toString("utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l));
 }
 
-/**
- * Deletes document bytes (docs/...) no documents row points at: left by a request that stored the
- * file and then failed, or by a deleted document. Only objects older than grace go, so a request
- * still between putNew and its insert keeps its file; each batch is checked against the table
- * right before its deletes.
- */
 export async function sweepOrphanDocuments(pool: Pool, store: ObjectStore, now = new Date(), graceMs = 24 * 3600_000) {
   const old = (await store.entries("docs/")).filter((e) => now.getTime() - e.modified.getTime() > graceMs);
   const deleted: string[] = [];

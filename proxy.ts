@@ -1,7 +1,6 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
-// reachable without signing in
 const PUBLIC = /^\/(?:login|status)(?:\/|$)/;
 
 function contentSecurityPolicy(nonce: string) {
@@ -13,7 +12,6 @@ function contentSecurityPolicy(nonce: string) {
     supabaseOrigin = url.origin;
     websocketOrigin = `${url.protocol === "https:" ? "wss:" : "ws:"}//${url.host}`;
   } catch {
-    // A missing local configuration leaves only same-origin connections enabled.
   }
   const connectSources = ["'self'", supabaseOrigin, websocketOrigin, ...(dev ? ["ws:"] : [])].filter(Boolean).join(" ");
   return [
@@ -31,10 +29,6 @@ function contentSecurityPolicy(nonce: string) {
   ].filter(Boolean).join("; ");
 }
 
-/**
- * Sends visitors without a session cookie to /login and refreshes signed-in sessions.
- * This is only an optimistic check: pages and server-side tenant checks do the authorization.
- */
 export async function proxy(request: NextRequest) {
   const nonce = globalThis.crypto.randomUUID().replaceAll("-", "");
   const csp = contentSecurityPolicy(nonce);
@@ -56,8 +50,6 @@ export async function proxy(request: NextRequest) {
   let response = nextResponse();
   const hasSessionCookie = request.cookies.getAll().some((cookie) => /^sb-.+-auth-token(?:\.\d+)?$/.test(cookie.name) && cookie.value.length > 0);
   const path = request.nextUrl.pathname;
-  // Avoid initializing Supabase on signed-out visits. Protected pages still verify the JWT
-  // in requireUser(), and authenticated requests still refresh cookies below when needed.
   if (!hasSessionCookie) {
     if (PUBLIC.test(path)) return response;
     return loginRedirect();
@@ -75,7 +67,6 @@ export async function proxy(request: NextRequest) {
       },
     },
   });
-  // getClaims refreshes the session when needed and verifies the JWT without calling the auth server
   const { data } = await supabase.auth.getClaims();
   const user = data?.claims.sub;
   if (!user && !PUBLIC.test(path)) return loginRedirect();
@@ -83,6 +74,5 @@ export async function proxy(request: NextRequest) {
 }
 
 export const config = {
-  // everything except the API (token auth / public health), static files and PWA assets
   matcher: ["/((?!api/|_next/static|_next/image|favicon.ico|icon|apple-icon|manifest.webmanifest|sw.js|.*\\.(?:png|svg|jpg|webp)$).*)"],
 };

@@ -1,14 +1,10 @@
 "use client";
-// Entry form of any register, built for a phone in the field: pick the object and the fields
-// the type takes from it fill in, the date starts at today, "Repeat last" copies the previous
-// entry of this user.
 import { useState } from "react";
 import { EventForm, type EventFormLabels, type EventFormValues } from "@/components/event-form";
 import type { Schema } from "@/lib/engine/schema";
 import { recordEntry } from "@/app/terra/o/[slug]/registers/actions";
 
 export type ObjectOption = { id: string; label: string; values: Record<string, string> };
-/** Objects of one `also` type the entry can be linked to besides its subject. */
 export type AlsoOption = { type: string; label: string; objects: { id: string; label: string }[] };
 
 const today = () => {
@@ -24,9 +20,7 @@ export function RegisterForm({
   schema: Schema;
   objects: ObjectOption[];
   also?: AlsoOption[];
-  /** Values of the user's last entry, for "Repeat last". */
   last: EventFormValues | null;
-  /** Values of the entry being corrected. */
   initial?: EventFormValues;
   editId?: number;
   suggestions: Record<string, string[]>;

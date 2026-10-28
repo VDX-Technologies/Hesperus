@@ -1,13 +1,9 @@
-// The push source a research pipeline sends with: module "custom", bound to one project, so its
-// token writes that project's results (and datasets) and nothing else. Used by the admin engine
-// page and scripts/create-research-source.ts.
 import { forTenant, type Db } from "./engine/db";
 import { getObject, objectByExternalId, type CustomObject } from "./engine/custom-objects";
 import { createSource, type Source } from "./engine/sources";
 import { record, type Actor } from "./engine/audit";
 import { RESEARCH } from "./research";
 
-/** `project` is the project's id or its external id. */
 export async function createResearchSource(
   pool: Db,
   tenantId: string,

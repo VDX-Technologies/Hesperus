@@ -11,13 +11,10 @@ export const metadata: Metadata = {
   description: "Research projects, their runs and their results.",
 };
 
-/** The research console: a web app of its own on the shared engine, read through the research types. */
 export default async function ResearchLayout(props: LayoutProps<"/research/o/[slug]">) {
   const { slug } = await props.params;
-  // VDX turns the console on per organization, from the vendor console
   const { supabase, user, org, isAdmin } = await requireConsole(slug, "research");
   const { t, locale } = await getT();
-  // the consent is signed once, on whichever console the user opens first
   const mustSign = !isAdmin && !(await getConsent(supabase, user.id));
   return (
     <>
@@ -34,7 +31,6 @@ export default async function ResearchLayout(props: LayoutProps<"/research/o/[sl
             { href: `/research/o/${slug}/types`, label: t.schemaEditor },
             { href: `/research/o/${slug}/activity`, label: t.activity },
             { href: `/research/o/${slug}/settings`, label: t.settings },
-            // the organization's other consoles, by their own entry point
             ...enabledConsoles(org)
               .filter((c) => c.id !== "research")
               .map((c) => ({ href: c.href(slug), label: c.name })),

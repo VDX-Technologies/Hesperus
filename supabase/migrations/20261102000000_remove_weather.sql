@@ -1,4 +1,3 @@
--- Remove the retired weather warnings feature and its scheduled job.
 delete from public.engine_jobs where name = 'weather';
 drop table if exists public.weather_notification_outbox cascade;
 drop table if exists public.weather_notification_subscriptions cascade;

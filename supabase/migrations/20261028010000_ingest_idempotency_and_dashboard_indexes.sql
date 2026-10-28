@@ -1,4 +1,3 @@
--- Deduplicate retried source messages and make object-centric dashboard history lookups cheaper.
 alter table public.events add column idempotency_key text;
 
 create unique index events_source_idempotency

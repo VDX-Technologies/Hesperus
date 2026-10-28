@@ -8,7 +8,6 @@ import { TypeEditorPage } from "@/components/registers/type-editor-page";
 import { saveObjectTypeAction, saveType } from "../actions";
 import { registerContext, typeFrom } from "../context";
 
-/** The schema editor: `?key=` edits an event type, `?kind=object&key=` an object type. */
 export default async function EditType(props: PageProps<"/terra/o/[slug]/registers/types">) {
   const { slug } = await props.params;
   const sp = await props.searchParams;

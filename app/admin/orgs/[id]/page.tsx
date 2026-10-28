@@ -26,7 +26,6 @@ async function toggleModule(formData: FormData) {
   "use server";
   const { user } = await requireAdmin();
   const org = String(formData.get("org"));
-  // service role: customers may only touch the "config" column of org_modules
   await createAdminClient()
     .from("org_modules")
     .upsert({ org_id: org, module: String(formData.get("module")), enabled: formData.get("enabled") === "1" });
@@ -44,7 +43,6 @@ async function toggleConsole(formData: FormData) {
   if (error) throw new Error(error.message);
   const current: string[] = data.consoles ?? [];
   const consoles = parseConsoles(on ? [...current, id] : current.filter((c) => c !== id));
-  // an organization without consoles would leave its users nowhere to land
   if (!consoles.length) throw new Error("an organization needs at least one console");
   const { error: e } = await supabase.from("organizations").update({ consoles }).eq("id", org);
   if (e) throw new Error(e.message);
@@ -69,7 +67,6 @@ async function saveThresholds(formData: FormData) {
   revalidatePath(path(org));
 }
 
-/** Deletes one push token, or all of the organization's when no source id is sent. */
 async function deleteTokens(formData: FormData) {
   "use server";
   const { user } = await requireAdmin();
@@ -148,7 +145,6 @@ async function addMember(formData: FormData) {
     if (error) throw new Error(error.message);
     userId = data.user.id;
   } else {
-    // The password field is explicitly labeled as temporary: apply it to existing accounts too.
     const { error } = await admin.auth.admin.updateUserById(userId, { password });
     if (error) throw new Error(error.message);
   }
@@ -179,7 +175,6 @@ async function removeMember(formData: FormData) {
   "use server";
   const { user } = await requireAdmin();
   const org = String(formData.get("org"));
-  // only the membership: the login may belong to other organizations too
   await createAdminClient().from("memberships").delete().eq("org_id", org).eq("user_id", String(formData.get("user")));
   await record(tenantDb(org), user, "member.remove", { data: { user: String(formData.get("user")) } });
   revalidatePath(path(org));
@@ -296,7 +291,6 @@ function Overview({
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         {CONSOLES.map((c) => {
           const on = consoles.includes(c.id);
-          // the last console stays on: the organization's users need somewhere to land
           const last = on && consoles.length === 1;
           return (
             <form key={c.id} action={toggleConsole} className={`card p-5 ${on ? "border-ice/40" : ""}`}>
@@ -318,7 +312,6 @@ function Overview({
   );
 }
 
-/** The organization's push tokens (one per gateway source): delete one, or all of them at once. */
 async function Tokens({ id, t, locale }: Ctx & { locale: Locale }) {
   const { rows } = await tenantDb(id).query<{ id: string; name: string; module: string; token_hint: string | null; last_seen: Date | null }>(
     `select id, name, module, token_hint, last_seen from sources where tenant_id = $1 and connector = 'push' order by name`,
@@ -372,10 +365,8 @@ async function Tokens({ id, t, locale }: Ctx & { locale: Locale }) {
 }
 
 const SENSOR_NAMES: Record<string, string> = { bh1750: "Luce BH1750", ldr: "Fotoresistenza", mlx90614: "IR MLX90614" };
-/** Firmware before 1.2.0 does not report its sensors: a reading in the last day means the sensor is there. */
 const INFERRED: Record<string, string> = { lux: "Luce", leaf_c: "IR" };
 
-/** Which sensors each Heltec node finds at every push: green detected, red missing. */
 async function NodeSensors({ id, t, locale }: Ctx & { locale: Locale }) {
   const nodes = await listObjects(tenantDb(id), "lora");
   if (!nodes.length) return null;
@@ -417,12 +408,10 @@ async function NodeSensors({ id, t, locale }: Ctx & { locale: Locale }) {
   );
 }
 
-/** One place with its areas below; areas can be renamed, moved under another place, removed. */
 function PlaceNode({ id, place, all, t }: Ctx & {
   place: Place;
   all: { place: Place; path: string[] }[];
 }) {
-  // a place cannot move under itself or its own areas
   const below = new Set(flattenPlaces([place]).map((p) => p.place.id));
   return (
     <li className="py-2">
@@ -535,7 +524,6 @@ async function Members({ id, t }: Ctx) {
   const admin = createAdminClient();
   const { data: members, error } = await admin.from("memberships").select("user_id, role").eq("org_id", id);
   if (error) throw new Error(error.message);
-  // one lookup per member instead of listing every user of the platform
   const users = await Promise.all((members ?? []).map((m) => admin.auth.admin.getUserById(m.user_id)));
 
   return (

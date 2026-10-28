@@ -7,7 +7,6 @@ import { TypeEditorPage } from "@/components/registers/type-editor-page";
 import { saveObjectTypeAction } from "../../actions";
 import { researchContext } from "../../context";
 
-/** The schema editor of an object type (owner only): `?key=` edits a saved one. */
 export default async function EditType(props: PageProps<"/research/o/[slug]/types/edit">) {
   const { slug } = await props.params;
   const { key } = await props.searchParams;

@@ -1,5 +1,3 @@
-// Turning a console on from the vendor console: new organizations start with Terra, Research loads
-// its types the first time, and a type the customer has since edited is left as it is.
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { Client } from "pg";
 vi.mock("server-only", () => ({}));

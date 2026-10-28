@@ -1,6 +1,3 @@
-# Deploys the app to Vercel with the CLI. The Hobby plan can't build private repos owned by
-# a GitHub organisation through the Git integration, but CLI deploys with a personal token work.
-# Repo secrets: VERCEL_TOKEN, VERCEL_ORG_ID, VERCEL_PROJECT_ID.
 name: Deploy
 
 on:

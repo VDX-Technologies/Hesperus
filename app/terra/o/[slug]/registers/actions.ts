@@ -8,7 +8,6 @@ import { deleteObjectForm, formError, formText, saveObjectForm, saveObjectTypeFo
 import type { EventFormState } from "@/components/event-form";
 import { registerContext, typeFrom } from "./context";
 
-/** Records an entry of any register, or with `supersedes` a corrected version of one. */
 export async function recordEntry(_prev: EventFormState, form: FormData): Promise<EventFormState> {
   const slug = String(form.get("slug"));
   const ctx = await registerContext(slug);
@@ -22,7 +21,6 @@ export async function recordEntry(_prev: EventFormState, form: FormData): Promis
   if (!object) return { error: "objectRequired" };
   const supersedes = Number(form.get("supersedes") || 0);
   try {
-    // the other objects of the `also` types, checked by the engine
     const also = form.getAll("_also").map(String).filter(Boolean);
     const input = { ts: new Date(String(_ts)), payload: fields, objectIds: [object, ...new Set(also)] };
     if (supersedes) await correctEvent(ctx.db, specOf(t, ctx.pkgs), ctx.author, supersedes, input);
@@ -35,7 +33,6 @@ export async function recordEntry(_prev: EventFormState, form: FormData): Promis
   return { ok: Date.now() };
 }
 
-/** Voids an entry with the reason given; it leaves the lists and stays in the history. */
 export async function voidEntry(form: FormData): Promise<void> {
   const slug = String(form.get("slug"));
   const ctx = await registerContext(slug);
@@ -51,7 +48,6 @@ export async function voidEntry(form: FormData): Promise<void> {
   redirect(error ? `${base}?error=${error}` : `${base}?voided=1`);
 }
 
-/** Creates or replaces a custom event type from the editor (owner only). */
 export async function saveType(_prev: EventFormState, form: FormData): Promise<EventFormState> {
   const slug = String(form.get("slug"));
   const ctx = await registerContext(slug);
@@ -72,7 +68,6 @@ export async function saveType(_prev: EventFormState, form: FormData): Promise<E
   redirect(`/terra/o/${slug}/registers/${encodeURIComponent(type)}`);
 }
 
-/** Creates or replaces a custom object type from the editor (owner only). */
 export async function saveObjectTypeAction(_prev: EventFormState, form: FormData): Promise<EventFormState> {
   const slug = String(form.get("slug"));
   const ctx = await registerContext(slug);
@@ -82,7 +77,6 @@ export async function saveObjectTypeAction(_prev: EventFormState, form: FormData
   redirect(`/terra/o/${slug}/registers/objects/${encodeURIComponent(r.saved)}`);
 }
 
-/** Creates an object of a custom type, or with `id` changes its name, properties and links. */
 export async function saveObjectAction(_prev: EventFormState, form: FormData): Promise<EventFormState> {
   const slug = String(form.get("slug"));
   const ctx = await registerContext(slug);
@@ -92,7 +86,6 @@ export async function saveObjectAction(_prev: EventFormState, form: FormData): P
   redirect(`/terra/o/${slug}/registers/objects/${encodeURIComponent(r.saved.type)}?saved=${r.saved.id}`);
 }
 
-/** Deletes an object of a custom type nothing points at. */
 export async function deleteObjectAction(form: FormData): Promise<void> {
   const slug = String(form.get("slug"));
   const ctx = await registerContext(slug);

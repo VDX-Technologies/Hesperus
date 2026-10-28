@@ -1,7 +1,4 @@
 "use client";
-// The review queue's form: one button per review value, a note, and keys for each (i, d, s by
-// default), j / k to move through the queue and n to write the note. Keys are ignored while
-// typing; Escape leaves the note. The page passes a new `key` per result, so state starts over.
 import { useActionState, useEffect, useRef } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -16,7 +13,6 @@ export function ReviewKeys({
   slug: string;
   id: string;
   choices: ReviewChoice[];
-  /** the current note; null when the type has no note */
   note: string | null;
   noteLabel: string;
   prev: string | null;

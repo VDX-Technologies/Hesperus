@@ -1,6 +1,3 @@
--- The last errors of each source, not only the latest one on sources.last_error, so a source
--- that fails now and then keeps its history. markSeen (lib/engine/sources.ts) appends and trims
--- to the newest 50 per source.
 create table public.source_errors (
   id bigint generated always as identity primary key,
   tenant_id uuid not null references public.organizations (id) on delete cascade,

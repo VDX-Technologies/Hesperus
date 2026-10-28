@@ -1,8 +1,3 @@
-/**
- * POST /api/push/document - a file attached to an object of the tenant's own types.
- * Auth: "Authorization: Bearer <source token>" with the documents scope, of a push source of module "custom".
- * Body: multipart form with "file" and either "objectId" or "type" + "externalId".
- */
 import { ConnectorError } from "@/lib/engine/connectors";
 import { pushDocument } from "@/lib/engine/custom-ingest";
 import { metered } from "@/lib/engine/health";
@@ -18,7 +13,6 @@ export async function POST(request: Request) {
   if ("error" in auth) return auth.error;
   const { db, source } = auth;
 
-  // read within the limit first: formData() on the request itself would buffer a chunked body of any size
   const bytes = await readBody(request, MAX_BODY);
   if (bytes instanceof Response) return bytes;
   let form: FormData;

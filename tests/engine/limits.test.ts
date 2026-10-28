@@ -1,5 +1,3 @@
-// Daily and total limits hold under concurrent requests: the count and the insert run under one
-// per-tenant lock, so two requests racing for the last slot cannot both get it.
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { Pool, type Client } from "pg";
 vi.mock("server-only", () => ({}));

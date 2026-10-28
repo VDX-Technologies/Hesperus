@@ -1,16 +1,3 @@
--- Object types made by the tenant in the schema editor (module "custom"), like event types.
--- Rows already fit object_types: tenant_id set, read and manage policies are tenant-aware.
--- What this adds, all generic:
---   links         declared links of the type: {"project": {"type": "custom.project", "required": true}}
---                 (the key is the link type in public.links; part_of and located_in stay with places)
---   field_order   the editor's order of the properties
---   format        a property {"type": "object", "format": "schema"} holds a field schema itself
---   schemaFrom    a property {"type": "object", "schemaFrom": "project.result_schema"} is validated
---                 against the schema held by the object it is linked to through "project"
---   also          event_types: other object types an event may be linked to besides its subject
--- A parent's schema can change later: objects already saved are not checked again until they are
--- written, the same rule as a type whose schema changes.
-
 alter table public.object_types
   add column links jsonb not null default '{}',
   add column field_order text[];
@@ -22,8 +9,6 @@ insert into public.engine_settings (key, value, description) values
   ('custom.objects_max', '5000', 'Objects of custom types a tenant can hold')
 on conflict (key) do nothing;
 
--- Problems of a field schema held as a value (format "schema"); null when fine. The editor checks
--- the same rules first with readable messages (checkFields).
 create or replace function public.check_field_schema(s jsonb) returns text
 language plpgsql immutable as $$
 declare
@@ -44,9 +29,6 @@ begin
 end;
 $$;
 
--- Checks the schemaFrom properties of an object against its parents' schemas. The parent through
--- link `via` can be given (a link being inserted), else it is read from public.links; a property
--- whose parent is not linked yet is checked when the link is made.
 create or replace function public.check_delegated(
   tenant uuid, obj uuid, schema jsonb, props jsonb, via text default null, via_dst uuid default null
 ) returns text
@@ -98,12 +80,9 @@ begin
 end;
 $$;
 
--- runs after objects_validate (triggers fire in name order)
 create trigger objects_validate_schemas before insert or update of type_id, properties, tenant_id
   on public.objects for each row execute function public.objects_validate_schemas();
 
--- A link from an object whose type declares links must be one of them, to an object of the
--- declared type, one per key; types without declared links (packages) keep any link.
 create or replace function public.links_validate_declared() returns trigger
 language plpgsql as $$
 declare

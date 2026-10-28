@@ -8,7 +8,6 @@ import { onAlert, type AlertTransition } from "../../lib/engine/hooks";
 import type { ModulePackage } from "../../lib/engine/package";
 import { testPkg } from "./fixture";
 
-// testPkg plus derived metrics and config acknowledgements ({ack}).
 const pkg: ModulePackage = {
   ...testPkg,
   id: "rulemod",
@@ -67,20 +66,20 @@ describe("derived metrics", () => {
     const defs = pkg.derived!;
     const m1: Record<string, number> = { temp: 20, hum: 50 };
     applyDerived(defs, m1, at(0), state);
-    expect(m1).toEqual({ temp: 20, hum: 50, spread: -30 }); // no previous point: no rate yet
+    expect(m1).toEqual({ temp: 20, hum: 50, spread: -30 });
     const m2: Record<string, number> = { temp: 26 };
     applyDerived(defs, m2, at(1), state);
-    expect(m2).toEqual({ temp: 26, temp_rate: 0.1 }); // spread needs both inputs
+    expect(m2).toEqual({ temp: 26, temp_rate: 0.1 });
     const late: Record<string, number> = { temp: 0 };
     applyDerived(defs, late, at(0), state);
-    expect(late.temp_rate).toBeUndefined(); // out of order: ignored, state untouched
+    expect(late.temp_rate).toBeUndefined();
     expect(state).toEqual({ temp_rate: { ts: at(1).getTime(), v: 26 } });
   });
 
   it("stores derived values as metrics and keeps state across batches", async () => {
     await push([msg("d1", 0, 20, { hum: 50 })]);
     const r = await push([msg("d1", 2, 32)]);
-    expect(r.metrics).toBe(2); // temp + temp_rate
+    expect(r.metrics).toBe(2);
     const { rows } = await db.query(
       `select k.key, m.value from metrics m join metric_keys k on k.id = m.metric_id
        where m.object_id = $1 and k.key in ('spread', 'temp_rate') order by k.key`, [await objectId("d1")],
@@ -93,10 +92,10 @@ describe("rules and alerts", () => {
   it("opens after for_s, tracks the peak, resolves with hysteresis", async () => {
     await rule({ key: "hot", for_s: 120, hysteresis: 2 });
     let r = await push([msg("s1", 0, 31), msg("s1", 1, 33)]);
-    expect(r.alerts.opened).toBe(0); // breaching for 60 s only
+    expect(r.alerts.opened).toBe(0);
     r = await push([msg("s1", 2, 35), msg("s1", 3, 34)]);
     expect(r.alerts.opened).toBe(1);
-    r = await push([msg("s1", 4, 29)]); // within the 2° band: still active
+    r = await push([msg("s1", 4, 29)]);
     expect(r.alerts.resolved).toBe(0);
     r = await push([msg("s1", 5, 27.5)]);
     expect(r.alerts.resolved).toBe(1);
@@ -113,7 +112,7 @@ describe("rules and alerts", () => {
     await rule({ key: "hot", for_s: 120 });
     await push([msg("s2", 0, 31), msg("s2", 1, 29), msg("s2", 2, 31), msg("s2", 3, 31)]);
     expect(await alerts("s2")).toHaveLength(0);
-    await push([msg("s2", 1, 99)]); // older than the last evaluated point
+    await push([msg("s2", 1, 99)]);
     expect(await alerts("s2")).toHaveLength(0);
     await push([msg("s2", 4, 31)]);
     expect(await alerts("s2")).toHaveLength(1);
@@ -135,7 +134,6 @@ describe("rules and alerts", () => {
     await push([msg("c", 20, 35)]);
     await push([msg("c", 21, 36)]);
     const { rows: [a] } = await db.query(`select id from object_alerts`);
-    // viewers see alerts but only owners and members acknowledge them
     await asUser(db, USER, async () => {
       await expect(db.query(`select ack_alert($1) ok`, [a.id])).rejects.toThrow("alert not found");
     });
@@ -145,7 +143,7 @@ describe("rules and alerts", () => {
       expect((await db.query(`select ack_alert($1) ok`, [a.id])).rows[0].ok).toBe(false);
       await expect(db.query(`update object_alerts set status = 'resolved'`)).resolves.toMatchObject({ rowCount: 0 });
       expect((await db.query(`select status, acked_by from object_alerts`)).rows).toEqual([{ status: "acknowledged", acked_by: USER }]);
-    }); // rolled back: the session ends
+    });
     await db.query(`update memberships set role = 'viewer' where user_id = $1`, [USER]);
     await db.query(`update object_alerts set status = 'acknowledged'`);
     await push([msg("c", 22, 20)]);
@@ -178,7 +176,7 @@ describe("rules and alerts", () => {
       await expect(db.query(
         `insert into rules (tenant_id, key, module, metric, op, threshold, severity) values ($1, 'y', 'rulemod', 'temp', '>', 1, 'info')`,
         [ORG],
-      )).rejects.toThrow(/row-level security/); // viewers cannot manage rules
+      )).rejects.toThrow(/row-level security/);
     });
   });
 });
@@ -187,7 +185,7 @@ describe("device config", () => {
   it("returns pushed thresholds until the device acknowledges the version", async () => {
     await push([msg("p", 40, 20)]);
     await rule({ key: "hot", push_to_device: true, threshold: 30, hysteresis: 1 });
-    await rule({ key: "cold", op: "<", threshold: 5 }); // not pushed
+    await rule({ key: "cold", op: "<", threshold: 5 });
     let r = await push([msg("p", 41, 20)]);
     expect(r.configs).toEqual([{
       type: "sensor", externalId: "p", version: expect.any(Number),

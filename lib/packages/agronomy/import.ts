@@ -1,7 +1,3 @@
-// Rows of an uploaded file that are agronomy work: the file is read as a whole to say what it is
-// about (treatments, harvests, sowings), then each row becomes an event of that register on its
-// crop. Crops are matched by name and created when missing; what a row leaves out is taken from
-// the crop (area, phase), and a treatment's quantity is the dose times the area when not given.
 import type { Db } from "../../engine/db";
 import { registerPackage } from "../../engine/ingest";
 import { validateProperties } from "../../engine/schema";
@@ -22,11 +18,6 @@ const KIND_WORDS: [Register, RegExp][] = [
   ["sowing", /semin|sow|trapiant|transplant|impiant/],
 ];
 
-/**
- * What a file is about, from all its rows: a kind column or the file's own kind says it outright;
- * otherwise rows with a product and a dose or a pest are treatments, rows with a quantity and no
- * product are harvests. Null when the rows are not agronomy work (or no subject to hang them on).
- */
 export function classify(messages: RawMessage[], hint = ""): Register | null {
   const rows = messages.filter((m) => text(m.subject));
   if (!rows.length) return null;
@@ -41,11 +32,9 @@ export function classify(messages: RawMessage[], hint = ""): Register | null {
     else if (text(m.quantity) && !text(m.product)) vote("harvest");
   }
   const [best] = [...votes].sort((a, b) => b[1] - a[1]);
-  // most rows must agree, or the file stays a plain register
   return best && best[1] >= rows.length * 0.6 ? best[0] : null;
 }
 
-/** "l/ha", "Lt", "hl" → L; "kg/ha", "g", "q" → kg; "t" → t. */
 export function unitOf(s: string, fallback: "kg" | "L" = "L"): "kg" | "L" | "t" {
   const u = fold(s).replace(/[^a-z]/g, " ");
   if (/\b(t|ton|tonn\w*)\b/.test(u)) return "t";
@@ -66,10 +55,6 @@ export interface AgronomyImport {
   objectIds: string[];
 }
 
-/**
- * Writes the rows as events of `register`, recorded by whoever uploaded the file. `units` is the
- * unit the file's dose or quantity column is written in ("l/ha" from "Dose (l/ha)"), when known.
- */
 export async function importAgronomy(
   db: Db,
   source: Source,
@@ -102,7 +87,6 @@ export async function importAgronomy(
       phase: PHASES.includes(c.properties.phase as Phase) ? (c.properties.phase as Phase) : null,
     });
 
-  // a crop the file names for the first time: its area is the largest the file gives it
   const crop = async (name: string, area: number | undefined): Promise<Crop> => {
     const hit = crops.get(name.toLowerCase());
     if (hit) return hit;
@@ -149,7 +133,6 @@ export async function importAgronomy(
       } else if (register === "harvest") {
         if (quantity !== undefined) {
           const u = unitOf(`${text(m.unit)} ${opts.units ?? ""}`, "kg");
-          // quintals are kept as kg
           const q = /\bq/.test(fold(`${text(m.unit)} ${opts.units ?? ""}`)) ? quantity * 100 : quantity;
           payload.yield = { value: round(q), unit: u === "t" ? "t" : "kg" };
         }
@@ -180,10 +163,6 @@ export async function importAgronomy(
   return out;
 }
 
-/**
- * Entries loaded before files were sorted into registers (records.entry with no file behind them)
- * are read again as file rows and written to the register they belong to; the old entries go.
- */
 export async function moveLegacyEntries(db: Db, tenantId: string, actor: Actor): Promise<{ moved: number; rejected: number }> {
   const { rows } = await db.query<{ id: string; ts: Date; payload: Record<string, unknown>; subject: string | null; source: Source | null }>(
     `select e.id, e.ts, e.payload, o.name subject,
@@ -211,7 +190,6 @@ export async function moveLegacyEntries(db: Db, tenantId: string, actor: Actor):
   return { moved, rejected };
 }
 
-/** How many old entries `moveLegacyEntries` would read. */
 export async function countLegacyEntries(db: Db, tenantId: string): Promise<number> {
   const { rows } = await db.query<{ n: number }>(
     `select count(*)::int n from events where tenant_id = $1 and type = 'records.entry' and document_id is null and author is null`,

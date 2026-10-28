@@ -12,11 +12,8 @@ import type { EventFormState } from "@/components/event-form";
 
 const ERRORS = ["required", "notNumber", "unitRequired", "notDate", "notJson", "manualErr_403", "manualErr_404", "manualErr_409", "manualErr_429"] as const;
 
-/** Where a console keeps its object pages: the types list, one type's objects and the type editor. */
 export type ObjectPaths = { types: string; objects: (type: string) => string; editType: (key?: string) => string };
 
-/** The objects of one custom type: a list with their properties and links, and the form to add or change one.
- * Shared by every console that shows custom objects: each passes its own paths and server actions. */
 export async function ObjectsView({ slug, db, author, type, sp, paths, saveAction, deleteAction }: {
   slug: string;
   db: TenantDb;

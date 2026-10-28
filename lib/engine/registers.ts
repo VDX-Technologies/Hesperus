@@ -1,7 +1,3 @@
-// Registers: every event type with a schema gets a list, an entry form and its exports, with no
-// code of its own. Types come from the enabled packages and from the tenant's schema editor
-// (module "custom", stored in event_types and validated by the same trigger). This file only
-// knows schemas, objects and events: what a field means is up to the type.
 import type { TenantDb } from "./db";
 import type { EventQuery, EventRow } from "./events";
 import type { EventSpec, Author } from "./manual";
@@ -14,7 +10,6 @@ import { checkFields, KEY, parseDecimal, type Quantity, type Schema } from "./sc
 export type Locale = "en" | "it";
 
 export interface EventTypeInfo {
-  /** "agronomy.treatment", "custom.pruning" */
   type: string;
   module: string;
   key: string;
@@ -22,9 +17,7 @@ export interface EventTypeInfo {
   fields: Schema;
   subject: string | null;
   fromSubject: Record<string, string>;
-  /** Other object types the event may be linked to after its subject. */
   also: string[];
-  /** Made in the schema editor (editable by the owner). */
   custom: boolean;
 }
 
@@ -33,11 +26,9 @@ export const FIELD_TYPES = ["string", "number", "integer", "boolean", "timestamp
 
 export const label = (text: Record<string, string> | undefined, locale: Locale, fallback: string) => text?.[locale] ?? text?.en ?? fallback;
 
-/** The fields in the editor's order; keys missing from the order (none, normally) go last. */
 const ordered = (fields: Schema, order: string[] | null): Schema =>
   Object.fromEntries([...(order ?? []).filter((k) => k in fields), ...Object.keys(fields).filter((k) => !order?.includes(k))].map((k) => [k, fields[k]]));
 
-/** Package types first (in package order), then the tenant's own, by name. */
 export async function listEventTypes(db: TenantDb, pkgs: ModulePackage[]): Promise<EventTypeInfo[]> {
   const fromPkgs = pkgs.flatMap((p) =>
     (p.eventTypes ?? []).map((t) => ({
@@ -62,7 +53,6 @@ export const specOf = (t: EventTypeInfo, pkgs: ModulePackage[]): EventSpec => ({
   type: t.type, module: t.module, fields: t.fields, subject: t.subject, also: t.also, pkg: pkgs.find((p) => p.id === t.module),
 });
 
-/** Object types the tenant has objects of, and its own ones: what a custom type can be about. */
 export async function subjectTypes(db: TenantDb): Promise<{ type: string; name: Record<string, string> }[]> {
   const { rows } = await db.query<{ type: string; name: Record<string, string> }>(
     `select distinct t.module || '.' || t.key type, t.name from object_types t
@@ -79,7 +69,6 @@ export interface SubjectObject {
   archived: boolean;
 }
 
-/** Objects of a type, by name; archived ones only with `all` (they stay readable, not choosable). */
 export async function subjectObjects(db: TenantDb, subject: string | null, opts: { all?: boolean } = {}): Promise<SubjectObject[]> {
   const { rows } = await db.query<{ id: string; name: string | null; external_id: string | null; properties: Record<string, unknown> }>(
     `select o.id, o.name, o.external_id, o.properties from objects o join object_types t on t.id = o.type_id
@@ -93,7 +82,6 @@ export async function subjectObjects(db: TenantDb, subject: string | null, opts:
   }));
 }
 
-/** Values already written in the type's free-text fields, most used first, for autocomplete. */
 export async function fieldSuggestions(db: TenantDb, t: EventTypeInfo): Promise<Record<string, string[]>> {
   const fields = Object.entries(t.fields).filter(([, s]) => s.type === "string" && !s.enum).map(([k]) => k);
   if (!fields.length) return {};
@@ -109,20 +97,15 @@ export async function fieldSuggestions(db: TenantDb, t: EventTypeInfo): Promise<
   return out;
 }
 
-// ---- filters --------------------------------------------------------------------------------
-
 export interface RegisterFilters {
-  /** yyyy-mm-dd, both days included */
   from?: string;
   to?: string;
   obj?: string;
-  /** Field values, exact match. */
   fields: Record<string, string>;
 }
 
 export const filterable = (s: PropertySpec) => s.type === "string" || s.type === "boolean" || s.type === "integer" || s.type === "number";
 
-/** Filters from the query string: from, to, obj and f.<field>. */
 export function filtersFrom(t: EventTypeInfo, sp: Record<string, string | string[] | undefined>): RegisterFilters {
   const one = (k: string) => {
     const v = sp[k];
@@ -151,7 +134,6 @@ const day = (s: string | undefined, plus = 0) => {
   return Number.isNaN(d.getTime()) ? undefined : new Date(d.getTime() + plus * 86400000);
 };
 
-/** The filters as an event query, all applied by the database. */
 export function registerQuery(t: EventTypeInfo, f: RegisterFilters): EventQuery {
   const payload: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(f.fields)) {
@@ -173,12 +155,9 @@ export function registerQuery(t: EventTypeInfo, f: RegisterFilters): EventQuery 
   };
 }
 
-// ---- cells and CSV ---------------------------------------------------------------------------
-
 const number = (v: number, locale: Locale) => v.toLocaleString(locale === "it" ? "it-IT" : "en-GB", { maximumFractionDigits: 3 });
 const date = (iso: string, locale: Locale) => (locale === "it" ? iso.split("-").reverse().join("/") : iso);
 
-/** A payload value as text for a list or a PDF. */
 export function fieldText(spec: PropertySpec | undefined, v: unknown, locale: Locale): string {
   if (v === undefined || v === null || v === "") return "";
   if (!spec) return typeof v === "object" ? JSON.stringify(v) : String(v);
@@ -198,7 +177,6 @@ export interface RegisterColumn {
   label: string;
 }
 
-/** Date, object, one column per field, who recorded it. */
 export function registerColumns(t: EventTypeInfo, locale: Locale, text: { date: string; object: string; author: string }): RegisterColumn[] {
   return [
     { key: "_date", label: text.date },
@@ -216,8 +194,6 @@ export function registerCell(t: EventTypeInfo, e: EventRow, key: string, objects
 }
 
 export const csvCell = (value: string) => {
-  // Text cells that begin with spreadsheet formula characters must stay inert when opened in Excel.
-  // Keep plain numeric values (including negative numbers) numeric.
   const numeric = /^-?(?:\d+(?:[.,]\d*)?|[.,]\d+)(?:[eE][-+]?\d+)?$/.test(value.trim());
   const formula = /^[\u0000-\u0020]*[=+\-@]/.test(value);
   const v = formula && !numeric ? `'${value}` : value;
@@ -225,13 +201,11 @@ export const csvCell = (value: string) => {
 };
 export const dec = (v: unknown) => (typeof v === "number" ? String(v).replace(".", ",") : "");
 
-/** Header of the CSV (keys, not labels: stable for whoever reads it); a quantity takes two columns. */
 export function csvHeader(t: EventTypeInfo): string {
   const fields = Object.entries(t.fields).flatMap(([k, s]) => (s.type === "quantity" ? [k, `${k}_unit`] : [k]));
   return "﻿" + ["date", "object", ...fields, "recorded_by", "recorded_at", "version", "id"].join(";") + "\r\n";
 }
 
-/** One CSV line: semicolons, comma decimals, so it opens as is in a spreadsheet set to Italian. */
 export function csvLine(t: EventTypeInfo, e: EventRow, objects: Map<string, string>): string {
   const cells = Object.entries(t.fields).flatMap(([k, s]) => {
     const v = e.payload[k];
@@ -249,8 +223,6 @@ export function csvLine(t: EventTypeInfo, e: EventRow, objects: Map<string, stri
   ].map(csvCell).join(";") + "\r\n";
 }
 
-// ---- schema editor ---------------------------------------------------------------------------
-
 export interface EventTypeInput {
   key: string;
   name: Record<string, string>;
@@ -262,7 +234,6 @@ export interface EventTypeInput {
 
 const TYPE = /^[a-z][a-z0-9_]{0,39}\.[a-z][a-z0-9_]{0,39}$/;
 
-/** Problems of a type definition, null when fine. */
 export function checkEventType(input: EventTypeInput): string | null {
   if (!KEY.test(input.key)) return "invalid key";
   if (!Object.values(input.name).some((n) => n?.trim())) return "a name is required";
@@ -281,7 +252,6 @@ export function checkEventType(input: EventTypeInput): string | null {
   return null;
 }
 
-/** Creates or replaces a type of the tenant. Only the owner; events already recorded stay as they are. */
 export async function saveEventType(db: TenantDb, author: Author, input: EventTypeInput): Promise<string> {
   if (author.role !== "owner") throw new ManualEventError(403, "only the owner manages event types");
   const err = checkEventType(input);
@@ -303,12 +273,8 @@ export async function saveEventType(db: TenantDb, author: Author, input: EventTy
   return type;
 }
 
-// ---- form values ------------------------------------------------------------------------------
-
-/** The entry form: the day of the event (`_ts`) then the type's fields. */
 export const formSchema = (t: EventTypeInfo): Schema => ({ _ts: { type: "timestamp", required: true, label: { en: "Date", it: "Data" } }, ...t.fields });
 
-/** A value as form text: comma decimals, dates as yyyy-mm-dd. */
 export function formText(spec: PropertySpec | undefined, v: unknown): Record<string, string> {
   if (v === undefined || v === null) return {};
   const dec = (n: unknown) => (typeof n === "number" ? String(n).replace(".", ",") : "");
@@ -321,14 +287,12 @@ export function formText(spec: PropertySpec | undefined, v: unknown): Record<str
   return { "": typeof v === "object" ? JSON.stringify(v) : String(v) };
 }
 
-/** A recorded event back into form text, for "Repeat last" and corrections. */
 export function eventValues(t: EventTypeInfo, e: { ts: Date; payload: Record<string, unknown>; objectIds: string[] }): Record<string, string> {
   const out: Record<string, string> = { _object: e.objectIds[0] ?? "", _also: e.objectIds.slice(1).join(","), _ts: e.ts.toISOString().slice(0, 10) };
   for (const [k, s] of Object.entries(t.fields)) for (const [suffix, v] of Object.entries(formText(s, e.payload[k]))) out[k + suffix] = v;
   return out;
 }
 
-/** Form text the type takes from an object when it is chosen (fromSubject: field ← property). */
 export function subjectValues(t: EventTypeInfo, o: SubjectObject): Record<string, string> {
   const out: Record<string, string> = {};
   for (const [field, prop] of Object.entries(t.fromSubject))
@@ -336,7 +300,6 @@ export function subjectValues(t: EventTypeInfo, o: SubjectObject): Record<string
   return out;
 }
 
-/** An object's properties back into form text, for editing it with its schema's form. */
 export function propertyValues(schema: Schema, properties: Record<string, unknown>): Record<string, string> {
   const out: Record<string, string> = {};
   for (const [k, s] of Object.entries(schema)) for (const [suffix, v] of Object.entries(formText(s, properties[k]))) out[k + suffix] = v;

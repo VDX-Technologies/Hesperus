@@ -1,11 +1,3 @@
-/**
- * Signs firmware releases offline. Keep the private key off the server (a password manager or an
- * offline machine): whoever holds it can install firmware on every node.
- *   npx tsx scripts/sign-firmware.ts keygen <key.pem>
- *     writes a new private key and prints the public key, for FIRMWARE_PUBLIC_KEY and the node
- *   npx tsx scripts/sign-firmware.ts sign <key.pem> <version> <firmware.bin>
- *     prints the signature to paste in /admin/firmware with the same version and file
- */
 import { createHash, createPrivateKey, createPublicKey, generateKeyPairSync, sign } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import { signedMessage, validVersion } from "../lib/engine/firmware";

@@ -1,6 +1,3 @@
-// Sources and their push tokens. Only the sha256 of a token is stored; the token itself is
-// shown once when the source is created. The primary token (sources.token_hash) has every scope;
-// extra tokens (source_tokens) carry their own scopes and may expire.
 import { createHash, randomBytes } from "node:crypto";
 import { isIP } from "node:net";
 import type { Db, TenantDb } from "./db";
@@ -20,10 +17,8 @@ export const hashToken = (token: string) => createHash("sha256").update(token).d
 
 const newToken = () => `vdx_${randomBytes(24).toString("base64url")}`;
 
-/** The shape of every token newToken makes: anything else is refused without a query. */
 export const TOKEN_FORMAT = /^vdx_[A-Za-z0-9_-]{32}$/;
 
-/** write: push messages and firmware; documents: push files; read: pipeline results. */
 export type TokenScope = "write" | "documents" | "read";
 export const TOKEN_SCOPES: readonly TokenScope[] = ["write", "documents", "read"];
 
@@ -43,10 +38,6 @@ export async function createSource(
   return { source: rows[0], token };
 }
 
-/**
- * The source a token belongs to, or null when it is unknown, expired or lacks the scope (no scope:
- * any valid token). Notes when and from where it was used.
- */
 export async function sourceByToken(db: Db, token: string, scope?: TokenScope, ip?: string | null): Promise<Source | null> {
   if (!TOKEN_FORMAT.test(token)) return null;
   const hash = hashToken(token);
@@ -68,10 +59,6 @@ export async function sourceByToken(db: Db, token: string, scope?: TokenScope, i
   return rows[0] ?? null;
 }
 
-/**
- * Replaces a source's primary token and returns the new one. The old one stops working at once,
- * or after graceSeconds, kept meanwhile as an extra token with every scope (overlapping rotation).
- */
 export async function rotateToken(db: TenantDb, sourceId: string, graceSeconds = 0): Promise<string> {
   const token = newToken();
   const { rows } = await db.query<{ old_hash: string | null; old_hint: string | null }>(
@@ -90,7 +77,6 @@ export async function rotateToken(db: TenantDb, sourceId: string, graceSeconds =
   return token;
 }
 
-/** Adds a token with only some scopes, optionally expiring, next to the primary one. */
 export async function createToken(
   db: TenantDb, sourceId: string, t: { scopes: TokenScope[]; expiresAt?: Date | null },
 ): Promise<{ id: string; token: string }> {
@@ -116,7 +102,6 @@ export interface ExtraToken {
   lastUsedIp: string | null;
 }
 
-/** The extra tokens of a source, expired ones included until they are deleted. */
 export async function sourceTokens(db: TenantDb, sourceId: string): Promise<ExtraToken[]> {
   const { rows } = await db.query<{ id: string; token_hint: string; scopes: TokenScope[]; expires_at: Date | null; last_used_at: Date | null; last_used_ip: string | null }>(
     `select id, token_hint, scopes, expires_at, last_used_at, host(last_used_ip) last_used_ip from source_tokens
@@ -126,10 +111,6 @@ export async function sourceTokens(db: TenantDb, sourceId: string): Promise<Extr
   return rows.map((r) => ({ id: r.id, hint: r.token_hint, scopes: r.scopes, expiresAt: r.expires_at, lastUsedAt: r.last_used_at, lastUsedIp: r.last_used_ip }));
 }
 
-/**
- * Deletes the push token of one source, or of every source of the organization when no source is
- * given: pushes with it are refused at once, the source and its data stay. Returns how many went.
- */
 export async function revokeTokens(db: Db, tenantId: string, sourceId?: string): Promise<number> {
   const { rowCount } = await db.query(
     `update sources set token_hash = null, token_hint = null
@@ -143,7 +124,6 @@ export async function revokeTokens(db: Db, tenantId: string, sourceId?: string):
   return (rowCount ?? 0) + (extra.rowCount ?? 0);
 }
 
-/** Deletes one extra token. */
 export async function deleteToken(db: TenantDb, tokenId: string): Promise<boolean> {
   const { rowCount } = await db.query(`delete from source_tokens where tenant_id = $1 and id = $2`, [db.tenantId, tokenId]);
   return !!rowCount;
@@ -151,10 +131,6 @@ export async function deleteToken(db: TenantDb, tokenId: string): Promise<boolea
 
 const KEPT_ERRORS = 50;
 
-/**
- * Notes that a source sent something: when, and what went wrong (null when nothing did). An error
- * is also appended to source_errors, which keeps the newest 50 per source.
- */
 export async function markSeen(db: Db, source: Source, error: string | null, now = new Date()): Promise<void> {
   await db.query(`update sources set last_seen = $2, last_error = $3 where id = $1 and tenant_id = $4`, [
     source.id, now, error?.slice(0, 500) ?? null, source.tenant_id,
@@ -171,7 +147,6 @@ export async function markSeen(db: Db, source: Source, error: string | null, now
   );
 }
 
-/** A source's recent errors, newest first. */
 export async function sourceErrors(db: TenantDb, sourceId: string, limit = KEPT_ERRORS): Promise<{ at: Date; error: string }[]> {
   const { rows } = await db.query<{ at: Date; error: string }>(
     `select at, error from source_errors where tenant_id = $1 and source_id = $2 order by at desc, id desc limit $3`,
@@ -184,14 +159,12 @@ export interface SourceState {
   id: string;
   name: string;
   status: Source["status"];
-  /** The last four characters of the token, null once it was deleted. */
   tokenHint: string | null;
   lastSeen: Date | null;
   lastError: string | null;
   createdAt: Date;
 }
 
-/** The push sources bound to one object (sources.config.scope.id): a project's pipelines. */
 export async function scopedSources(db: TenantDb, objectId: string): Promise<SourceState[]> {
   const { rows } = await db.query<{ id: string; name: string; status: Source["status"]; token_hint: string | null; last_seen: Date | null; last_error: string | null; created_at: Date }>(
     `select id, name, status, token_hint, last_seen, last_error, created_at from sources

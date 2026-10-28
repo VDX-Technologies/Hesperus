@@ -11,12 +11,10 @@ const security = [
 
 const nextConfig: NextConfig = {
   poweredByHeader: false,
-  // CSV uploads go through a server action: room for upload.max_bytes (5 MB) plus multipart overhead
   experimental: { serverActions: { bodySizeLimit: "6mb" } },
   async headers() {
     return [{ source: "/:path*", headers: security }];
   },
-  // the customer console moved under /terra: old bookmarks and already-delivered push notifications still land
   async redirects() {
     return [{ source: "/o/:path*", destination: "/terra/o/:path*", permanent: false }];
   },

@@ -1,13 +1,6 @@
--- Rollups and retention. One maintenance function, run by pg_cron every rollup.interval_min:
---   1. 5 min rollups from raw metrics, hourly rollups from the 5 min ones. Each run recomputes
---      from (watermark - rollup.lookback_min), so late data inside the lookback is picked up.
---   2. Retention: drops raw day partitions older than retention.raw_days (never past what the
---      rollups have covered), trims rollups per retention.rollup_*_days (null = forever).
---   3. Creates the metric partitions ahead.
-
 create table public.engine_jobs (
   name text primary key,
-  watermark timestamptz,                       -- rollups: end of the last closed bucket done
+  watermark timestamptz,
   last_run timestamptz,
   last_ok timestamptz,
   last_error text,
@@ -23,7 +16,7 @@ declare
   lookback interval := make_interval(mins => coalesce((public.engine_setting('rollup.lookback_min') #>> '{}')::integer, 60));
   wm timestamptz;
   t_from timestamptz;
-  t_to timestamptz := date_bin('5 minutes', p_now, 'epoch');   -- closed 5 min buckets only
+  t_to timestamptz := date_bin('5 minutes', p_now, 'epoch');
   h_to timestamptz := date_trunc('hour', p_now, 'UTC');
   n5 integer;
   n60 integer;
@@ -75,7 +68,6 @@ declare
   n60 integer := 0;
 begin
   if raw_days is not null then
-    -- Raw data is only removed once rollups have covered it.
     cutoff := least(p_now - make_interval(days => raw_days), coalesce(covered, '-infinity'));
     for part in
       select c.relname from pg_inherits i join pg_class c on c.oid = i.inhrelid
@@ -102,7 +94,6 @@ begin
 end;
 $$;
 
--- The scheduled entry point; records outcome and timing in engine_jobs ('maintenance').
 create or replace function public.engine_maintenance(p_now timestamptz default now())
 returns jsonb language plpgsql as $$
 declare
@@ -128,8 +119,6 @@ begin
 end;
 $$;
 
--- (Re)schedules the maintenance job from rollup.interval_min. Call it after changing the
--- setting. Without pg_cron (local dev, tests) it does nothing and returns false.
 create or replace function public.engine_schedule() returns boolean language plpgsql as $$
 declare
   every integer := coalesce((public.engine_setting('rollup.interval_min') #>> '{}')::integer, 15);

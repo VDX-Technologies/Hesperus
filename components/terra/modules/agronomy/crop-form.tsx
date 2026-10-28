@@ -1,6 +1,4 @@
 "use client";
-// Crop form: name and place above the crop's own properties (species, area, phase, dates).
-// With `id` it edits an existing crop: name and place are fixed, the properties change.
 import { EventForm, type EventFormLabels, type EventFormValues } from "@/components/event-form";
 import { CROP_FORM } from "@/lib/packages/agronomy";
 import { saveCrop } from "@/app/terra/o/[slug]/crops/actions";

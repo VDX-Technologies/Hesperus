@@ -1,6 +1,3 @@
-// The VDX Research seed: configuration only, saved through the editor's APIs. Running it twice
-// changes nothing; a TESS project then holds its own result fields (TIC id) and a run links the
-// project to the datasets it read.
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { Client } from "pg";
 vi.mock("server-only", () => ({}));
@@ -51,7 +48,6 @@ describe("research seed", () => {
     });
     const result = { type: "custom.result", name: "TIC 123", links: { project: tess } };
     await createObject(A, member, { ...result, properties: { score: 0.93, review: "to_review", run, extra: { tic_id: 123 } } });
-    // the project's own fields are enforced
     await expect(createObject(A, member, { ...result, name: "TIC x", properties: { score: 1, review: "to_review", extra: {} } }))
       .rejects.toMatchObject({ status: 400 });
     await expect(createObject(A, member, { ...result, name: "TIC y", properties: { score: 1, review: "maybe" } }))

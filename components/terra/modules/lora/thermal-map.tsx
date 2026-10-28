@@ -8,9 +8,8 @@ export interface ThermalFrame {
 }
 
 type Mode = "temp" | "dew";
-const SCALE = 24; // canvas pixels per sensor pixel
+const SCALE = 24;
 
-// "Iron" palette of thermal cameras: black -> purple -> red -> orange -> yellow -> white
 export const IRON: [number, number, number, number][] = [
   [0, 0, 0, 10],
   [0.2, 70, 0, 140],
@@ -19,7 +18,6 @@ export const IRON: [number, number, number, number][] = [
   [0.85, 255, 210, 50],
   [1, 255, 255, 230],
 ];
-// Condensation risk: distance from the dew point. Blue = wet, green = safe, amber = dry/hot.
 export const DEW: [number, number, number, number][] = [
   [0, 40, 90, 255],
   [0.2, 120, 190, 255],
@@ -41,7 +39,6 @@ export function ramp(stops: [number, number, number, number][], x: number): [num
   return stops.at(-1)!.slice(1) as [number, number, number];
 }
 
-/** Bilinear sample of the frame at fractional sensor coordinates. */
 function sample(f: ThermalFrame, x: number, y: number) {
   const cx = Math.min(f.w - 1, Math.max(0, x)),
     cy = Math.min(f.h - 1, Math.max(0, y));
@@ -55,10 +52,6 @@ function sample(f: ThermalFrame, x: number, y: number) {
   return (at(x0, y0) * (1 - fx) + at(x1, y0) * fx) * (1 - fy) + (at(x0, y1) * (1 - fx) + at(x1, y1) * fx) * fy;
 }
 
-/**
- * What the LoRa infrared array sees, as a heat map. "temp" colours by temperature (auto range),
- * "dew" colours by distance from the dew point so wet leaves stand out in blue.
- */
 export function ThermalMap({
   frame,
   dew,
@@ -92,7 +85,6 @@ export function ThermalMap({
     for (let py = 0; py < H; py++)
       for (let px = 0; px < W; px++) {
         const v = sample(frame, (px + 0.5) / SCALE - 0.5, (py + 0.5) / SCALE - 0.5);
-        // dew mode: 0 °C from the dew point = 0.2, +8 °C = 1
         const [r, g, b] = canDew ? ramp(DEW, 0.2 + (v - dew!) / 10) : ramp(IRON, (v - lo) / span);
         const i = (py * W + px) * 4;
         img.data[i] = r;
@@ -101,7 +93,6 @@ export function ThermalMap({
         img.data[i + 3] = 255;
       }
     ctx.putImageData(img, 0, 0);
-    // max and min markers
     const mark = (v: number, color: string) => {
       const k = frame.data.indexOf(v);
       ctx.strokeStyle = color;
@@ -154,7 +145,6 @@ export function ThermalMap({
           className="block w-full rounded-md"
           style={{ aspectRatio: `${frame.w} / ${frame.h}`, imageRendering: "auto" }}
           onPointerDown={(e) => {
-            // tap on phones shows the reading at that point
             const r = e.currentTarget.getBoundingClientRect();
             const x = ((e.clientX - r.left) / r.width) * frame.w - 0.5;
             const y = ((e.clientY - r.top) / r.height) * frame.h - 0.5;

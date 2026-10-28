@@ -2,7 +2,6 @@ import { CoreShell } from "../CoreShell";
 import { hourLabels, noise, series, sun } from "../data";
 import { CORE, Card, Chart, Dot, Metric, SectionLabel } from "../ui";
 
-/** 24 h of a LoRa unit ending at 14:30, sampled every 15 minutes. */
 const END = 14.5 / 24;
 const N = 96;
 const air = series(N, END, (t, i) => 15 + 12.5 * sun(t) + noise(i, 1) * 0.25);
@@ -33,7 +32,6 @@ const METRICS = [
 
 const CHART = { width: 716, height: 300 };
 
-/** Face 1: the LoRa module, a sensor in a greenhouse on a clear afternoon. */
 export function LoraFace() {
   return (
     <CoreShell workspace="Vivai Demo" nav={["Overview", "Alerts", "Settings"]}>

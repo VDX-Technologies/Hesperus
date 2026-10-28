@@ -13,10 +13,6 @@ import { researchContext } from "../../context";
 import { addComment, reviewResult } from "../../actions";
 import { Attachments, OutsideLinks } from "../../attachments";
 
-/**
- * A result: its properties and outside links, the run that produced it, its attachments
- * (previewed), its review, the comments on it in threads and its history.
- */
 export default async function Result(props: PageProps<"/research/o/[slug]/r/[id]">) {
   const { slug, id } = await props.params;
   const { saved, error } = await props.searchParams;
@@ -37,7 +33,6 @@ export default async function Result(props: PageProps<"/research/o/[slug]/r/[id]
   const shown = Object.entries(type.properties).filter(([k, s]) => s.type !== "object" && !editable.has(k) && result.properties[k] !== undefined);
   const extra = (result.properties[RESEARCH.extra] ?? {}) as Record<string, unknown>;
   const own = project ? projectFields(project) : {};
-  // the project's fields first, in its order, then anything else the pipeline sent
   const extraRows = [...Object.entries(own).map(([k, s]) => [k, s] as const), ...Object.keys(extra).filter((k) => !own[k]).map((k) => [k, undefined] as const)]
     .filter(([k]) => extra[k] !== undefined);
   const review = type.properties[RESEARCH.review];

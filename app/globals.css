@@ -5,7 +5,6 @@
   --font-mono: var(--font-plex-mono), ui-monospace, monospace;
 }
 
-/* VDX brand palette (same as vdxtechnologies.com): Black · Steel · Frost · Ice */
 @theme {
   --color-ink-950: #07090d;
   --color-ink-900: #0b0e12;
@@ -54,7 +53,6 @@
     border-radius: 8px;
     padding: 8px 10px;
     color: var(--color-frost);
-    /* 16px avoids the automatic zoom iOS Safari applies to smaller inputs */
     font-size: 16px;
   }
   input[type="range"] {
@@ -74,7 +72,6 @@
   }
 }
 
-/* Room for the notch / home indicator when installed as an app on iPhone */
 @utility safe-top {
   padding-top: env(safe-area-inset-top);
 }
@@ -111,7 +108,6 @@
   }
 }
 
-/* Top progress bar (components/nav-progress.tsx) */
 .nav-progress {
   position: fixed;
   inset: 0 0 auto 0;
@@ -134,7 +130,6 @@
   to { background-position: 150% 0; }
 }
 
-/* Button that submitted a form, until the action finishes */
 [data-busy] {
   position: relative;
   pointer-events: none;
@@ -156,7 +151,6 @@
   to { transform: rotate(360deg); }
 }
 
-/* Pages fade in instead of popping */
 .page-in {
   animation: page-in 220ms ease-out both;
 }
@@ -167,13 +161,11 @@
   .page-in, .nav-progress.is-active { animation: none; }
 }
 
-/* VDX Core faces (login background), from the public website hero. */
 @layer components {
   .core-num {
     font-family: var(--font-plex-mono), ui-monospace, monospace;
     font-variant-numeric: tabular-nums;
   }
-  /* Faces change like the app navigating: the next one wipes in over the last, which sinks back. */
   .core-face {
     opacity: 0;
     z-index: 0;

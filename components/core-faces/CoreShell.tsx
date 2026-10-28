@@ -1,4 +1,3 @@
-/** The VDX Core app frame shared by every face: same bar, same navigation. Only the content changes. */
 export function CoreShell({
   workspace,
   nav,

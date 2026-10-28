@@ -23,16 +23,10 @@ interface Item {
   error?: string;
 }
 
-/** Below this a column is shown for review; a file with every column above it can go in one click. */
 const SURE = 0.75;
 
 let next = 1;
 
-/**
- * Upload queue: any number of files are read on the server, every column is recognised with how
- * sure the guess is, files that are fully recognised are ready to send, the others open for review
- * of the doubtful columns only.
- */
 export function UploadForm({
   slug,
   sources,
@@ -76,7 +70,6 @@ export function UploadForm({
       };
       const status = settle(done);
       patch(it.id, { ...done, status });
-      // a layout confirmed before goes straight in
       if (p.recognition?.known && status === "ready") await send(done);
     } catch {
       patch(it.id, { status: "error", error: "uploadErr_500" });
@@ -86,7 +79,6 @@ export function UploadForm({
   const add = (files: FileList | File[]) => {
     const fresh = [...files].map((file): Item => ({ id: next++, file, status: "reading", mapping: {}, confidence: {} }));
     setItems((xs) => [...xs, ...fresh]);
-    // two at a time: big batches do not flood the server
     const queue = [...fresh];
     const worker = async () => {
       for (let it = queue.shift(); it; it = queue.shift()) await read(it);
@@ -113,10 +105,8 @@ export function UploadForm({
     for (const it of items.filter((x) => x.status === "ready")) await send(it);
   };
 
-  // a column changed by hand is sure: the user said so
   const setField = (it: Item, header: string, field: string) => {
     const mapping = { ...it.mapping };
-    // a field fills one column only
     for (const h in mapping) if (field && mapping[h] === field) mapping[h] = "";
     mapping[header] = field;
     const changed: Item = { ...it, mapping, confidence: { ...it.confidence, [header]: 1 } };
@@ -125,7 +115,6 @@ export function UploadForm({
 
   const changeSource = (id: string) => {
     setSourceId(id);
-    // each register has its own memory: open files are read again against it
     for (const it of items) if (it.status !== "done" && it.status !== "sending") void read(it, id);
   };
 

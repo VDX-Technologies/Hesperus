@@ -6,7 +6,6 @@ import { listAlerts, type ConsoleAlert } from "@/lib/packages/console";
 import { SectionTitle, StatusDot } from "@/components/ui";
 import { PushToggle } from "@/components/terra/push-toggle";
 
-/** Acknowledging only marks the alert as seen; the engine resolves it when the value recovers. */
 async function ackAlert(formData: FormData) {
   "use server";
   const slug = String(formData.get("slug"));
@@ -29,7 +28,6 @@ export default async function Alerts(props: PageProps<"/terra/o/[slug]/alerts">)
       <span className="mt-1.5 flex sm:mt-0">
         <StatusDot status={a.status === "resolved" ? "offline" : a.severity === "alarm" ? "alarm" : "warn"} pulse={a.status === "open"} />
       </span>
-      {/* stacked on phones, one line on wider screens */}
       <div className="flex min-w-0 flex-1 flex-col gap-0.5 sm:flex-row sm:items-center sm:gap-3">
         <span className="text-sm text-mist sm:w-28 sm:shrink-0">{a.object}</span>
         <span className="text-sm sm:flex-1">{a.text}</span>

@@ -1,4 +1,3 @@
-// Outgoing mail for platform alerts. Resend's HTTP API (free tier: 3000 mails/month), no SDK.
 export interface Mail {
   from: string;
   to: string[];
@@ -26,7 +25,6 @@ export class ResendMailer implements Mailer {
   }
 }
 
-/** RESEND_API_KEY from env, or null (alerts are then only logged and shown in the admin). */
 export function mailerFromEnv(): Mailer | null {
   return process.env.RESEND_API_KEY ? new ResendMailer(process.env.RESEND_API_KEY) : null;
 }

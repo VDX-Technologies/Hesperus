@@ -1,6 +1,3 @@
-// What the Research console reads and writes: a project's results filtered by score and review,
-// counted per project, with their attachments, and a review that only touches what changed and
-// leaves its trace in the audit trail. Always inside one tenant.
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { Client } from "pg";
 vi.mock("server-only", () => ({}));
@@ -105,7 +102,6 @@ describe("research console", () => {
     expect(h.bins[2].hi).toBe(0.9);
     const some = await objectHistogram(A, RESEARCH.result, RESEARCH.score, resultFilters({ min: "0.4" }, tess), 2);
     expect(some.bins.map((b) => b.n)).toEqual([1, 2]);
-    // one value: a single bin; nothing numeric, or another tenant's project: no bins
     expect((await objectHistogram(A, RESEARCH.result, RESEARCH.score, resultFilters({}, other))).bins).toEqual([{ lo: 0.95, hi: 0.95, n: 1 }]);
     expect(await objectHistogram(A, RESEARCH.result, RESEARCH.review, resultFilters({}, tess))).toEqual({ min: null, max: null, bins: [] });
     expect((await objectHistogram(B, RESEARCH.result, RESEARCH.score, resultFilters({}, tess))).bins).toEqual([]);
@@ -140,7 +136,6 @@ describe("research console", () => {
     const after = (await getObject(A, ids.a))!;
     expect(after.properties).toMatchObject({ score: 0.9, review: "interesting", note: "curva strana" });
     expect(reviewPatch(after, "interesting", "curva strana")).toBeNull();
-    // emptying the note removes it
     await updateObject(A, owner, ids.a, { properties: reviewPatch(after, "interesting", "")! });
     expect((await getObject(A, ids.a))!.properties.note).toBeUndefined();
     const audit = await listAudit(A, { objectId: ids.a, limit: 10 });
@@ -166,7 +161,6 @@ describe("research console", () => {
     expect(await find({ "f.extra.tic_id": "cinque" })).toEqual(["a", "c", "b", "d"]);
     expect(await find({ sort: "name", order: "asc" })).toEqual(["a", "b", "c", "d"]);
     expect((await find({ sort: "extra.tic_id" }))[0]).toBe("c");
-    // assigned to me: a batch change touches only what differs, "-" unassigns
     const b = (await getObject(A, ids.b))!;
     expect(batchPatch(b, { review: "interesting", assignee: "" })).toBeNull();
     await updateObject(A, owner, ids.b, { properties: batchPatch(b, { assignee: owner.email! })! });
@@ -215,9 +209,7 @@ describe("research console", () => {
     expect(lastVisit(undefined, t0)).toEqual({ since: null, next: `|${t0}` });
     expect(lastVisit("garbage", t0)).toEqual({ since: null, next: `|${t0}` });
     expect(lastVisit(`|${t0 + h}`, t0)).toEqual({ since: null, next: `|${t0}` });
-    // a reload during the first visit: still nothing to compare with
     expect(lastVisit(`|${t0}`, t0 + 60_000)).toEqual({ since: null, next: null });
-    // back the next day: new since the first visit, and that stays during the visit
     expect(lastVisit(`|${t0}`, t0 + 24 * h)).toEqual({ since: new Date(t0), next: `${t0}|${t0 + 24 * h}` });
     expect(lastVisit(`${t0}|${t0 + 24 * h}`, t0 + 24 * h + 60_000)).toEqual({ since: new Date(t0), next: null });
   });

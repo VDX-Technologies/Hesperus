@@ -1,6 +1,3 @@
-// The research pipeline through its source token: the project page shows when it last pushed and
-// what went wrong, it reads back its project's reviewed results, and a push that creates a run or
-// a high-scoring result tells the project's emails and webhook once.
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { Client } from "pg";
 vi.mock("server-only", () => ({}));
@@ -126,7 +123,6 @@ describe("research pipeline", () => {
     const deps = { mailer, origin: "https://core.example.com", fetch, lookup: publicDns };
     const push = async (messages: RawMessage[]) => notifyPush(db, src, messages, await ingestCustom(db, src, messages), deps);
 
-    // nobody to tell yet
     expect(await push([run("k0")])).toEqual({ mailed: 0, webhook: false });
     await updateObject(A, owner, tess, {
       properties: { notify_email: "a@x.it, b@x.it; nope", notify_webhook: "https://hooks.example.com/r", notify_score: 0.8 },
@@ -142,9 +138,7 @@ describe("research pipeline", () => {
       project: { id: tess, name: "TESS" }, url: `https://core.example.com/research/o/lab-a/p/${tess}`,
       runs: [{ key: "k1", outcome: "ok" }], results: [{ externalId: "n1", score: 0.85 }],
     });
-    // sent again: the run is a duplicate and the results are updates, nothing is new
     expect(await push(batch)).toEqual({ mailed: 0, webhook: false });
-    // a low score alone is not news
     expect(await push([res("n3", 0.2)])).toEqual({ mailed: 0, webhook: false });
     expect(mails).toHaveLength(1);
     expect(posts).toHaveLength(1);

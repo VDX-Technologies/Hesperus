@@ -5,7 +5,6 @@ import { deleteObjectAction, saveObjectAction } from "../../actions";
 import { researchContext } from "../../context";
 import { researchPaths } from "../../paths";
 
-/** The objects of one type: list, new one, edit. */
 export default async function Objects(props: PageProps<"/research/o/[slug]/objects/[type]">) {
   const { slug, type: param } = await props.params;
   const { db, author } = await researchContext(slug);

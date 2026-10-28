@@ -1,8 +1,3 @@
-// Push for the tenant's own types (module "custom"): a program sends objects and events of the
-// types defined in the schema editor, with no package behind them. Objects are matched by their
-// external id, so sending the same ones again changes them in place; events carry a key of the
-// sender's, so the same run sent twice is stored once. A source can be bound to one object (a
-// project): what it writes is then linked to that object and nothing else.
 import { createHash } from "node:crypto";
 import { forTenant, inTransaction, lockTenant, type Db, type TenantDb } from "./db";
 import { documentsToday } from "./upload";
@@ -19,20 +14,14 @@ import { getObject, getObjectType, objectByExternalId, upsertObject, type Upsert
 import { getSettings, num } from "./settings";
 import { parseDecimal, parseTimestamp, type Schema } from "./schema";
 
-/** An object by id, or by its type and external id. */
 export type ObjectRef = string | { type: string; externalId: string };
 
 export interface CustomPushResult {
   accepted: number;
   rejected: { index: number; error: string }[];
-  /** One per accepted message, in order: the object or event id and what happened to it. */
   results: { index: number; id: string; status: UpsertStatus | "duplicate" }[];
 }
 
-/**
- * sources.config.scope: the object the source works for. `link` names the link its objects use
- * to point at it; `also` lists the other object types it may write without that link (datasets).
- */
 export interface SourceScope {
   link: string;
   id: string;
@@ -44,12 +33,10 @@ export const sourceScope = (source: Source): SourceScope | null => {
   return s && typeof s.link === "string" && typeof s.id === "string" ? { link: s.link, id: s.id, also: Array.isArray(s.also) ? s.also.map(String) : [] } : null;
 };
 
-/** Who the audit names for what a source writes: no person, the source. */
 export const sourceActor = (source: Source): Actor => ({ id: null, email: `source:${source.name}` });
 
 const isObject = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
 
-/** Keys that would reach Object.prototype when used as a property name. */
 const UNSAFE_KEYS = new Set(["__proto__", "constructor", "prototype"]);
 
 function safeKeys(v: unknown, what: string) {
@@ -60,11 +47,6 @@ function safeKeys(v: unknown, what: string) {
   }
 }
 
-/**
- * An object by id or `{type, externalId}`, which must exist in the tenant and, for a scoped source,
- * be in its scope: the object it works for, one linked to it, or one of the `also` types (those can
- * be linked to, not written).
- */
 async function resolve(db: TenantDb, ref: unknown, what: string, scope: SourceScope | null = null): Promise<string> {
   const o = typeof ref === "string" ? (/^[0-9a-f-]{36}$/i.test(ref) ? await getObject(db, ref) : null)
     : isObject(ref) && typeof ref.type === "string" && typeof ref.externalId === "string" ? await objectByExternalId(db, ref.type, ref.externalId)
@@ -86,7 +68,6 @@ async function pushObject(db: TenantDb, source: Source, scope: SourceScope | nul
   }
   if (scope) {
     if (type === scopeType) throw new ManualEventError(403, "this source cannot change the object it works for");
-    // the also types (shared datasets) can be linked to, never written by one project's source
     if (!t.links[scope.link]) throw new ManualEventError(403, `${type} is outside this source's scope`);
   }
   const links: Record<string, string> = Object.create(null);
@@ -99,7 +80,6 @@ async function pushObject(db: TenantDb, source: Source, scope: SourceScope | nul
   }
   if (scope) {
     links[scope.link] = scope.id;
-    // an object already there that belongs to another project stays out of reach
     const prev = await objectByExternalId(db, type, String(m.externalId ?? ""));
     if (prev && prev.links[scope.link] && prev.links[scope.link] !== scope.id) throw new ManualEventError(403, "this object is outside this source's scope");
   }
@@ -120,7 +100,6 @@ async function pushEvent(db: TenantDb, source: Source, scope: SourceScope | null
   if (!Array.isArray(m.objects)) throw new ManualEventError(400, `"objects" must be a list`);
   const ts = new Date(typeof m.ts === "string" || typeof m.ts === "number" ? m.ts : now);
   if (Number.isNaN(ts.getTime())) throw new ManualEventError(400, "invalid event time");
-  // the same bound as device ingest: a run dated years ahead would top every timeline
   if (ts.getTime() - now.getTime() > num(await getSettings(db.shared), "ingest.max_future_s", 300) * 1000)
     throw new ManualEventError(400, "ts is in the future");
   const objectIds: string[] = [];
@@ -143,7 +122,6 @@ async function pushEvent(db: TenantDb, source: Source, scope: SourceScope | null
     [db.tenantId, ts, type, payload, source.id, now, key, ids],
   );
   if (!rows[0]) {
-    // sent twice at the same moment: the other request stored it
     const again = await db.query<{ id: string }>(`select id from events where tenant_id = $1 and source_id = $2 and idempotency_key = $3`, [db.tenantId, source.id, key]);
     return { id: String(again.rows[0].id), status: "duplicate" as const };
   }
@@ -152,11 +130,6 @@ async function pushEvent(db: TenantDb, source: Source, scope: SourceScope | null
   return { id, status: "created" as const };
 }
 
-/**
- * Messages of the source's tenant types, one by one: `{kind: "object", type, externalId, name?,
- * properties?, defaults?, links?}` or `{kind: "event", type, key, ts?, payload, objects}`, where
- * a link or an object is an id or `{type, externalId}`. A message refused does not stop the others.
- */
 export async function ingestCustom(db: Db, source: Source, messages: RawMessage[], now = new Date()): Promise<CustomPushResult> {
   if (source.module !== CUSTOM) throw new ConnectorError(400, "source is not for custom types");
   const tdb = forTenant(db, source.tenant_id);
@@ -168,11 +141,8 @@ export async function ingestCustom(db: Db, source: Source, messages: RawMessage[
 
   const scope = sourceScope(source);
   const out: CustomPushResult = { accepted: 0, rejected: [], results: [] };
-  // one connection for the batch, a savepoint per message: a message that fails halfway leaves
-  // nothing behind (no object without its links or audit), and the others still count
   await inTransaction(db, async (connection) => {
     const c = forTenant(connection, source.tenant_id);
-    // the first tenant query sets the RLS context, before any savepoint whose rollback would undo it
     const scoped = scope ? await getObject(c, scope.id)
       : (await c.query(`select 1 from sources where tenant_id = $1 and id = $2`, [source.tenant_id, source.id]), null);
     if (scope && !scoped) throw new ConnectorError(409, "the object this source works for is gone");
@@ -196,8 +166,6 @@ export async function ingestCustom(db: Db, source: Source, messages: RawMessage[
   return out;
 }
 
-// ---- documents ---------------------------------------------------------------------------------
-
 export interface PushedFile {
   name: string;
   type?: string;
@@ -206,10 +174,6 @@ export interface PushedFile {
 
 const safeName = (name: string) => name.replace(/[^\w.-]+/g, "_").slice(-80) || "file";
 
-/**
- * A file (a plot, a report) kept on object storage and attached to one of the source's objects.
- * The same bytes sent again by the source are the same document: it is attached, not stored twice.
- */
 export async function pushDocument(
   db: Db, store: ObjectStore, source: Source, file: PushedFile, object: ObjectRef, now = new Date(),
 ): Promise<{ documentId: string; objectId: string; status: "created" | "duplicate" }> {
@@ -249,12 +213,10 @@ export async function pushDocument(
   if ((await documentsToday(tdb, source, now)) >= perDay) throw new ConnectorError(429, `too many files (max ${perDay} per day)`);
 
   const key = `docs/${source.tenant_id}/${source.id}/${sha256}-${safeName(file.name)}`;
-  // served by the type its bytes show, never the one the sender claims
   const contentType = sniffType(file.bytes, file.type);
   if (await store.putNew(key, file.bytes, contentType)) await db.query(`select engine_count('r2.writes', 1, $1)`, [now]);
   const documentId = await inTransaction(db, async (connection) => {
     const c = forTenant(connection, source.tenant_id);
-    // counted again under the lock: concurrent pushes cannot both take the last slot
     await lockTenant(connection, source.tenant_id, `documents:${source.id}`);
     const same = await c.query<{ id: string }>(`select id from documents where tenant_id = $1 and source_id = $2 and sha256 = $3`, [source.tenant_id, source.id, sha256]);
     if (!same.rows[0] && (await documentsToday(c, source, now)) >= perDay) throw new ConnectorError(429, `too many files (max ${perDay} per day)`);
@@ -264,7 +226,6 @@ export async function pushDocument(
        on conflict (source_id, sha256) where source_id is not null do nothing returning id`,
       [source.tenant_id, key, file.name, contentType, file.bytes.length, sha256, { kind: "push" }, source.id, now],
     );
-    // the same file sent twice at once: the other request stored it
     const id = rows[0]?.id ?? (await c.query<{ id: string }>(`select id from documents where tenant_id = $1 and source_id = $2 and sha256 = $3`, [source.tenant_id, source.id, sha256])).rows[0].id;
     if (rows[0]) await record(c, sourceActor(source), "document.create", { objectId, subject: target.type, data: { document: id, filename: file.name, size: file.bytes.length, sha256 } });
     await attach(c, id);
@@ -272,8 +233,6 @@ export async function pushDocument(
   });
   return { documentId: String(documentId), objectId, status: "created" };
 }
-
-// ---- CSV ----------------------------------------------------------------------------------------
 
 function cell(spec: Schema[string] | undefined, raw: string): unknown {
   const v = raw.trim();
@@ -290,13 +249,6 @@ function cell(spec: Schema[string] | undefined, raw: string): unknown {
   }
 }
 
-/**
- * One object message per CSV row, for objects of `type`: `external_id` (required), `name`,
- * `link.<key>` (an id or the linked object's external id) and one column per property, with
- * `prop.sub` for a field inside an object property (a project's own result fields). Values are
- * read by their declared type; an empty cell leaves the property as it is. `default.<prop>`
- * columns only count when the object is new.
- */
 export async function csvMessages(db: Db, source: Source, type: string, text: string): Promise<RawMessage[]> {
   const tdb = forTenant(db, source.tenant_id);
   const t = await getObjectType(tdb, type);
@@ -307,7 +259,6 @@ export async function csvMessages(db: Db, source: Source, type: string, text: st
   if (unsafe) throw new ConnectorError(400, `"${unsafe}" is not a valid column`);
   const scope = sourceScope(source);
   const schemas = new Map<string, Schema>();
-  // the schema a "schemaFrom" property follows, from the object the row links to (or the scope's)
   const nestedSchema = async (prop: string, links: Record<string, string>): Promise<Schema> => {
     const from = t.properties[prop]?.schemaFrom;
     if (!from) return {};

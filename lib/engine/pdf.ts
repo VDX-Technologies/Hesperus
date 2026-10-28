@@ -1,7 +1,3 @@
-// A table as a PDF laid out like a paper register: A4 landscape, a header repeated on every
-// page, rows wrapped to their column. Rows can come from an async source so long registers
-// are read in chunks. Standard Helvetica only covers WinAnsi, so other characters are
-// replaced rather than failing the whole export.
 import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage } from "pdf-lib";
 
 const W = 841.89, H = 595.28, M = 32, SIZE = 8, LINE = 10;
@@ -33,10 +29,8 @@ function wrap(text: string, font: PDFFont, width: number): string[] {
 export interface PdfTable {
   title: string;
   subtitle: string;
-  /** Width as a share of the page; shares are normalised, so any proportion works. */
   columns: { label: string; width: number }[];
   rows: Iterable<string[]> | AsyncIterable<string[]>;
-  /** Text when there are no rows. */
   empty: string;
 }
 

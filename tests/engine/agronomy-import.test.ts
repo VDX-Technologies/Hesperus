@@ -1,4 +1,3 @@
-// What an uploaded file is about, read from all its rows, and the units its numbers are in.
 import { describe, expect, it } from "vitest";
 import { classify, unitOf } from "../../lib/packages/agronomy/import";
 

@@ -1,12 +1,10 @@
-// Health and quotas: measures the platform against the limits in engine_settings, keeps the
-// open problems in engine_notices and mails the admins when one starts, repeats, or clears.
 import type { Db } from "./db";
 import type { Mailer } from "./mail";
 import { getSettings, num, type Settings } from "./settings";
 import { MeteredStore, type ObjectStore, type StoreOps } from "./store";
 
 export interface Check {
-  key: string; // stable: 'quota.db', 'source.<id>', ...
+  key: string;
   ok: boolean;
   message: string;
   value?: number;
@@ -23,14 +21,12 @@ export interface HealthReport {
   at: string;
   ok: boolean;
   quotas: Quota[];
-  /** From engine_gauges: the last daily listing plus the writes since (measured_at: that listing). */
   r2?: { objects: number; bytes: number; measured_at: string | null };
   checks: Check[];
 }
 
 const month = (now: Date) => new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
 
-/** Adds the operations made through a metered store to this month's counters and its bytes to the size. */
 export async function recordUsage(db: Db, ops: StoreOps, now = new Date()): Promise<void> {
   if (ops.writes) await db.query(`select engine_count('r2.writes', $1, $2)`, [ops.writes, now]);
   if (ops.reads) await db.query(`select engine_count('r2.reads', $1, $2)`, [ops.reads, now]);
@@ -42,7 +38,6 @@ export async function recordUsage(db: Db, ops: StoreOps, now = new Date()): Prom
     );
 }
 
-/** Runs fn with a metered view of store and records what it did, also when fn fails. */
 export async function metered<T>(db: Db, store: ObjectStore, fn: (store: ObjectStore) => Promise<T>): Promise<T> {
   const m = new MeteredStore(store);
   try {
@@ -52,7 +47,6 @@ export async function metered<T>(db: Db, store: ObjectStore, fn: (store: ObjectS
   }
 }
 
-/** Lists the whole store once and sets the size to what is really there (the daily job). */
 export async function reconcileStorage(db: Db, store: ObjectStore, now = new Date()) {
   const u = await store.usage("");
   await db.query(
@@ -85,7 +79,10 @@ export async function dbBytes(db: Db): Promise<number> {
 const fmtBytes = (n: number) => {
   const u = ["B", "KB", "MB", "GB", "TB"];
   let i = 0;
-  while (n >= 1024 && i < u.length - 1) (n /= 1024), i++;
+  while (n >= 1024 && i < u.length - 1) {
+    n /= 1024;
+    i++;
+  }
   return `${n.toFixed(i ? 1 : 0)} ${u[i]}`;
 };
 
@@ -102,10 +99,6 @@ function quotaCheck(q: Quota, ratio: number): Check {
   };
 }
 
-/**
- * Measures everything. The object storage size comes from engine_gauges; store is only listed
- * when it was never measured (without a store the size is then not checked).
- */
 export async function collectHealth(db: Db, store?: ObjectStore, now = new Date()): Promise<HealthReport> {
   const s: Settings = await getSettings(db, true);
   const usage = await monthUsage(db, now);
@@ -123,7 +116,6 @@ export async function collectHealth(db: Db, store?: ObjectStore, now = new Date(
   ];
   const checks = quotas.map((q) => quotaCheck(q, num(s, "quota.alert_ratio", 0.8)));
 
-  // Active sources that have pushed before and then went quiet.
   const silentMin = num(s, "health.source_silent_min", 30);
   const { rows: sources } = await db.query<{ id: string; name: string; org: string; last_seen: Date | null; silent: boolean }>(
     `select s.id, s.name, o.name org, s.last_seen,
@@ -138,7 +130,6 @@ export async function collectHealth(db: Db, store?: ObjectStore, now = new Date(
     message: `source "${r.name}" (${r.org}) ${r.silent ? `silent since ${r.last_seen!.toISOString()}` : "is sending"}`,
   });
 
-  // Sources hitting the push rate limit over and over this hour.
   const limitedMax = num(s, "health.rate_limited_per_h", 20);
   const { rows: limited } = await db.query<{ id: string; name: string; org: string; n: number }>(
     `select s.id, s.name, o.name org,
@@ -155,7 +146,6 @@ export async function collectHealth(db: Db, store?: ObjectStore, now = new Date(
     limit: limitedMax,
   });
 
-  // Raw rows that should have been flushed to the archive long ago.
   const staleMin = num(s, "raw.inbox_stale_min", 120);
   const { rows: inbox } = await db.query<{ oldest: Date | null }>(`select min(received_at) oldest from raw_inbox`);
   const oldest = inbox[0].oldest;
@@ -181,13 +171,9 @@ export async function collectHealth(db: Db, store?: ObjectStore, now = new Date(
 export interface NoticeChanges {
   opened: Check[];
   repeated: Check[];
-  resolved: string[]; // messages of the problems that cleared
+  resolved: string[];
 }
 
-/**
- * Brings engine_notices in line with the checks and returns what should be mailed: new
- * problems, problems still open after alerts.repeat_h, and problems that cleared.
- */
 export async function updateNotices(db: Db, checks: Check[], now = new Date()): Promise<NoticeChanges> {
   const s = await getSettings(db, true);
   const repeatMs = num(s, "alerts.repeat_h", 24) * 3600000;
@@ -219,7 +205,6 @@ export async function updateNotices(db: Db, checks: Check[], now = new Date()): 
       if (due) out.repeated.push(c);
     }
   }
-  // Problems whose subject is gone (source deleted or paused, job removed) are cleared quietly.
   for (const key of open.keys()) await db.query(`update engine_notices set resolved_at = $2 where key = $1`, [key, now]);
   return out;
 }
@@ -237,7 +222,6 @@ export function noticeMail(ch: NoticeChanges): { subject: string; text: string }
   return { subject, text: lines.join("\n") };
 }
 
-/** alerts.email_to, or every platform admin when it is empty. */
 export async function alertRecipients(db: Db): Promise<string[]> {
   const s = await getSettings(db, true);
   const to = s["alerts.email_to"];
@@ -248,7 +232,6 @@ export async function alertRecipients(db: Db): Promise<string[]> {
   return rows.map((r) => r.email);
 }
 
-/** The hourly job: measure, update notices, mail, and record the run in engine_jobs. */
 export async function runHealth(db: Db, opts: { store?: ObjectStore; mailer?: Mailer | null; now?: Date } = {}) {
   const now = opts.now ?? new Date();
   const started = Date.now();
@@ -263,7 +246,6 @@ export async function runHealth(db: Db, opts: { store?: ObjectStore; mailer?: Ma
       try {
         if (to.length) await opts.mailer.send({ to, ...mail, from: String((await getSettings(db, true))["alerts.email_from"]) });
       } catch (e) {
-        // not delivered: the open problems are due again on the next run
         const keys = [...changes.opened, ...changes.repeated].map((c) => c.key);
         await db.query(`update engine_notices set last_sent = null where key = any($1)`, [keys]);
         throw e;

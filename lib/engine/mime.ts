@@ -1,5 +1,3 @@
-// The content type a stored file is served with, read from its first bytes instead of trusted
-// from the sender: a file only passes as an image or a PDF when it starts like one.
 const SIGNATURES: [type: string, magic: number[], offset?: number][] = [
   ["image/png", [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]],
   ["image/jpeg", [0xff, 0xd8, 0xff]],
@@ -19,11 +17,6 @@ const TEXT = new Set(["text/csv", "text/plain", "text/tab-separated-values", "ap
 const startsWith = (bytes: Uint8Array, magic: number[], offset = 0) =>
   bytes.length >= offset + magic.length && magic.every((b, i) => bytes[offset + i] === b);
 
-/**
- * The type to store bytes under: the one their signature says; for a zip, the office type the
- * sender claimed if it is one; text the sender called text when it has no NUL byte; otherwise
- * application/octet-stream.
- */
 export function sniffType(bytes: Uint8Array, claimed?: string | null): string {
   const said = (claimed ?? "").toLowerCase().split(";")[0].trim();
   if (startsWith(bytes, [0x52, 0x49, 0x46, 0x46]) && startsWith(bytes, WEBP, 8)) return "image/webp";

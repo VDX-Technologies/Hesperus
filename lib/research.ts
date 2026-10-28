@@ -1,6 +1,3 @@
-// The Research console reads the types made in the schema editor (scripts/research/types.ts is
-// their versioned copy). Only the names of those types and properties live here: the engine
-// knows nothing of projects or results, and another sector can point a console at its own types.
 import { parseDecimal, type Schema } from "./engine/schema";
 import type { PropertySpec } from "./engine/package";
 import type { CustomObject, ObjectSearch } from "./engine/custom-objects";
@@ -14,66 +11,49 @@ export const RESEARCH = {
   dataset: "custom.dataset",
   labNote: "custom.lab_note",
   comment: "custom.comment",
-  /** a saved search of a project's results, its query string in `query` */
   view: "custom.view",
   query: "query",
-  /** the result → project link */
   link: "project",
   stage: "stage",
   score: "score",
   review: "review",
-  /** the review value of a result nobody has looked at yet */
   pending: "to_review",
   outcome: "outcome",
   note: "note",
-  /** the project property holding its results' own fields, and the result property following it */
   schema: "result_schema",
   extra: "extra",
-  /** the email of the member a result is assigned to; without it the console hides assignment */
   assignee: "assignee",
-  /** the result property with the id of the run (an event) that produced it */
   runRef: "run",
-  /** the project property with its results' outside links, one "Label https://...{field}" per line */
   links: "result_links",
-  /** the text of a lab note or a comment, and the comment a reply answers */
   text: "text",
   replyTo: "reply_to",
-  /** the project properties saying who hears of its pipeline: emails, a webhook, a score threshold */
   notifyEmail: "notify_email",
   notifyWebhook: "notify_webhook",
   notifyScore: "notify_score",
 } as const;
 
-/** The review values a key sets in the review queue. */
 export const REVIEW_KEYS: Record<string, string> = { i: "interesting", d: "discarded", s: "sent" };
 
 type Query = Record<string, string | string[] | undefined>;
 
-/** The query parameters that filter, sort or lay out results, so a link can keep them (not the page). */
 export const isFilterParam = (k: string) =>
   ["q", "review", "min", "max", "mine", "sort", "order", "cols", "hist", "x", "y"].includes(k) || /^(f|min|max)\.[\w.]+$/.test(k);
 
 export function filterQuery(sp: Query): URLSearchParams {
   const q = new URLSearchParams();
   for (const [k, raw] of Object.entries(sp)) {
-    // the column picker's checkboxes send one `cols` each
     const v = k === "cols" && Array.isArray(raw) ? raw.join(",") : raw;
     if (typeof v === "string" && v.trim() && isFilterParam(k)) q.set(k, v.trim());
   }
   return q;
 }
 
-/**
- * The columns of the results table: `cols` lists the keys shown, comma separated (`extra.<field>`
- * for the project's own); without it, or when none of its keys is a column, all of them.
- */
 export function shownColumns(cols: unknown, all: string[]): Set<string> {
   const raw = Array.isArray(cols) ? cols.join(",") : cols;
   const asked = typeof raw === "string" ? raw.split(",").map((c) => c.trim()).filter((c) => all.includes(c)) : [];
   return new Set(asked.length ? asked : all);
 }
 
-/** The query string a saved view keeps: its filters, sort, columns and charts, nothing else. */
 export function viewQuery(raw: string): string {
   const sp: Query = {};
   for (const [k, v] of new URLSearchParams(raw)) {
@@ -83,18 +63,10 @@ export function viewQuery(raw: string): string {
   return filterQuery(sp).toString();
 }
 
-/** The cookie holding the dashboard visits, scoped to the organization's Research pages. */
 export const VISIT_COOKIE = "research_visit";
 
-/** How long a visit to the dashboard lasts: coming back within it is still the same visit. */
 const VISIT = 30 * 60_000;
 
-/**
- * "New since your last visit" from the visit cookie, which holds the start of the previous visit
- * and of the latest one ("prev|latest", ms). A visit starting now counts from the latest; a page
- * reloaded during a visit keeps counting from the previous one. `next` is the cookie to write
- * then, null when it stays as it is; `since` is null on a first visit.
- */
 export function lastVisit(cookie: string | undefined, now: number): { since: Date | null; next: string | null } {
   const [prev, latest] = (cookie ?? "").split("|").map((v) => (/^\d+$/.test(v) ? Number(v) : null));
   if (!latest || latest > now) return { since: null, next: `|${now}` };
@@ -102,7 +74,6 @@ export function lastVisit(cookie: string | undefined, now: number): { since: Dat
   return { since: prev ? new Date(prev) : null, next: null };
 }
 
-/** The schemas the filters are read against: the result type's, the project's own fields, and who is asking. */
 export interface FilterContext {
   result?: Schema;
   own?: Schema;
@@ -115,19 +86,12 @@ const specAt = (key: string, c: FilterContext): PropertySpec | undefined => {
   return sub === undefined ? c.result?.[top] : top === RESEARCH.extra ? c.own?.[sub] : undefined;
 };
 
-// a filter value as the property stores it; undefined when it cannot be one
 const typed = (spec: PropertySpec | undefined, raw: string): unknown => {
   if (spec?.type === "integer" || spec?.type === "number") return parseDecimal(raw) ?? undefined;
   if (spec?.type === "boolean") return raw === "true" ? true : raw === "false" ? false : undefined;
   return raw;
 };
 
-/**
- * The results filter of a project page, read from its query string: `q` searches name and
- * external id, `f.<key>` asks for a value, `min.<key>` / `max.<key>` bound a number (`min` and
- * `max` alone bound the score), `mine=1` keeps the results assigned to `me`, and `sort` / `order`
- * sort (score, highest first, by default). `<key>` can be `extra.<field>` for the project's fields.
- */
 export function resultFilters(sp: Query, project: string, c: FilterContext = {}): ObjectSearch & { page: number } {
   const one = (k: string) => (typeof sp[k] === "string" ? (sp[k] as string).trim() : "");
   const where: Record<string, unknown> = {};
@@ -162,10 +126,6 @@ export function resultFilters(sp: Query, project: string, c: FilterContext = {})
   };
 }
 
-/**
- * The fields a batch change makes on one result, only those that differ: an empty value leaves a
- * field as it is, an assignee of "-" removes it.
- */
 export function batchPatch(o: CustomObject, change: { review?: string; assignee?: string }): Record<string, unknown> | null {
   const patch: Record<string, unknown> = {};
   if (change.review && change.review !== o.properties[RESEARCH.review]) patch[RESEARCH.review] = change.review;
@@ -176,7 +136,6 @@ export function batchPatch(o: CustomObject, change: { review?: string; assignee?
   return Object.keys(patch).length ? patch : null;
 }
 
-/** The fields a review changes, only those that differ; an emptied note is removed. */
 export function reviewPatch(o: CustomObject, review: string, note: string): Record<string, unknown> | null {
   const patch: Record<string, unknown> = {};
   if (review && review !== o.properties[RESEARCH.review]) patch[RESEARCH.review] = review;
@@ -185,15 +144,10 @@ export function reviewPatch(o: CustomObject, review: string, note: string): Reco
   return Object.keys(patch).length ? patch : null;
 }
 
-// a scalar the way the CSV writes it: comma decimals, objects as JSON
 const csvValue = (s: PropertySpec | undefined, v: unknown) =>
   v === undefined || v === null ? "" : s?.type === "number" || s?.type === "integer" ? dec(v)
     : typeof v === "object" ? JSON.stringify(v) : String(v);
 
-/**
- * The CSV of a project's results: keys, not labels, for whoever reads it; the result type's
- * fields, then the project's own as `extra.<key>`. `header` starts with a BOM for spreadsheets.
- */
 export function resultsCsv(result: Schema, own: Schema) {
   const fields = Object.entries(result).filter(([k, s]) => s.type !== "object" && k !== RESEARCH.extra);
   const extra = Object.entries(own);
@@ -209,13 +163,11 @@ export function resultsCsv(result: Schema, own: Schema) {
   };
 }
 
-/** The project's own result fields (TIC id, gene...), shown as columns of its results. */
 export function projectFields(project: CustomObject): Schema {
   const s = project.properties[RESEARCH.schema];
   return s && typeof s === "object" && !Array.isArray(s) ? (s as Schema) : {};
 }
 
-// raster images only: an SVG can carry script, so it is downloaded and never shown inline
 const IMAGES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
 export const inlineImage = (contentType: string | null) => !!contentType && IMAGES.has(contentType.toLowerCase().split(";")[0].trim());
 
@@ -226,12 +178,6 @@ export interface OutsideLink {
 
 const LINE = /^(.*?)\s*(https?:\/\/\S+)$/i;
 
-/**
- * A result's pages in outside catalogs, from the project's template: one "Label https://...{key}"
- * per line, `{key}` being name, external_id, id, a result property or one of the project's own
- * fields. Values are URL-encoded; a line whose placeholder the result lacks is left out, and only
- * http(s) links are kept.
- */
 export function expandLinks(template: unknown, o: CustomObject): OutsideLink[] {
   if (typeof template !== "string") return [];
   const extra = (o.properties[RESEARCH.extra] ?? {}) as Record<string, unknown>;
@@ -252,7 +198,6 @@ export function expandLinks(template: unknown, o: CustomObject): OutsideLink[] {
       const u = new URL(url);
       if (u.protocol === "http:" || u.protocol === "https:") out.push({ label: m[1] || u.hostname, url: u.toString() });
     } catch {
-      // not a URL once filled in: left out
     }
   }
   return out;
@@ -265,14 +210,12 @@ export interface ParamRow {
   state: "same" | "changed" | "onlyA" | "onlyB";
 }
 
-// nested parameters as dotted keys, arrays kept whole
 function leaves(v: unknown, prefix: string, into: Map<string, unknown>) {
   if (v && typeof v === "object" && !Array.isArray(v) && Object.keys(v).length) {
     for (const [k, x] of Object.entries(v)) leaves(x, prefix ? `${prefix}.${k}` : k, into);
   } else if (prefix) into.set(prefix, v);
 }
 
-/** Two runs' parameters side by side, nested keys dotted, the ones that differ first. */
 export function paramDiff(a: unknown, b: unknown): ParamRow[] {
   const la = new Map<string, unknown>(), lb = new Map<string, unknown>();
   leaves(a, "", la);
@@ -284,11 +227,6 @@ export function paramDiff(a: unknown, b: unknown): ParamRow[] {
   return rows.sort((x, y) => Number(x.state === "same") - Number(y.state === "same") || x.key.localeCompare(y.key));
 }
 
-/**
- * Comments in threads: each under the first comment of its chain of replies (`reply_to` is the
- * root id of the comment answered), oldest first; a reply to a comment no longer there opens its
- * own thread.
- */
 export function commentThreads<T extends { rootId: number; ts: Date; payload: Record<string, unknown> }>(list: T[]): { comment: T; replies: T[] }[] {
   const byId = new Map(list.map((c) => [c.rootId, c]));
   const top = (c: T): T => {
@@ -313,10 +251,6 @@ export function commentThreads<T extends { rootId: number; ts: Date; payload: Re
   return [...threads.values()];
 }
 
-/**
- * The first rows of a CSV attachment for its preview: only the first `maxBytes` are read, cut at
- * the last whole line; null when they do not read as a table.
- */
 export function csvPreview(bytes: Uint8Array, maxRows = 20, maxBytes = 16384): { headers: string[]; rows: string[][]; more: boolean } | null {
   const cut = bytes.length > maxBytes;
   let text = new TextDecoder("utf-8", { fatal: false }).decode(bytes.subarray(0, maxBytes));
@@ -330,9 +264,7 @@ export function csvPreview(bytes: Uint8Array, maxRows = 20, maxBytes = 16384): {
   }
 }
 
-/** A CSV attachment, previewed as a table. */
 export const isCsv = (contentType: string | null, filename: string | null) =>
   /^text\/(csv|tab-separated-values)\b/i.test(contentType ?? "") || /\.(csv|tsv)$/i.test(filename ?? "");
 
-/** A PDF attachment, opened in the browser's own viewer. */
 export const isPdf = (contentType: string | null) => /^application\/pdf\b/i.test(contentType ?? "");

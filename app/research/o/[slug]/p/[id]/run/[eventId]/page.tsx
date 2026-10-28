@@ -8,10 +8,6 @@ import { RESEARCH } from "@/lib/research";
 import { researchContext } from "../../../../context";
 import { Outcome } from "../../../../runs";
 
-/**
- * A run of a project's pipeline: what it reported, its parameters, the datasets it read and the
- * results it produced, counted by review.
- */
 export default async function Run(props: PageProps<"/research/o/[slug]/p/[id]/run/[eventId]">) {
   const { slug, id, eventId } = await props.params;
   const { db } = await researchContext(slug);

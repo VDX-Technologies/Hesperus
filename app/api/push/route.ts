@@ -1,9 +1,3 @@
-/**
- * POST /api/push - generic push ingestion.
- * Auth: "Authorization: Bearer <source token>" with the write scope. Body: one message or an array of messages,
- * interpreted by the source's module package. A source of the tenant's own types (module
- * "custom") also takes a CSV of objects: "Content-Type: text/csv" and "?type=<object type>".
- */
 import { ConnectorError, pushConnector } from "@/lib/engine/connectors";
 import { csvMessages, ingestCustom } from "@/lib/engine/custom-ingest";
 import { ingestPush } from "@/lib/engine/ingest";
@@ -16,7 +10,7 @@ import { after } from "next/server";
 import { mailerFromEnv } from "@/lib/engine/mail";
 import { notifyPush } from "@/lib/research-pipeline";
 
-const MAX_BODY = 4_000_000; // Vercel caps function bodies at 4.5 MB anyway
+const MAX_BODY = 4_000_000;
 
 export async function POST(request: Request) {
   const auth = await authSource(request, "write", (s) => s.connector === "push" ? null : "source does not accept push");
@@ -49,7 +43,6 @@ export async function POST(request: Request) {
         ? await csvMessages(db, source, new URL(request.url).searchParams.get("type") ?? "", text)
         : await pushConnector.messages(source, body);
       const result = await ingestCustom(db, source, messages);
-      // a research project's emails and webhook hear of new runs and high scores, after the answer
       after(() =>
         notifyPush(db, source, messages, result, { mailer: mailerFromEnv(), origin: new URL(request.url).origin }).catch((e) => {
           if (!(e instanceof ConnectorError)) console.error(e);
@@ -63,7 +56,6 @@ export async function POST(request: Request) {
     const status = e instanceof ConnectorError ? e.status : e instanceof ValidationError || e instanceof RangeError ? 400 : null;
     if (status === null) throw e;
     const error = (e as Error).message;
-    // a refused batch shows on the project page of a custom source, next to its last push
     if (custom) await markSeen(db, source, error).catch(() => undefined);
     return Response.json({ error }, { status });
   }

@@ -1,6 +1,3 @@
-// Push for the tenant's own types: a research pipeline sends its run and its results with a
-// project's token. Sending the same run again stores nothing new, a review made in Core is not
-// undone by the next run, and the token only reaches its own project.
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { Client } from "pg";
 vi.mock("server-only", () => ({}));
@@ -65,10 +62,8 @@ describe("custom push", () => {
     expect(rows[0].n).toBe(1);
     const results = await listObjects(A, "custom.result", { linkedTo: { key: "project", id: tess } });
     expect(results.map((o) => o.name).sort()).toEqual(["TIC 1", "TIC 2"]);
-    // the run is about the project and the dataset it read
     const objs = await db.query(`select object_id from event_objects where event_id = $1`, [first.results[0].id]);
     expect(objs.rows.map((r) => r.object_id).sort()).toEqual([tess, sector].sort());
-    // written by the source, in the audit trail
     const audit = await db.query(`select action, actor, actor_label from audit_log where tenant_id = $1 and actor_label = 'source:tess-pipeline' order by id`, [ORG]);
     expect(audit.rows.map((r) => r.action)).toEqual(["event.create", "object.create", "object.create"]);
     expect(audit.rows[0].actor).toBeNull();
@@ -99,10 +94,8 @@ describe("custom push", () => {
       { ...run("run-3"), objects: [other] },
       { kind: "object", type: "custom.dataset", externalId: "S71", name: "TESS S71", properties: { source: "MAST" } },
     ]);
-    // the dataset is shared by every project: linked to, not written
     expect(out.rejected.map((r) => r.index)).toEqual([0, 1, 2, 3]);
     expect(out.rejected.every((r) => /scope|works for/.test(r.error))).toBe(true);
-    // a result of the other project with the same external id stays out of reach
     await createObject(A, owner, { type: "custom.result", externalId: "tic-9", name: "TIC 9", links: { project: other }, properties: { score: 1, review: "sent", extra: { tic_id: 9 } } });
     expect((await ingestCustom(db, src, [result("9", 0.1)])).rejected[0].error).toMatch(/scope/);
   });
@@ -171,7 +164,6 @@ describe("custom push", () => {
     expect(links.rows.map((r) => r.document_id)).toEqual([first.documentId]);
     const audit = await db.query(`select action from audit_log where data->>'document' = $1 order by id`, [first.documentId]);
     expect(audit.rows.map((r) => r.action)).toEqual(["document.create", "document.attach"]);
-    // not on another project's result, not too big
     await expect(pushDocument(db, store, src, png, { type: "custom.result", externalId: "tic-9" })).rejects.toMatchObject({ status: 403 });
     await db.query(`update engine_settings set value = '4' where key = 'push.document_max_bytes'`);
     await getSettings(db, true);

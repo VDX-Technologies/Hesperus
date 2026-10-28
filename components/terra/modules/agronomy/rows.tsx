@@ -3,7 +3,6 @@ import { COLUMNS, COLUMN_LABELS, cell, type RegisterRow } from "@/lib/packages/a
 import type { Locale } from "@/lib/packages/types";
 import type { Dict } from "@/lib/i18n";
 
-/** The register: a table in paper order on wide screens, one card per treatment on a phone. */
 export function TreatmentRows({ rows, locale, t, editHref }: { rows: RegisterRow[]; locale: Locale; t: Dict; editHref?: (r: RegisterRow) => string }) {
   if (!rows.length) return <p className="text-sm text-dim">{t.noTreatments}</p>;
   return (

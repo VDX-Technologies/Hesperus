@@ -2,12 +2,10 @@ import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Locale } from "@/lib/packages/types";
 
-/** Bump when the text changes in substance; stored with each signature. */
 export const CONSENT_VERSION = "2026-10";
 
 export type Consent = { granted: boolean; version: string; signed_name: string; signed_at: string; changed_at: string };
 
-/** This user's research consent, null when they have never signed it (= show the document). */
 export async function getConsent(supabase: SupabaseClient, userId: string): Promise<Consent | null> {
   const { data } = await supabase
     .from("research_consents")
@@ -17,7 +15,6 @@ export async function getConsent(supabase: SupabaseClient, userId: string): Prom
   return data;
 }
 
-/** The document shown on first access. Text to be reviewed by the data protection officer. */
 export const CONSENT_DOC: Record<Locale, { title: string; intro: string; sections: { title: string; body: string }[] }> = {
   it: {
     title: "Consenso all'uso dei dati per ricerca scientifica e attività di laboratorio",

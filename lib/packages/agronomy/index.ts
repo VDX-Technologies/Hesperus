@@ -1,7 +1,3 @@
-// Agronomy as a module package: crops grown in an area and what is done to them, entered by
-// people (manual connector). A crop is an object located_in an area; treatments, sowing,
-// transplant and harvest are typed events linked to the crop. Nothing arrives from devices,
-// so normalize refuses every message.
 import { ValidationError, type ModulePackage, type PropertySpec } from "../../engine/package";
 import { agronomy } from "./model";
 
@@ -30,11 +26,9 @@ export const CROP_PROPERTIES: Record<string, PropertySpec> = {
   phase: { ...phase, required: true },
   start: { type: "timestamp", label: { en: "Start", it: "Inizio" } },
   end: { type: "timestamp", label: { en: "End", it: "Fine" } },
-  /** Set by archiving, not by the form; missing means active. */
   status: { type: "string", enum: ["active", "archived"], label: { en: "Status", it: "Stato" } },
 };
 
-/** What the crop form shows: everything but the status. */
 export const CROP_FORM = Object.fromEntries(Object.entries(CROP_PROPERTIES).filter(([k]) => k !== "status")) as Record<string, PropertySpec>;
 
 export const TREATMENT_FIELDS: Record<string, PropertySpec> = {

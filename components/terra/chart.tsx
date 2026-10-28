@@ -13,7 +13,6 @@ export interface Series {
   dashed?: boolean;
 }
 
-/** Time-series chart in the VDX style. rows: [{ t: epoch ms, <key>: number|null }] */
 export function TimeChart({
   rows,
   series,
@@ -69,7 +68,6 @@ const TOOLTIP = { background: "#111317", border: "1px solid #23282f", borderRadi
 
 const AXIS = { stroke: "#6b7079", fontSize: 11, tickLine: false } as const;
 
-/** Stacked weekly entries per product, with the running total of area worked as a line on the right axis. */
 export function WeekBars({
   rows, series, locale, cumLabel, height = 280,
 }: { rows: Record<string, number>[]; series: Series[]; locale: string; cumLabel?: string; height?: number }) {
@@ -104,7 +102,6 @@ export function WeekBars({
 
 export interface DosePoint { t: number; dose: number; product: string; subject: string; odd: boolean }
 
-/** Every dose over time, one colour per product; doses out of line are ringed in red. */
 export function DoseScatter({ points, series, locale, height = 280 }: { points: DosePoint[]; series: Series[]; locale: string; height?: number }) {
   const day = (v: number) => new Date(v).toLocaleDateString(locale, { day: "numeric", month: "short" });
   const Dot = (p: { cx?: number; cy?: number; payload?: DosePoint; fill?: string }) =>
@@ -147,7 +144,6 @@ export function DoseScatter({ points, series, locale, height = 280 }: { points: 
   );
 }
 
-/** Pareto: entries per item, largest first, with the cumulative share on the right axis. */
 export function Pareto({ rows, locale, label, height = 260 }: { rows: { key: string; value: number }[]; locale: string; label: string; height?: number }) {
   const total = rows.reduce((a, r) => a + r.value, 0) || 1;
   const data = rows.map((r, i) => ({ ...r, cum: Math.round((rows.slice(0, i + 1).reduce((a, x) => a + x.value, 0) / total) * 1000) / 10 }));
@@ -167,7 +163,6 @@ export function Pareto({ rows, locale, label, height = 260 }: { rows: { key: str
   );
 }
 
-/** Tiny line for a KPI card. */
 export function Spark({ values, color = "#9fd8ff", height = 32 }: { values: number[]; color?: string; height?: number }) {
   if (values.length < 2) return null;
   return (
@@ -182,11 +177,6 @@ export function Spark({ values, color = "#9fd8ff", height = 32 }: { values: numb
 export interface OpsPoint { t: number; n: number; ha: number; L: number; kg: number; avg: number }
 export type OpsMetric = "n" | "ha" | "L" | "kg";
 
-/**
- * The operations timeline: one bar per day for the chosen measure, the weekly trend over it,
- * a brush to zoom into any stretch, and the period's mean as a reference. The measure is picked
- * from the tabs above it; a tab with nothing to show is left out.
- */
 export function OpsChart({
   points, labels, locale, height = 300,
 }: { points: OpsPoint[]; labels: Record<OpsMetric | "avg" | "mean", string>; locale: string; height?: number }) {
@@ -270,10 +260,6 @@ export function OpsChart({
 
 export interface StackSeries { key: string; label: string; color: string; href?: string }
 
-/**
- * Every register on one timeline: a bar per day stacked by register, the weekly trend of all of
- * them over it and a brush to zoom. A register is hidden or shown from its chip in the legend.
- */
 export function StackChart({
   points, series, labels, locale, height = 320,
 }: { points: Record<string, number>[]; series: StackSeries[]; labels: { total: string; timeline: string; volume: string; trend: string; mean: string; showAll: string; drillDown: string }; locale: string; height?: number }) {
@@ -498,7 +484,6 @@ function SensorMetricChart({ panel, locale, minMaxLabel, emptyLabel, shown, show
   );
 }
 
-/** Comparative, five-minute sensor history with visible gaps and configured threshold bands. */
 export function SensorMetricGrid({ panels, locale, minMaxLabel, emptyLabel, labels }: {
   panels: SensorMetricPanel[]; locale: string; minMaxLabel: string; emptyLabel: string;
   labels: { timeWindow: string; showAll: string; isolate: string; zoom: string };
@@ -509,8 +494,6 @@ export function SensorMetricGrid({ panels, locale, minMaxLabel, emptyLabel, labe
   const series = panels[0].series;
   const shown = series.filter((s) => !off.has(s.key));
   const allRows = panels[0].rows;
-  // The window ends at the newest reading (not the clock, which would make render impure); with no
-  // timed rows nothing is visible anyway.
   const end = allRows.reduce((max, row) => typeof row.t === "number" && row.t > max ? row.t : max, -Infinity);
   const from = end - hours * 60 * 60_000;
   const visiblePanels = panels.map((panel) => ({

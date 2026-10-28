@@ -1,5 +1,3 @@
-// The research pipeline's push source, as the admin engine page creates it: module "custom",
-// scoped to one project of the tenant, with the token shown once and an audit entry.
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { Client } from "pg";
 vi.mock("server-only", () => ({}));

@@ -6,8 +6,6 @@ import type { TenantDb } from "@/lib/engine/db";
 import type { Author } from "@/lib/engine/manual";
 import type { ObjectPaths } from "./objects-view";
 
-/** The organization's own object types (projects, datasets, results...), with how many objects each has.
- * `back` is the page the list hangs from in the console showing it. */
 export async function ObjectTypesView({ db, author, paths, back }: {
   db: TenantDb;
   author: Author;

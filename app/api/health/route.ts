@@ -1,13 +1,7 @@
-/**
- * GET /api/health - liveness for uptime monitors. 200 when the database answers and the last
- * hourly health run (scripts/health.ts) found no problem, 503 otherwise. Public, so it only
- * says ok; with `Authorization: Bearer $HEALTH_TOKEN` it adds the age of the run and the number
- * of problems (the details are in /admin/engine).
- */
 import { timingSafeEqual } from "node:crypto";
 import { crossTenantAccess, crossTenantDb } from "@/lib/engine/db";
 
-const STALE_MS = 2 * 3600_000; // the health job runs hourly
+const STALE_MS = 2 * 3600_000;
 const headers = { "cache-control": "no-store" };
 
 function authorized(request: Request) {

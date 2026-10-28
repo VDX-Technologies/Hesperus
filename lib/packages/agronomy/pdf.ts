@@ -1,4 +1,3 @@
-// The treatments register as a PDF laid out like the paper one, columns in COLUMNS order.
 import { tablePdf } from "../../engine/pdf";
 import { COLUMNS, COLUMN_LABELS, cell, type Column, type RegisterRow } from "./register";
 

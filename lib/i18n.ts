@@ -2,7 +2,6 @@ import "server-only";
 import { cookies, headers } from "next/headers";
 import type { Locale } from "@/lib/packages/types";
 
-/** UI strings. English is the primary language, Italian the second one. */
 const en = {
   appName: "VDX Core",
   signIn: "Sign in",
@@ -1016,7 +1015,6 @@ const it: Dict = {
 
 const DICTS: Record<Locale, Dict> = { en, it };
 
-/** Locale: explicit cookie > browser language > English. */
 export async function getLocale(): Promise<Locale> {
   const c = (await cookies()).get("locale")?.value;
   if (c === "en" || c === "it") return c;

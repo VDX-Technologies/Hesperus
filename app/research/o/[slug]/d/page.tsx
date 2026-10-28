@@ -6,7 +6,6 @@ import { getObjectType, listObjects } from "@/lib/engine/custom-objects";
 import { RESEARCH } from "@/lib/research";
 import { researchContext } from "../context";
 
-/** The datasets the organization's runs read, with their source and when a run last used them. */
 export default async function Datasets(props: PageProps<"/research/o/[slug]/d">) {
   const { slug } = await props.params;
   const { db } = await researchContext(slug);

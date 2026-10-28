@@ -1,11 +1,3 @@
-/**
- * POST /api/agent/telemetry - anonymous, opt-in telemetry from VDX Agent (no token: the app is
- * open source, so any embedded secret would be public anyway).
- * Body: { install: { id, app_version, mac_model, chip, ... }, turns: [{ ts, model, ... }] }.
- * Writes only agent_installs / agent_turns (migration agent_telemetry), read by /admin/agent.
- * Every field is whitelisted, typed and clamped; the caller's address is never read or stored.
- * Abuse limits: 64 KB body, 100 turns per request, MAX_PER_HOUR turns per install.
- */
 import { crossTenantAccess, crossTenantDb } from "@/lib/engine/db";
 
 const MAX_BODY = 64_000;
@@ -22,7 +14,6 @@ const real = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? Math
 
 const bad = (error: string, status = 400) => Response.json({ error }, { status });
 
-/** A turn timestamp, accepted only within the last 7 days (queued offline batches) and not in the future. */
 function when(v: unknown): string | null {
   const t = typeof v === "string" ? Date.parse(v) : NaN;
   const now = Date.now();

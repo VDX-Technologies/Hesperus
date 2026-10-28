@@ -1,4 +1,3 @@
-// Records analysis: totals, weeks, shares and the signals worth a decision.
 import { describe, expect, it } from "vitest";
 import { analyze } from "../../lib/packages/records/analysis";
 

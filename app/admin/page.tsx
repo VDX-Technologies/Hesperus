@@ -18,7 +18,6 @@ async function createOrg(formData: FormData) {
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-|-$/g, "");
   const consoles = parseConsoles(formData.getAll("console"));
-  // its users need at least one console to land on
   if (!consoles.length) throw new Error("choose at least one console");
   const { data, error } = await supabase
     .from("organizations")

@@ -10,7 +10,6 @@ import { TimeChart } from "@/components/terra/chart";
 import { ThermalMap, type ThermalFrame } from "./thermal-map";
 import { LeafCalendar, type HourlyPoints } from "./leaf-calendar";
 
-/** Progress towards a disease alert: 0..1 of the warning threshold, capped at 2 (alarm). */
 function RiskBar({ label, value, warn, detail }: { label: string; value: number; warn: number; detail: string }) {
   const r = Math.min(2, value / warn);
   const color = r >= 2 ? "bg-alarm" : r >= 1 ? "bg-warn" : "bg-ok";
@@ -30,7 +29,6 @@ function RiskBar({ label, value, warn, detail }: { label: string; value: number;
 const CHART_KEYS = ["temp_c", "leaf_c", "dew_c", "rh", "vpd_kpa", "co2", "voc", "par", "uvi", "leaf_air", "ir_spread", "wet_h"];
 const LEAF_DAYS = 14;
 
-/** LoRa object page: live values, today's light, latest IR frame, history charts from the engine series. */
 export async function LoraDevice({
   orgId,
   device,
@@ -54,14 +52,12 @@ export async function LoraDevice({
     series(db, { objectId: device.id, module: "lora", metrics: CHART_KEYS, from: new Date(now.getTime() - (range === "7d" ? 7 : 1) * 86400000), to: now }),
     series(db, { objectId: device.id, module: "lora", metrics: ["par"], from: midnight, to: now }),
   ]);
-  // no IR frame (single-point sensor): leaf temperature hour by hour instead
   const ir = (device.properties.ir ?? null) as ThermalFrame | null;
   const leafHours = ir
     ? null
     : await series(db, { objectId: device.id, module: "lora", metrics: ["leaf_c", "dew_c"], from: new Date(now.getTime() - LEAF_DAYS * 86400000), to: now, level: "1h" });
   const pairs = (k: string): HourlyPoints => (leafHours?.series[k] ?? []).map((p) => [p.ts.getTime(), p.value]);
 
-  // one chart row per timestamp with every metric that has a point there
   const byTs = new Map<number, Record<string, number>>();
   for (const [k, pts] of Object.entries(hist.series))
     for (const p of pts) {
@@ -72,7 +68,6 @@ export async function LoraDevice({
     }
   const rows = [...byTs.values()].sort((a, b) => a.t - b.t);
 
-  // Daily light integral: PAR (µmol/m²/s) integrated over today -> mol/m²/day
   let dli = 0;
   const par = light.series.par;
   for (let i = 1; i < par.length; i++) dli += (par[i - 1].value * (par[i].ts.getTime() - par[i - 1].ts.getTime())) / 1000 / 1e6;

@@ -1,6 +1,3 @@
--- Web push (PWA) alarm notifications: one row per browser/device subscribed to an organization.
--- Written by the app server after checking membership; a subscription the push service reports
--- as gone (404/410) is deleted by the sender.
 create table public.push_subscriptions (
   tenant_id uuid not null references public.organizations (id) on delete cascade,
   endpoint text not null,

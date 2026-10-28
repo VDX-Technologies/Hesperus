@@ -1,7 +1,3 @@
-/**
- * Moves closed hours from raw_inbox to the R2 archive. Run hourly (GitHub Actions).
- *   npx tsx scripts/flush-raw.ts
- */
 import "./env";
 import { crossTenantAccess, crossTenantDb } from "../lib/engine/db";
 import { flushRawInbox } from "../lib/engine/archive";

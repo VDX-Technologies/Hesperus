@@ -1,5 +1,3 @@
-// Places as objects: the links trigger keeps the tree sound, the data migration moves sites and
-// zones over with their ids, and the console reads each object's place path.
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
@@ -45,7 +43,7 @@ describe("place tree", () => {
     expect(flattenPlaces(await placeTree(A)).map((p) => p.path.join("/"))).toEqual(["Farm", "Farm/North", "Farm/North/Bed 1"]);
 
     await renamePlace(A, north, "Nord");
-    await setObjectPlace(A, sensors[0], north); // replaces, one place per object
+    await setObjectPlace(A, sensors[0], north);
     expect((await listObjects(A, "testmod"))[0].placePath).toEqual(["Farm", "Nord"]);
   });
 
@@ -60,7 +58,7 @@ describe("place tree", () => {
     await expect(setObjectPlace(A, a1, site)).rejects.toThrow(/located_in/);
     await expect(setObjectPlace(A, sensors[1], sensors[0])).rejects.toThrow(/located_in/);
     const foreign = await createPlace(forTenant(db, OTHER), { kind: "site", name: "B" });
-    await expect(setObjectPlace(A, sensors[1], foreign)).rejects.toThrow(); // composite FK on tenant
+    await expect(setObjectPlace(A, sensors[1], foreign)).rejects.toThrow();
   });
 
   it("moves areas and objects up to the parent when a place is deleted", async () => {
@@ -73,7 +71,7 @@ describe("place tree", () => {
     const d = (await placeTree(A)).find((p) => p.id === site)!;
     expect(d.children.map((c) => c.id)).toEqual([leaf]);
 
-    await deletePlace(A, site); // a site has no parent: its object loses the place
+    await deletePlace(A, site);
     expect((await listObjects(A, "testmod"))[1].placeId).toBeNull();
   });
 
@@ -85,26 +83,23 @@ describe("place tree", () => {
 
 describe("sites and zones migration", () => {
   it("keeps ids, links zones to sites and objects to zones, drops zone_id", async () => {
-    // the old tables are gone after 20261023000000_drop_sites_zones: rebuild them as they were
     await db.query(`create table sites (id uuid primary key default gen_random_uuid(), org_id uuid not null, name text not null, created_at timestamptz not null default now())`);
     await db.query(`create table zones (id uuid primary key default gen_random_uuid(), org_id uuid not null, site_id uuid not null references sites (id), name text not null, created_at timestamptz not null default now())`);
     const site = (await db.query(`insert into sites (org_id, name) values ($1, 'Old site') returning id`, [ORG])).rows[0].id;
     const zone = (await db.query(`insert into zones (org_id, site_id, name) values ($1, $2, 'Old zone') returning id`, [ORG, site])).rows[0].id;
-    // objects written before the migration carried zone_id in their properties
     await db.query(`update object_types set properties = properties || '{"zone_id": {"type": "string"}}' where module = 'testmod'`);
     await setObjectPlace(A, sensors[1], null);
     await db.query(`update objects set properties = properties || jsonb_build_object('zone_id', $2::text) where id = $1`, [sensors[1], zone]);
 
     const sql = readFileSync(join(__dirname, "../../supabase/migrations/20261020010000_places_data.sql"), "utf8");
     await db.query(sql);
-    await db.query(sql); // re-running is harmless
+    await db.query(sql);
 
     const [, s2] = await listObjects(A, "testmod");
     expect(s2.placeId).toBe(zone);
     expect(s2.placePath).toEqual(["Old site", "Old zone"]);
     expect(s2.properties.zone_id).toBeUndefined();
 
-    // with everything moved the drop goes through; a row left behind stops it
     const drop = readFileSync(join(__dirname, "../../supabase/migrations/20261023000000_drop_sites_zones.sql"), "utf8");
     await db.query(`insert into sites (org_id, name) values ($1, 'Never moved')`, [ORG]);
     await expect(db.query(drop)).rejects.toThrow(/1 rows not moved/);

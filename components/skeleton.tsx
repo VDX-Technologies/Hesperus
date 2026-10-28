@@ -1,4 +1,3 @@
-/** Placeholder shown instantly while a dashboard page renders on the server. */
 export function PageSkeleton({ cards = 6, blocks = 2 }: { cards?: number; blocks?: number }) {
   return (
     <div className="animate-pulse" aria-busy>

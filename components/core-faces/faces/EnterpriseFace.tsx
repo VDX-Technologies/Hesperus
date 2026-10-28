@@ -2,7 +2,6 @@ import { CoreShell } from "../CoreShell";
 import { noise, series } from "../data";
 import { CORE, Card, Chart, Dot, SectionLabel } from "../ui";
 
-/** Schedule window, 06:00 → 22:00, in hours. */
 const FROM = 6;
 const SPAN = 16;
 const NOW = 14.5;
@@ -15,7 +14,6 @@ const SCHEDULE: { line: string; plant: string; oee: string; warn?: boolean; orde
   { line: "B2", plant: "LY", oee: "84.7", orders: [{ id: "4465", from: 6, to: 11 }, { id: "4468", from: 11.25, to: 16.5 }, { id: "4471", from: 16.75, to: 21.5, ghost: true }] },
 ];
 
-/** 8 h of spindle vibration and cycle time on B1, every 5 minutes, drifting from 13:10. */
 const N = 96;
 const DRIFT = 62;
 const vib = series(N, 0, (_, i) => 2.05 + noise(i, 11) * 0.1 + (i > DRIFT ? (i - DRIFT) ** 1.3 * 0.022 : 0));
@@ -30,7 +28,6 @@ const TRACE = [
 
 const pct = (h: number) => `${((h - FROM) / SPAN) * 100}%`;
 
-/** Face 3: one anomaly on one line, explained by joining four systems that never talked to each other. */
 export function EnterpriseFace() {
   return (
     <CoreShell workspace="Manifattura Demo" nav={["Overview", "Lines", "Orders", "Alerts"]} active={1} alerts={1}>

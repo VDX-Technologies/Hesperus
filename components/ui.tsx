@@ -14,7 +14,6 @@ const TEXT: Record<Status, string> = {
   offline: "text-offline",
 };
 
-/** Same colours as the status ring on the device. */
 export function StatusDot({ status, pulse = false }: { status: Status; pulse?: boolean }) {
   return (
     <span className="relative inline-flex h-2.5 w-2.5">
@@ -35,7 +34,6 @@ export function StatusLabel({ status, t }: { status: Status; t: Dict }) {
   );
 }
 
-/** Device status as the user should see it: stale data means offline. */
 export function liveStatus(lastStatus: string | null, lastSeen: string | null, offlineAfterS: number): Status {
   if (!lastSeen || Date.now() - Date.parse(lastSeen) > offlineAfterS * 1000) return "offline";
   return (lastStatus as Status) ?? "offline";

@@ -1,11 +1,3 @@
-// Object types made by the tenant in the schema editor (module "custom") and their objects:
-// a research project, a dataset, a result, or anything else a sector needs, with no code of its
-// own. A type has a field schema (the same one event types use) and declared links to other
-// types; the database checks both again (objects_validate, objects_validate_schemas,
-// links_validate_declared), this file checks first so people get readable errors.
-// Two schema features let a parent shape its children without a new type per project:
-//   format "schema"   an object property that holds a field schema (a project's result fields)
-//   schemaFrom        a property checked against that schema, read through a declared link
 import type { Db, TenantDb } from "./db";
 import { forTenant, inTransaction } from "./db";
 import type { PropertySpec } from "./package";
@@ -16,14 +8,12 @@ import { checkFields, KEY, validateProperties, type Schema } from "./schema";
 import { CUSTOM, FIELD_TYPES, filterable } from "./registers";
 
 export interface LinkSpec {
-  /** Target object type, "custom.project" or a package type such as "core.site". */
   type: string;
   required?: boolean;
   label?: Record<string, string>;
 }
 
 export interface ObjectTypeInfo {
-  /** "custom.project" */
   type: string;
   module: string;
   key: string;
@@ -45,17 +35,14 @@ export interface CustomObject {
   name: string;
   externalId: string | null;
   properties: Record<string, unknown>;
-  /** Declared links: key → target object id. */
   links: Record<string, string>;
   createdAt: Date;
 }
 
 const TYPE = /^[a-z][a-z0-9_]{0,39}\.[a-z][a-z0-9_]{0,39}$/;
 const UUID = /^[0-9a-f-]{36}$/i;
-// links the places tree uses; an object type cannot declare them
 const RESERVED_LINKS = ["part_of", "located_in"];
 
-/** The properties in the editor's order. */
 const ordered = (props: Schema, order: string[] | null): Schema =>
   Object.fromEntries([...(order ?? []).filter((k) => k in props), ...Object.keys(props).filter((k) => !order?.includes(k))].map((k) => [k, props[k]]));
 
@@ -64,7 +51,6 @@ const typeInfo = (r: TypeRow): ObjectTypeInfo => ({
   type: `${CUSTOM}.${r.key}`, module: CUSTOM, key: r.key, name: r.name, properties: ordered(r.properties, r.field_order), links: r.links ?? {},
 });
 
-/** The tenant's own object types, by name. */
 export async function listObjectTypes(db: TenantDb): Promise<ObjectTypeInfo[]> {
   const { rows } = await db.query<TypeRow>(
     `select key, name, properties, links, field_order from object_types where tenant_id = $1 and module = $2 order by name->>'en', key`,
@@ -82,7 +68,6 @@ export async function getObjectType(db: TenantDb, type: string): Promise<ObjectT
   return rows[0] ? typeInfo(rows[0]) : null;
 }
 
-/** Properties of a type the tenant can see (its own or a global one), null when it does not exist. */
 async function typeProperties(db: TenantDb, type: string): Promise<Schema | null> {
   const { rows } = await db.query<{ properties: Schema }>(
     `select properties from object_types where (tenant_id = $1 or tenant_id is null) and module || '.' || key = $2
@@ -92,7 +77,6 @@ async function typeProperties(db: TenantDb, type: string): Promise<Schema | null
   return rows[0]?.properties ?? null;
 }
 
-/** Problems of a type definition that need no database, null when fine. */
 export function checkObjectType(input: ObjectTypeInput): string | null {
   if (!KEY.test(input.key)) return "invalid key";
   if (!Object.values(input.name ?? {}).some((n) => n?.trim())) return "a name is required";
@@ -117,13 +101,11 @@ export function checkObjectType(input: ObjectTypeInput): string | null {
   return null;
 }
 
-/** Creates or replaces an object type of the tenant. Only the owner; objects already saved stay as they are. */
 export async function saveObjectType(db: TenantDb, author: Author, input: ObjectTypeInput): Promise<string> {
   if (author.role !== "owner") throw new ManualEventError(403, "only the owner manages object types");
   const err = checkObjectType(input);
   if (err) throw new ManualEventError(400, err);
   const type = `${CUSTOM}.${input.key}`;
-  // targets must exist; a link to the type itself (a result refining another) is fine
   for (const [k, l] of Object.entries(input.links ?? {})) {
     const target = l.type === type ? input.properties : await typeProperties(db, l.type);
     if (!target) throw new ManualEventError(400, `link "${k}": unknown type "${l.type}"`);
@@ -149,9 +131,6 @@ export async function saveObjectType(db: TenantDb, author: Author, input: Object
   return type;
 }
 
-// ---- objects ---------------------------------------------------------------------------------
-
-/** Database refusals as the errors people see: the triggers check what this file checks, and more. */
 async function guarded<T>(fn: () => Promise<T>): Promise<T> {
   try {
     return await fn();
@@ -163,7 +142,6 @@ async function guarded<T>(fn: () => Promise<T>): Promise<T> {
   }
 }
 
-/** Schemas held by the object (format "schema") and the ones it follows through its links. */
 async function checkProperties(db: TenantDb, t: ObjectTypeInfo, properties: Record<string, unknown>, links: Record<string, string>) {
   const err = validateProperties(t.properties, properties);
   if (err) throw new ManualEventError(400, err);
@@ -184,7 +162,6 @@ async function checkProperties(db: TenantDb, t: ObjectTypeInfo, properties: Reco
   }
 }
 
-/** Declared links: required ones present, each to an object of the declared type. */
 async function checkLinks(db: TenantDb, t: ObjectTypeInfo, links: Record<string, string>) {
   for (const k of Object.keys(links)) if (!t.links[k]) throw new ManualEventError(400, `link "${k}" is not declared by ${t.type}`);
   for (const [k, l] of Object.entries(t.links)) {
@@ -213,7 +190,6 @@ async function objectLimit(db: TenantDb) {
 
 const scoped = (db: TenantDb, c: Db) => forTenant(c, db.tenantId);
 
-/** Creates an object of a custom type with its links, in one transaction. Returns its id. */
 export async function createObject(
   db: TenantDb,
   author: Author,
@@ -249,7 +225,6 @@ async function insertObject(db: TenantDb, t: ObjectTypeInfo, externalId: string 
   );
 }
 
-/** The same JSON value, whatever the key order. */
 const canonical = (v: unknown): unknown =>
   Array.isArray(v) ? v.map(canonical) : v && typeof v === "object" ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, canonical((v as Record<string, unknown>)[k])])) : v;
 const same = (a: unknown, b: unknown) => JSON.stringify(canonical(a)) === JSON.stringify(canonical(b));
@@ -265,13 +240,6 @@ const withPatch = (base: Record<string, unknown>, patch: Record<string, unknown>
 
 export type UpsertStatus = "created" | "updated" | "unchanged";
 
-/**
- * Creates the object of `type` with this external id, or changes the one already there: for
- * machines that send the same objects again (a pipeline run after run). `properties` and
- * `links` are applied each time (null removes a property); `defaults` only when the object is
- * created, so what people changed since (a review status) stays. Nothing is written, nor
- * audited, when nothing changes. The caller has authorized the writer (a source token).
- */
 export async function upsertObject(
   db: TenantDb,
   actor: Actor,
@@ -327,7 +295,6 @@ export async function upsertObject(
   return { id: prev.id, status: "updated" };
 }
 
-/** The object of a custom type with this external id, null when there is none. */
 export async function objectByExternalId(db: TenantDb, type: string, externalId: string): Promise<CustomObject | null> {
   if (!type.startsWith(`${CUSTOM}.`)) return null;
   const { rows } = await db.query<ObjectRow>(`${SELECT_OBJECTS} and t.key = $4 and o.external_id = $5`, [db.tenantId, RESERVED_LINKS, CUSTOM, type.slice(CUSTOM.length + 1), externalId]);
@@ -336,7 +303,6 @@ export async function objectByExternalId(db: TenantDb, type: string, externalId:
 
 type ObjectRow = { id: string; key: string; name: string | null; external_id: string | null; properties: Record<string, unknown>; created_at: Date; links: Record<string, string> | null };
 
-// $1 tenant, $2 reserved links, $3 module; the caller adds its own conditions from $4
 const SELECT_OBJECTS = `select o.id, t.key, o.name, o.external_id, o.properties, o.created_at,
         (select jsonb_object_agg(l.type, l.dst_id) from links l where l.tenant_id = $1 and l.src_id = o.id and l.type <> all($2::text[])) links
    from objects o join object_types t on t.id = o.type_id
@@ -347,14 +313,12 @@ const toObject = (r: ObjectRow): CustomObject => ({
   properties: r.properties ?? {}, links: r.links ?? {}, createdAt: r.created_at,
 });
 
-/** One object of a custom type with its declared links, null when it is not there. */
 export async function getObject(db: TenantDb, id: string): Promise<CustomObject | null> {
   if (!UUID.test(id)) return null;
   const { rows } = await db.query<ObjectRow>(`${SELECT_OBJECTS} and o.id = $4`, [db.tenantId, RESERVED_LINKS, CUSTOM, id]);
   return rows[0] ? toObject(rows[0]) : null;
 }
 
-/** Objects of one custom type, optionally only those linked to `linkedTo.id` through `linkedTo.key`. */
 export async function listObjects(
   db: TenantDb,
   type: string,
@@ -365,19 +329,11 @@ export async function listObjects(
 
 export interface ObjectSearch {
   linkedTo?: { key: string; id: string };
-  /** words the name or the external id contains, case insensitive */
   text?: string;
-  /** property → value it must hold (string, number, integer or boolean properties) */
   where?: Record<string, unknown>;
-  /** property → lowest / highest value (number or integer properties) */
   min?: Record<string, number>;
   max?: Record<string, number>;
-  /** a number, integer or string property, "name", or "created" (the default, newest first) */
   order?: { by: string; desc?: boolean };
-  /**
-   * The fields inside object properties, which the type does not declare (a schema taken from a
-   * linked object): with them, "extra.tic_id" can be filtered and sorted on like a property.
-   */
   schemas?: Record<string, Schema>;
   limit?: number;
   offset?: number;
@@ -385,11 +341,6 @@ export interface ObjectSearch {
 
 const numeric = (s: PropertySpec | undefined) => s?.type === "number" || s?.type === "integer";
 
-/**
- * The objects of one custom type a search matches, as a query and its parameters (`where`, with
- * the columns of SELECT_OBJECTS) and the property paths it can read, shared by the page of objects
- * and the aggregates over them. Null when nothing can match.
- */
 async function filtered(db: TenantDb, type: string, q: ObjectSearch) {
   const t = await getObjectType(db, type);
   if (!t || t.module !== CUSTOM) return null;
@@ -397,7 +348,6 @@ async function filtered(db: TenantDb, type: string, q: ObjectSearch) {
   if (q.linkedTo && !link) return null;
   const params: unknown[] = [db.tenantId, RESERVED_LINKS, CUSTOM, t.key];
   const p = (v: unknown) => `$${params.push(v)}`;
-  // a declared property, or a field of an object property: its spec and its jsonb / text path
   const at = (k: string) => {
     const [top, sub, ...rest] = k.split(".");
     const outer = t.properties[top];
@@ -425,7 +375,6 @@ async function filtered(db: TenantDb, type: string, q: ObjectSearch) {
     }
   }
   const where = `${SELECT_OBJECTS} and t.key = $4${conds.map((c) => ` and ${c}`).join("")}`;
-  // a numeric property, read from the rows of `where` taken as `o`
   const numberOf = (k: string) => {
     const f = at(k);
     return f && numeric(f.spec) ? numberAt(f) : null;
@@ -433,12 +382,6 @@ async function filtered(db: TenantDb, type: string, q: ObjectSearch) {
   return { params, p, at, numberAt, numberOf, where };
 }
 
-/**
- * A page of the objects of one custom type, filtered on their properties, with the number of
- * objects that match. Only properties declared by the type (or by `schemas`, one level down) can
- * be filtered or sorted on; others are ignored, so a stale link never breaks the page. Objects
- * missing the sort property come last.
- */
 export async function searchObjects(db: TenantDb, type: string, q: ObjectSearch = {}): Promise<{ objects: CustomObject[]; total: number }> {
   const s = await filtered(db, type, q);
   if (!s) return { objects: [], total: 0 };
@@ -461,17 +404,11 @@ export async function searchObjects(db: TenantDb, type: string, q: ObjectSearch 
 }
 
 export interface Histogram {
-  /** the lowest and highest value among the matching objects; null when none holds a number */
   min: number | null;
   max: number | null;
-  /** equal-width bins from min to max, the last one closed: [lo, hi) … [lo, hi] */
   bins: { lo: number; hi: number; n: number }[];
 }
 
-/**
- * How the values of one numeric property spread over the objects a search matches, in `bins`
- * equal-width bins (at most 100); objects without a number there are left out.
- */
 export async function objectHistogram(db: TenantDb, type: string, key: string, q: ObjectSearch = {}, bins = 20): Promise<Histogram> {
   const none: Histogram = { min: null, max: null, bins: [] };
   const s = await filtered(db, type, q);
@@ -494,10 +431,6 @@ export async function objectHistogram(db: TenantDb, type: string, key: string, q
   };
 }
 
-/**
- * Two numeric properties of the objects a search matches, as points to plot (those holding a
- * number in both), at most `limit` of them (2000 at most), with how many there are in all.
- */
 export async function objectPoints(
   db: TenantDb, type: string, x: string, y: string, q: ObjectSearch = {}, limit = 1000,
 ): Promise<{ points: { id: string; name: string; x: number; y: number }[]; total: number }> {
@@ -515,11 +448,6 @@ export async function objectPoints(
   return { points: rows.map(({ total: _, ...p }) => p), total: rows[0]?.total ?? 0 };
 }
 
-/**
- * How many objects of a type each object is linked to through `link`, split by the value of
- * one property when `by` is given: the results of every project, per review status. With
- * `since`, only the objects created from then on.
- */
 export async function countLinked(db: TenantDb, type: string, link: string, by?: string, since?: Date): Promise<{ id: string; value: string | null; n: number }[]> {
   if (!type.startsWith(`${CUSTOM}.`)) return [];
   const { rows } = await db.query<{ id: string; value: string | null; n: number }>(
@@ -542,7 +470,6 @@ export interface ObjectDocument {
   createdAt: Date;
 }
 
-/** The files attached to an object (plots, reports), newest first. */
 export async function objectDocuments(db: TenantDb, objectId: string): Promise<ObjectDocument[]> {
   if (!UUID.test(objectId)) return [];
   const { rows } = await db.query<{ id: string; filename: string; content_type: string | null; size: string | null; created_at: Date }>(
@@ -562,10 +489,6 @@ async function found(db: TenantDb, id: string) {
   return { o, t };
 }
 
-/**
- * Changes some properties (a review status, a note), keeping the others: a null value removes
- * the property. `name` renames. Validated against the type and the schemas it follows.
- */
 export async function updateObject(
   db: TenantDb,
   author: Author,
@@ -589,7 +512,6 @@ export async function updateObject(
   });
 }
 
-/** Points a declared link at another object, or removes it (null) when it is not required. */
 export async function setLink(db: TenantDb, author: Author, id: string, key: string, dst: string | null): Promise<void> {
   if (!canRecord(author.role)) throw new ManualEventError(403, "viewers cannot change objects");
   const { o, t } = await found(db, id);
@@ -609,7 +531,6 @@ export async function setLink(db: TenantDb, author: Author, id: string, key: str
   await record(db, author, "link.set", { objectId: id, subject: o.name, data: { link: key, before: o.links[key] ?? null, after: dst } });
 }
 
-/** Deletes an object nothing points at: no events, no objects linked to it. */
 export async function deleteObject(db: TenantDb, author: Author, id: string): Promise<void> {
   if (!canRecord(author.role)) throw new ManualEventError(403, "viewers cannot delete objects");
   const { o } = await found(db, id);

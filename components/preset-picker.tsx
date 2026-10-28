@@ -1,6 +1,5 @@
 "use client";
 
-/** Crop presets: fill the inputs of the surrounding settings form, the user then saves. */
 export function PresetPicker({
   presets,
   defaults,

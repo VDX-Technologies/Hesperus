@@ -1,6 +1,3 @@
-// VDX Agent telemetry as configuration: an anonymous install (random id, hardware, no user data)
-// and one event per model turn. The open-source agent pushes them with a custom source token,
-// only after its user allows it. Running it again replaces the definitions in place.
 import type { TenantDb } from "../../lib/engine/db";
 import type { Author } from "../../lib/engine/manual";
 import { saveEventType, type EventTypeInput } from "../../lib/engine/registers";
@@ -53,7 +50,6 @@ export const eventTypes: EventTypeInput[] = [
   },
 ];
 
-/** Saves the telemetry types, the install first since turns point at it. */
 export async function seedAgent(db: TenantDb, owner: Author): Promise<string[]> {
   const saved: string[] = [];
   for (const t of objectTypes) saved.push(await saveObjectType(db, owner, t));

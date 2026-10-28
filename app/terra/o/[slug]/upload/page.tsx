@@ -12,7 +12,6 @@ import { UploadForm } from "./form";
 
 const fmtSize = (n: number) => (n < 1024 * 1024 ? `${Math.max(1, Math.round(n / 1024))} KB` : `${(n / 1024 ** 2).toFixed(1)} MB`);
 
-/** CSV files loaded into the tenant's upload sources, and the form to load a new one (owner only). */
 export default async function Upload(props: PageProps<"/terra/o/[slug]/upload">) {
   const { slug } = await props.params;
   const { org, role } = await requireConsole(slug, "terra");

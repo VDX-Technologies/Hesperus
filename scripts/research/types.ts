@@ -1,6 +1,3 @@
-// VDX Research as configuration: the types a research organization needs, saved through the
-// same engine APIs the schema editor uses. Nothing here is known to the engine; running it
-// again replaces the definitions in place, so it is the versioned copy of the editor's work.
 import type { TenantDb } from "../../lib/engine/db";
 import type { Author } from "../../lib/engine/manual";
 import { saveEventType, type EventTypeInput } from "../../lib/engine/registers";
@@ -24,11 +21,8 @@ export const objectTypes: ObjectTypeInput[] = [
       started: { type: "timestamp", label: l("Inizio", "Start") },
       ended: { type: "timestamp", label: l("Fine", "End") },
       protocol: { type: "string", label: l("Link protocollo", "Protocol link") },
-      // one link per line, "Label https://...{tic_id}": a result's pages in outside catalogs
       result_links: { type: "string", format: "text", label: l("Link esterni dei risultati", "Result links") },
-      // the properties of this project's results (TIC id, gene, enzyme...), set per project
       result_schema: { type: "object", format: "schema", label: l("Proprietà dei risultati", "Result properties") },
-      // who hears of the pipeline: a run that ends, a new result scoring at least notify_score
       notify_email: { type: "string", label: l("Email per le notifiche (separate da virgola)", "Notification emails (comma separated)") },
       notify_webhook: { type: "string", label: l("Webhook per le notifiche (https)", "Notification webhook (https)") },
       notify_score: { type: "number", label: l("Punteggio minimo da notificare", "Score to notify from") },
@@ -64,16 +58,13 @@ export const objectTypes: ObjectTypeInput[] = [
         },
       },
       note: { type: "string", format: "text", label: l("Note", "Notes") },
-      // the email of the member who should look at it
       assignee: { type: "string", label: l("Assegnato a", "Assigned to") },
-      // the id of the run (an event) that produced it
       run: { type: "integer", label: l("Esecuzione", "Run") },
       extra: { type: "object", schemaFrom: "project.result_schema", label: l("Proprietà del progetto", "Project properties") },
     },
     links: { project: { type: "custom.project", required: true } },
   },
   {
-    // a saved search of a project's results: its filters, sort and columns, shared with the team
     key: "view",
     name: l("Vista salvata", "Saved view"),
     properties: { query: { type: "string", required: true, label: l("Filtri", "Filters") } },
@@ -111,13 +102,11 @@ export const eventTypes: EventTypeInput[] = [
     subject: "custom.result",
     fields: {
       text: { type: "string", format: "text", required: true, label: l("Testo", "Text") },
-      // the comment it answers, for threads
       reply_to: { type: "integer", min: 1, label: l("In risposta a", "Reply to") },
     },
   },
 ];
 
-/** Saves every type, objects first since the events point at them; returns the type names. */
 export async function seedResearch(db: TenantDb, owner: Author): Promise<string[]> {
   const saved: string[] = [];
   for (const t of objectTypes) saved.push(await saveObjectType(db, owner, t));

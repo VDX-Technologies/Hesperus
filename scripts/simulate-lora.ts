@@ -1,8 +1,3 @@
-/**
- * Fake LoRa nodes for demos: backfills plausible history, then optionally keeps sending live.
- * Goes through the same ingest as POST /api/push, from a source named "Simulatore LoRa".
- *   npx tsx scripts/simulate-lora.ts <org-slug> [--nodes 3] [--hours 48] [--live]
- */
 import "./env";
 import { crossTenantAccess, crossTenantDb } from "../lib/engine/db";
 import { ingestPush } from "../lib/engine/ingest";
@@ -24,10 +19,9 @@ if (!slug || slug.startsWith("--")) {
 
 const noise = (a: number) => (Math.random() - 0.5) * 2 * a;
 
-/** One reading of node n at time ts: daily cycle, irrigation at 7:00, a warmer node 2. */
 function reading(n: number, ts: Date) {
   const h = ts.getHours() + ts.getMinutes() / 60;
-  const day = Math.max(0, Math.sin(((h - 6) / 14) * Math.PI)); // 0 at night, 1 at 13:00
+  const day = Math.max(0, Math.sin(((h - 6) / 14) * Math.PI));
   const temp = 14 + 13 * day + n * 0.8 + noise(0.4);
   const irrigation = h >= 7 && h < 7.4 ? 14 : 0;
   const rh = Math.min(99, 90 - 32 * day + irrigation + noise(1.5));

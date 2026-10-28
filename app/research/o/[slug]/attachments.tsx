@@ -1,5 +1,3 @@
-// A result's attachments as the console shows them: raster images previewed, CSV files as the
-// table of their first rows, PDFs opened in the browser's viewer, anything else downloaded.
 import type { Dict } from "@/lib/i18n";
 import type { Locale } from "@/lib/packages/types";
 import type { TenantDb } from "@/lib/engine/db";
@@ -7,7 +5,6 @@ import type { ObjectDocument } from "@/lib/engine/custom-objects";
 import { csvPreview, inlineImage, isCsv, isPdf } from "@/lib/research";
 import { readDocument } from "./documents";
 
-// bigger files are only offered for download: the preview reads the whole file from the store
 const PREVIEW_BYTES = 5 * 1024 * 1024;
 
 export async function Attachments({ db, slug, docs, t, locale }: { db: TenantDb; slug: string; docs: ObjectDocument[]; t: Dict; locale: Locale }) {
@@ -74,7 +71,6 @@ export async function Attachments({ db, slug, docs, t, locale }: { db: TenantDb;
   );
 }
 
-/** A result's pages in outside catalogs, from its project's template. */
 export function OutsideLinks({ links, t }: { links: { label: string; url: string }[]; t: Dict }) {
   if (!links.length) return null;
   return (

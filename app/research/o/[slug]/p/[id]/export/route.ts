@@ -1,5 +1,3 @@
-// A project's results as CSV or JSON, with the same filters and order as its page. Every
-// matching result, read in pages and streamed.
 import { getObject, getObjectType, searchObjects } from "@/lib/engine/custom-objects";
 import { projectFields, RESEARCH, resultFilters, resultsCsv } from "@/lib/research";
 import { researchContext } from "../../../context";

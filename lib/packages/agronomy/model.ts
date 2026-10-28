@@ -1,4 +1,3 @@
-// Console side of Agronomy: no metrics, settings or rules; crops and their register only.
 import type { PackageDef } from "../types";
 
 export const agronomy: PackageDef<Record<string, never>> = {

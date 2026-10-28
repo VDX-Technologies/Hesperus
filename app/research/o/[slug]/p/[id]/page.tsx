@@ -20,11 +20,6 @@ import { Outcome, runLabel } from "../../runs";
 
 const isNumber = (s: PropertySpec) => s.type === "number" || s.type === "integer";
 
-/**
- * A project: its properties, its run history and its results, searched, filtered on any of their
- * properties (the project's own fields too) and sorted by column, with batch review and assignment;
- * charts of the results matching the filters, the review funnel, a choice of columns and saved views.
- */
 export default async function Project(props: PageProps<"/research/o/[slug]/p/[id]">) {
   const { slug, id } = await props.params;
   const sp = await props.searchParams;
@@ -40,7 +35,6 @@ export default async function Project(props: PageProps<"/research/o/[slug]/p/[id
   const assignable = !!resultType?.properties[RESEARCH.assignee];
   const { page, ...filters } = resultFilters(sp, project.id, { result: resultType?.properties, own, me: author.email });
   const one = (k: string) => (typeof sp[k] === "string" ? (sp[k] as string) : "");
-  // the numeric columns the charts can plot: the result's, then the project's own fields
   const numeric = [
     ...Object.entries(resultType?.properties ?? {}).filter(([, s]) => isNumber(s)).map(([k, s]) => [k, label(s.label, locale, k)] as const),
     ...Object.entries(own).filter(([, s]) => isNumber(s)).map(([k, s]) => [`${RESEARCH.extra}.${k}`, label(s.label, locale, k)] as const),
@@ -63,18 +57,15 @@ export default async function Project(props: PageProps<"/research/o/[slug]/p/[id
 
   const members = assignable ? await assignees(org.id) : [];
   const editor = canRecord(author.role);
-  // the key webhook posts are signed with, for the people who set the webhook
   const hookSecret = project.properties[RESEARCH.notifyWebhook] ? webhookSecret(project.id) : null;
   const shown = Object.entries(type.properties).filter(([k, s]) => s.type !== "object" && project.properties[k] !== undefined);
   const runCols = Object.entries(runType?.fields ?? {}).filter(([, s]) => s.type !== "object");
-  // the result's own scalar properties, then the project's fields held in `extra`
   const cols = Object.entries(resultType?.properties ?? {}).filter(([k, s]) => s.type !== "object" && k !== RESEARCH.note);
   const extraCols = Object.entries(own).filter(([, s]) => s.type !== "object");
   const columns = [...cols.map(([k, s]) => [k, label(s.label, locale, k)] as const), ...extraCols.map(([k, s]) => [`${RESEARCH.extra}.${k}`, label(s.label, locale, k)] as const)];
   const visible = shownColumns(sp.cols, columns.map(([k]) => k));
   const review = resultType?.properties[RESEARCH.review];
   const base = `/research/o/${slug}/p/${project.id}`;
-  // a link to this page with the current filters, some of them changed (null removes one)
   const link = (change: Record<string, string | null>, path = base) => {
     const q = filterQuery(sp);
     for (const [k, v] of Object.entries(change)) if (v === null) q.delete(k); else q.set(k, v);
@@ -88,7 +79,6 @@ export default async function Project(props: PageProps<"/research/o/[slug]/p/[id
       {text}{sortBy === key ? (desc ? " ↓" : " ↑") : ""}
     </Link>
   );
-  // the filters built from the schemas: a choice for enums and booleans, a range for numbers, the exact value otherwise
   const advanced = [
     ...Object.entries(resultType?.properties ?? {})
       .filter(([k, s]) => s.type !== "object" && s.type !== "timestamp" && ![RESEARCH.note, RESEARCH.review, RESEARCH.score, RESEARCH.assignee].includes(k as never))
@@ -123,17 +113,14 @@ export default async function Project(props: PageProps<"/research/o/[slug]/p/[id
   const queue = filterQuery(sp);
   queue.delete("review");
   const exportLink = (format: string) => link({ format }, `${base}/export`);
-  // the current filters as hidden inputs of a form that sets the others
   const keep = (...drop: string[]) =>
     [...filterQuery(sp)].filter(([k]) => !drop.includes(k)).map(([k, v]) => <input key={k} type="hidden" name={k} value={v} />);
   const nameOf = (k: string) => numeric.find(([n]) => n === k)?.[1] ?? k;
-  // a histogram's range is the score's min / max, or a field's min.<key> / max.<key>
   const [minKey, maxKey] = hist === RESEARCH.score ? ["min", "max"] : [`min.${hist}`, `max.${hist}`];
   const histQuery = filterQuery(sp);
   histQuery.delete(minKey);
   histQuery.delete(maxKey);
   const ranged = !!(one(minKey) || one(maxKey));
-  // the review funnel over all the project's results: reviewed, then kept (interesting or sent), then sent
   const counts = Object.fromEntries(byReview.filter((r) => r.id === project.id).map((r) => [r.value ?? "", r.n]));
   const all = Object.values(counts).reduce((a, n) => a + n, 0);
   const states = (review?.enum ?? []).map(String);

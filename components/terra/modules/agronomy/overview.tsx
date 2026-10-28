@@ -11,7 +11,6 @@ import { OpsChart } from "@/components/terra/chart";
 import { Heatmap, Signals } from "@/components/terra/modules/records/analysis";
 import { TreatmentRows } from "./rows";
 
-/** A treatment as a register entry: its dose is the quantity over the area it covered. */
 const asEntry = (r: RegisterRow): RecordEntry => {
   const area = r.areaHa ?? 0;
   const quantity = r.quantity?.value ?? 0;
@@ -29,7 +28,6 @@ const panel = "card overflow-hidden";
 const head = "flex items-center justify-between gap-3 border-b border-line-soft px-4 py-2.5";
 const act = "rounded border border-line px-2 py-0.5 text-[11px] text-mist hover:border-ice/60 hover:text-frost";
 
-/** Change against the period before, as a signed percentage; nothing when there is no before. */
 function Delta({ f }: { f: Figure }) {
   if (f.prev === null) return null;
   if (!f.prev) return <span className="text-[11px] text-dim">{f.value ? "new" : "–"}</span>;
@@ -38,7 +36,6 @@ function Delta({ f }: { f: Figure }) {
   return <span className={`num text-[11px] ${tone}`}>{d > 0 ? "▲" : d < 0 ? "▼" : "■"} {Math.abs(d)}%</span>;
 }
 
-/** A row of counts as a small line, drawn on the server. */
 function Spark({ values, tone = "#9fd8ff" }: { values: number[]; tone?: string }) {
   const w = 96, h = 20, max = Math.max(1, ...values);
   const step = values.length > 1 ? w / (values.length - 1) : w;
@@ -77,7 +74,6 @@ function MixPanel({ title, items, href, locale }: { title: string; items: Mix[];
   );
 }
 
-/** Agronomy on the organization overview: the period's treatments, the crops' state and where to act. */
 export async function AgronomyOverview({ orgId, slug, t, locale, period }: { orgId: string; slug: string; t: Dict; locale: Locale; period?: number }) {
   const db = tenantDb(orgId);
   const crops = await listCrops(db);

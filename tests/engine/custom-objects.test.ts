@@ -1,6 +1,3 @@
-// Object types made in the schema editor: a project, its datasets and results, with declared
-// links and a result schema the project itself holds. The database refuses what the engine
-// refuses, so a write that skips the engine cannot break the rules either.
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { Client } from "pg";
 vi.mock("server-only", () => ({}));
@@ -59,7 +56,6 @@ describe("custom object types", () => {
     await expect(saveObjectType(A, member, project)).rejects.toMatchObject({ status: 403 });
     await expect(saveObjectType(A, owner, { ...project, key: "Bad" })).rejects.toMatchObject({ status: 400 });
     await expect(saveObjectType(A, owner, { ...project, properties: { a: { type: "string", format: "schema" } } })).rejects.toMatchObject({ status: 400 });
-    // a result cannot follow a project schema before the project type exists
     await expect(saveObjectType(A, owner, result)).rejects.toMatchObject({ status: 400 });
     expect(await saveObjectType(A, owner, project)).toBe("custom.project");
     await saveObjectType(A, owner, dataset);
@@ -79,7 +75,7 @@ describe("custom object types", () => {
     await db.query(`update engine_settings set value = '3' where key = 'registers.object_types_max'`);
     await getSettings(db, true);
     await expect(saveObjectType(A, owner, { ...dataset, key: "extra_type" })).rejects.toMatchObject({ status: 429 });
-    await saveObjectType(A, owner, { ...dataset, name: { it: "Insieme di dati" } }); // an update is not a new type
+    await saveObjectType(A, owner, { ...dataset, name: { it: "Insieme di dati" } });
     await db.query(`update engine_settings set value = '30' where key = 'registers.object_types_max'`);
     await getSettings(db, true);
   });
@@ -116,7 +112,7 @@ describe("custom objects", () => {
     const { rows } = await db.query(`select id from object_types where tenant_id = $1 and key = 'result'`, [ORG]);
     const raw = (props: object) =>
       db.query(`insert into objects (tenant_id, type_id, name, properties) values ($1, $2, 'raw', $3) returning id`, [ORG, rows[0].id, props]);
-    const { rows: [r] } = await raw({ score: 1, extra: { sector: 1 } }); // no project yet: checked when linked
+    const { rows: [r] } = await raw({ score: 1, extra: { sector: 1 } });
     await expect(db.query(`insert into links (tenant_id, type, src_id, dst_id) values ($1, 'project', $2, $3)`, [ORG, r.id, tess]))
       .rejects.toMatchObject({ code: "23514" });
     await expect(db.query(`insert into links (tenant_id, type, src_id, dst_id) values ($1, 'other', $2, $3)`, [ORG, r.id, tess]))
@@ -192,7 +188,6 @@ describe("events on custom objects", () => {
     await expect(recordEvent(A, spec, member, { ...input, objectIds: [sector, tess] })).rejects.toMatchObject({ status: 400 });
     await expect(saveEventType(A, owner, { key: "bad", name: { en: "Bad" }, subject: "custom.project", also: ["custom.project"], fields: {} }))
       .rejects.toMatchObject({ status: 400 });
-    // an object with events is not deleted
     await expect(deleteObject(A, owner, sector)).rejects.toMatchObject({ status: 409 });
   });
 });

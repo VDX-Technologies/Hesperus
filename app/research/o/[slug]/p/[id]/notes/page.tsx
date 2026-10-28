@@ -9,7 +9,6 @@ import { Flash } from "@/components/flash";
 import { addLabNote } from "../../../actions";
 import { researchContext } from "../../../context";
 
-/** A project's lab notebook: the notes written on it, newest first, and a new one. */
 export default async function Notes(props: PageProps<"/research/o/[slug]/p/[id]/notes">) {
   const { slug, id } = await props.params;
   const { saved, error } = await props.searchParams;

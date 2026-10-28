@@ -1,8 +1,4 @@
 "use client";
-// Generic form for a typed event: one input per schema field, built from the event type's
-// schema (quantity = number plus unit, enum = select, timestamp = date, object = JSON). Values are plain text
-// (comma decimals allowed); the server action turns them into a payload with payloadFromForm
-// and validates it. Controlled from outside when a page fills fields (repeat last, defaults).
 import { useActionState, useState } from "react";
 import { SubmitButton } from "@/components/submit-button";
 import type { Schema } from "@/lib/engine/schema";
@@ -15,7 +11,6 @@ export type EventFormLabels = {
   pending: string;
   saved: string;
   choose: string;
-  /** Text for error codes (notNumber, unitRequired, ...) and server errors. */
   errors: Record<string, string>;
 };
 
@@ -37,17 +32,13 @@ export function EventForm({
   action: (prev: EventFormState, form: FormData) => Promise<EventFormState>;
   fieldLabels: Record<string, string>;
   labels: EventFormLabels;
-  /** Field order; fields left out are not shown. Defaults to the schema order. */
   order?: string[];
   values?: EventFormValues;
   onChange?: (name: string, value: string) => void;
   initial?: EventFormValues;
-  /** Autocomplete for free-text fields. */
   suggestions?: Record<string, string[]>;
-  /** Text for enum values, per field. */
   optionLabels?: Record<string, Record<string, string>>;
   hidden?: Record<string, string>;
-  /** Extra inputs above the fields (e.g. the objects the event is about). */
   before?: React.ReactNode;
 }) {
   const [state, formAction] = useActionState(action, null);

@@ -1,5 +1,3 @@
-// A register as PDF or CSV, or one of the exports its package adds, with the same filters as
-// the page. Every filtered row, read in chunks with the keyset; the CSV is streamed.
 import { getT } from "@/lib/i18n";
 import { allEvents } from "@/lib/engine/events";
 import { tablePdf } from "@/lib/engine/pdf";

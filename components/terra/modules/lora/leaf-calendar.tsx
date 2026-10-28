@@ -3,14 +3,8 @@ import { useMemo, useState } from "react";
 import { DEW, IRON, ramp } from "./thermal-map";
 
 type Mode = "temp" | "dew";
-/** Hourly averages as [ts ms, value]. */
 export type HourlyPoints = [number, number][];
 
-/**
- * Leaf temperature hour by hour: one row per day, one cell per hour (viewer's local time).
- * For single-point infrared sensors, which have no frame to draw. "dew" colours the
- * distance between leaf and dew point, like the thermal map.
- */
 export function LeafCalendar({
   leaf,
   dew,

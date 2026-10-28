@@ -1,6 +1,3 @@
-// Minimal RFC 4180 reader: quoted fields, doubled quotes, CRLF or LF, a leading BOM. The
-// delimiter is guessed from the header line (comma, semicolon or tab: spreadsheets in many
-// locales export with ';').
 export interface Csv {
   delimiter: string;
   headers: string[];
@@ -31,7 +28,7 @@ export function parseCsv(text: string, maxRows = Infinity, maxColumns = Infinity
     row.push(field);
     field = "";
     if (row.length > maxColumns) throw new RangeError(`more than ${maxColumns} columns`);
-    if (row.length > 1 || row[0].trim() !== "") records.push(row); // blank lines are skipped
+    if (row.length > 1 || row[0].trim() !== "") records.push(row);
     row = [];
     if (records.length > maxRows + 1) throw new RangeError(`more than ${maxRows} rows`);
   };

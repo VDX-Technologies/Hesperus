@@ -8,7 +8,6 @@ import { SectionTitle } from "@/components/ui";
 import { EntryList } from "./entries";
 import { Doses, Kpis, Shares, Signals, Weeks } from "./analysis";
 
-/** Records object page: what the subject's entries add up to, its signals and every entry. */
 export async function RecordsDevice({ orgId, device, baseHref, t, locale }: {
   orgId: string; device: ConsoleObject; range: "24h" | "7d"; baseHref: string; t: Dict; locale: Locale;
 }) {

@@ -46,8 +46,8 @@ describe("signed firmware", () => {
 
   it("verifies the signature over version and sha256", () => {
     expect(verifySignature("1.0.0", sha, signed("1.0.0"), pub)).toBe(true);
-    expect(verifySignature("1.0.1", sha, signed("1.0.0"), pub)).toBe(false); // relabelled
-    expect(verifySignature("1.0.0", "0".repeat(64), signed("1.0.0"), pub)).toBe(false); // swapped binary
+    expect(verifySignature("1.0.1", sha, signed("1.0.0"), pub)).toBe(false);
+    expect(verifySignature("1.0.0", "0".repeat(64), signed("1.0.0"), pub)).toBe(false);
     expect(verifySignature("1.0.0", sha, "AAAA", pub)).toBe(false);
   });
 

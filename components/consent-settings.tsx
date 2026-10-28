@@ -4,7 +4,6 @@ import type { Consent } from "@/lib/consent";
 import { SectionTitle } from "@/components/ui";
 import { ConfirmButton } from "@/components/confirm-button";
 
-/** The person's data-processing consent, with the button to withdraw or grant it again; `back` is the page showing it. */
 export async function ConsentSettings({ consent, slug, back }: {
   consent: Consent;
   slug: string;

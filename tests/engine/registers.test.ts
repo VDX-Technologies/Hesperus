@@ -1,5 +1,3 @@
-// Generic registers: a type made in the schema editor is recordable, filterable and exportable at
-// once; keyset paging walks every row exactly once; CSV and PDF read the events in chunks.
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { Client } from "pg";
 vi.mock("server-only", () => ({}));
@@ -57,7 +55,7 @@ describe("custom event types", () => {
     const types = await listEventTypes(A, pkgs);
     expect(types.map((t) => t.type).filter((t) => t.startsWith("custom."))).toEqual(["custom.pruning"]);
     expect(types.at(-1)!.custom).toBe(true);
-    expect(Object.keys(types.at(-1)!.fields)).toEqual(["method", "plants", "hours", "species"]); // editor order, not jsonb's
+    expect(Object.keys(types.at(-1)!.fields)).toEqual(["method", "plants", "hours", "species"]);
     expect(types.at(-1)).toMatchObject({ custom: true, subject: "agronomy.crop", fromSubject: { species: "species" } });
     expect(await getEventType(B, pkgs, "custom.pruning")).toBeNull();
     expect((await listAudit(A, { limit: 10 })).some((e) => e.action === "event_type.create")).toBe(true);
@@ -81,7 +79,7 @@ describe("custom event types", () => {
     const t = (await getEventType(A, pkgs, "custom.pruning"))!;
     const f = filtersFrom(t, { "f.method": "secco", "f.plants": "3", from: "2026-10-01", to: "2026-10-10", obj: vine, "f.nope": "x" });
     expect(f.fields).toEqual({ method: "secco", plants: "3" });
-    expect(await listEvents(A, registerQuery(t, f))).toHaveLength(0); // plants 3 is on the olive crop
+    expect(await listEvents(A, registerQuery(t, f))).toHaveLength(0);
     const secco = await listEvents(A, registerQuery(t, filtersFrom(t, { "f.method": "secco" })));
     expect(secco).toHaveLength(12);
     expect(await listEvents(A, registerQuery(t, filtersFrom(t, { from: "2026-10-02", to: "2026-10-02" })))).toHaveLength(3);

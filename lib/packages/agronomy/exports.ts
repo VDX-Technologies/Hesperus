@@ -1,5 +1,3 @@
-// The treatments register in the official layout: the PDF like the paper one and the JSON with
-// the fields it asks for. Same filters as the generic register, every filtered row, read in chunks.
 import "server-only";
 import { allEvents } from "../../engine/events";
 import { registerQuery, type RegisterFilters } from "../../engine/registers";

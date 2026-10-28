@@ -8,7 +8,6 @@ export interface PushKeys {
   keys: { p256dh: string; auth: string };
 }
 
-/** Stores this browser's push subscription for the organization (any member, viewers included). */
 export async function subscribePush(slug: string, sub: PushKeys, userAgent: string) {
   const { user, org } = await requireOrg(slug);
   if (!/^https:\/\//.test(sub.endpoint) || !sub.keys?.p256dh || !sub.keys?.auth) throw new Error("invalid subscription");

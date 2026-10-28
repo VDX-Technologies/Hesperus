@@ -98,7 +98,7 @@ describe("tenant isolation", () => {
     });
     await asUser(db, USER_B, async () => {
       expect((await db.query(`select * from events`)).rowCount).toBe(1);
-      expect((await db.query(`select * from sources`)).rowCount).toBe(0); // viewer: no sources
+      expect((await db.query(`select * from sources`)).rowCount).toBe(0);
     });
   });
 
@@ -127,7 +127,7 @@ describe("metric partitions", () => {
     const { rows } = await db.query(
       `select count(*)::int as n from pg_inherits where inhparent = 'metrics'::regclass`,
     );
-    expect(rows[0].n).toBe(1 + 4); // default + today..today+3
+    expect(rows[0].n).toBe(1 + 4);
     expect((await db.query(`select ensure_metric_partitions()`)).rows[0].ensure_metric_partitions).toBe(0);
   });
 

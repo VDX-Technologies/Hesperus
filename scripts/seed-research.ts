@@ -1,8 +1,3 @@
-/**
- * Defines the VDX Research types (project, dataset, result, run, lab note) in an organization,
- * as its owner, through the schema editor's APIs. Safe to run again.
- *   npx tsx scripts/seed-research.ts <org-slug>
- */
 import "./env";
 import { crossTenantAccess, crossTenantDb, forTenant } from "../lib/engine/db";
 import { seedResearch } from "./research/types";

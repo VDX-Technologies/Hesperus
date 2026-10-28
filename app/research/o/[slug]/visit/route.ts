@@ -1,8 +1,3 @@
-/**
- * POST /research/o/<slug>/visit - marks a visit to the dashboard, for its "new since your last
- * visit". A route rather than a Server Action: an action setting a cookie re-renders the page,
- * which would count from the visit just marked.
- */
 import { cookies } from "next/headers";
 import { lastVisit, VISIT_COOKIE } from "@/lib/research";
 

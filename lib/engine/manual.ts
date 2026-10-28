@@ -1,7 +1,3 @@
-// Manual connector: events entered by people in the console. Same path as any other source
-// (raw copy first, then the event), plus who recorded it and when. Nothing is ever edited:
-// a correction is a new version that supersedes the previous one, and the chain stays
-// readable. Each tenant gets one manual source per module, created on first use.
 import { withTenantLock, type TenantDb } from "./db";
 import type { ModulePackage, Severity } from "./package";
 import type { Source } from "./sources";
@@ -20,9 +16,7 @@ export class ManualEventError extends Error {
 }
 
 export interface ManualInput {
-  /** Event type key inside the package (stored as `${pkg.id}.${type}`). */
   type: string;
-  /** When it happened. */
   ts: Date;
   payload: Record<string, unknown>;
   objectIds: string[];
@@ -42,17 +36,12 @@ export async function manualSource(db: TenantDb, module: string): Promise<Source
   return rows[0];
 }
 
-/** What the connector needs to know about an event type, wherever it is defined. */
 export interface EventSpec {
-  /** Full type, "agronomy.treatment" or "custom.pruning". */
   type: string;
   module: string;
   fields: Schema;
-  /** Object type ("agronomy.crop") every object of the event must have. */
   subject?: string | null;
-  /** Object types the objects after the first may also have (a run's datasets, after its project). */
   also?: string[];
-  /** Registered before the first event, when the type comes from a package. */
   pkg?: ModulePackage;
 }
 
@@ -77,7 +66,6 @@ async function check(db: TenantDb, spec: EventSpec, author: Author, input: Event
   return ids;
 }
 
-/** Time, payload and objects of an event of the spec's type, whoever brings it. Returns the object ids. */
 export async function checkEvent(db: TenantDb, spec: EventSpec, input: EventInput): Promise<string[]> {
   if (Number.isNaN(input.ts.getTime())) throw new ManualEventError(400, "invalid event time");
   const err = validateProperties(spec.fields, input.payload);
@@ -94,7 +82,6 @@ export async function checkEvent(db: TenantDb, spec: EventSpec, input: EventInpu
     [db.tenantId, ids],
   );
   if (rows.length !== ids.length) throw new ManualEventError(404, "object not found");
-  // the first object is the subject; the others are of the subject's type or of one the type also takes
   if (spec.subject) {
     const typeOf = new Map(rows.map((r) => [r.id, r.type]));
     const others = [spec.subject, ...(spec.also ?? [])];
@@ -116,7 +103,6 @@ async function insert(
     db.tenantId, source.id, now, JSON.stringify({ manual: true, author: author.id, ...e, ts: e.ts.toISOString() }),
   ]);
   try {
-    // one statement: the event and its links land together or not at all
     const { rows } = await db.query<{ id: string }>(
       `with e as (
          insert into events (tenant_id, ts, type, severity, payload, source_id, recorded_at, author, author_label, supersedes, voided)
@@ -135,9 +121,7 @@ async function insert(
   }
 }
 
-/** Records an event of any type entered by a person, linked to one or more objects. Returns its id. */
 export function recordEvent(tenant: TenantDb, spec: EventSpec, author: Author, input: EventInput & { severity?: Severity }, now = new Date()): Promise<number> {
-  // the daily limit is counted and taken under one lock
   return withTenantLock(tenant, "manual.events", async (db) => {
     const objectIds = await check(db, spec, author, input, now);
     const source = await manualSource(db, spec.module);
@@ -147,10 +131,6 @@ export function recordEvent(tenant: TenantDb, spec: EventSpec, author: Author, i
   });
 }
 
-/**
- * Records a new version of a manual event of the spec's type. Only the latest version can be
- * corrected; the objects stay the same unless given. Returns the new version's id.
- */
 export function correctEvent(
   db: TenantDb,
   spec: EventSpec,
@@ -159,7 +139,6 @@ export function correctEvent(
   input: { ts: Date; payload: Record<string, unknown>; objectIds?: string[] },
   now = new Date(),
 ): Promise<number> {
-  // one lock for the daily limit and the latest-version check
   return withTenantLock(db, "manual.events", (txdb) => correctLocked(txdb, spec, author, eventId, input, now));
 }
 
@@ -192,10 +171,6 @@ async function correctLocked(
   return id;
 }
 
-/**
- * Voids a manual event: a last version with the same payload, time and objects that says why it
- * no longer counts. It drops out of lists, dashboards and exports and stays in the history.
- */
 export async function voidEvent(db: TenantDb, author: Author, eventId: number, reason: string, now = new Date()): Promise<number> {
   if (!canRecord(author.role)) throw new ManualEventError(403, "viewers cannot void events");
   const why = reason.trim();
@@ -219,13 +194,11 @@ export async function voidEvent(db: TenantDb, author: Author, eventId: number, r
   return id;
 }
 
-/** Records an event of a package type (`input.type` is the key inside the package). */
 export async function createManualEvent(db: TenantDb, pkg: ModulePackage, author: Author, input: ManualInput, now = new Date()): Promise<number> {
   if (!canRecord(author.role)) throw new ManualEventError(403, "viewers cannot record events");
   return recordEvent(db, specOf(pkg, input.type), author, input, now);
 }
 
-/** Corrects an event of a package type. */
 export async function correctManualEvent(
   db: TenantDb,
   pkg: ModulePackage,
@@ -248,14 +221,12 @@ async function checkObject(db: TenantDb, pkg: ModulePackage, author: Author, typ
   return (await registerPackage(db.shared, pkg)).types.get(type)!;
 }
 
-/** Creates an object entered by hand (a crop, ...), optionally located in a place. Returns its id. */
 export function createManualObject(
   db: TenantDb,
   pkg: ModulePackage,
   author: Author,
   input: { type: string; name: string; properties: Record<string, unknown>; placeId?: string | null },
 ): Promise<string> {
-  // the object limit is counted and taken under one lock
   return withTenantLock(db, `manual.objects:${pkg.id}`, (txdb) => createObjectLocked(txdb, pkg, author, input));
 }
 
@@ -305,7 +276,6 @@ async function manualObject(db: TenantDb, pkg: ModulePackage, id: string) {
   return rows[0];
 }
 
-/** Replaces the properties of an object of the package (validated against its type); `status` stays as it is. */
 export async function updateManualObject(db: TenantDb, pkg: ModulePackage, author: Author, id: string, properties: Record<string, unknown>): Promise<void> {
   const o = await manualObject(db, pkg, id);
   const { status: _, ...rest } = properties;
@@ -315,10 +285,6 @@ export async function updateManualObject(db: TenantDb, pkg: ModulePackage, autho
   await record(db, author, "object.update", { objectId: id, subject: o.name, data: { before: o.properties, properties: next } });
 }
 
-/**
- * Archives an object: an end (the given day, else the one it has, else today) and status
- * "archived". It leaves the active lists and the entry menus; its events stay as they are.
- */
 export async function archiveManualObject(db: TenantDb, pkg: ModulePackage, author: Author, id: string, end?: Date, now = new Date()): Promise<void> {
   const o = await manualObject(db, pkg, id);
   if (o.properties.status === "archived") throw new ManualEventError(409, "object is archived");
@@ -329,7 +295,6 @@ export async function archiveManualObject(db: TenantDb, pkg: ModulePackage, auth
   await record(db, author, "object.archive", { objectId: id, subject: o.name, data: { end: next.end } });
 }
 
-/** Deletes an object entered by hand, only when no event points at it: those are archived instead. */
 export async function deleteManualObject(db: TenantDb, pkg: ModulePackage, author: Author, id: string): Promise<void> {
   const o = await manualObject(db, pkg, id);
   if (!canRecord(author.role)) throw new ManualEventError(403, "viewers cannot delete objects");

@@ -1,7 +1,3 @@
--- Anonymous, opt-in telemetry from VDX Agent installs (open-source Mac app). Public ingest without
--- a token (POST /api/agent/telemetry), so it lives outside the tenant ontology: nothing here can
--- reach an organisation's data, and only platform admins read it (/admin/agent).
--- No IP, hostname, prompt or user content is stored; install_id is a random uuid made by the app.
 create table public.agent_installs (
   id uuid primary key,
   app_version text not null default '',
@@ -37,7 +33,7 @@ create table public.agent_turns (
   tokens_per_s real not null default 0,
   tools int not null default 0,
   ok boolean not null default true,
-  unique (install_id, ts)                      -- retried batches are idempotent
+  unique (install_id, ts)
 );
 create index agent_turns_ts on public.agent_turns (ts desc);
 create index agent_turns_install_recorded on public.agent_turns (install_id, recorded_at desc);

@@ -16,7 +16,6 @@ const HISTORY_METRICS = ["temp_c", "rh", "vpd_kpa", "co2"];
 const HISTORY_BUCKET_MS = 5 * 60_000;
 const SENSOR_PALETTE = ["#9fd8ff", "#70d6b3", "#c7a6ff", "#f2b84b", "#ff8e8e", "#67c6d0", "#d9df75", "#f49ac2"];
 
-/** LoRa widget on the organization overview: one card per sensor, grouped by place. */
 export async function LoraOverview({ orgId, slug, t, locale, cards: providedCards }: {
   orgId: string; slug: string; t: Dict; locale: Locale; period?: number; cards?: ConsoleObject[];
 }) {
@@ -79,7 +78,6 @@ export async function LoraOverview({ orgId, slug, t, locale, cards: providedCard
   const metrics = new Map(lora.metrics.map((m) => [m.key, m]));
   const counts = { ok: 0, warn: 0, alarm: 0, offline: 0 };
   for (const d of cards) counts[d.status]++;
-  // one group per place, in path order; objects without a place come last
   const groups = new Map<string, ConsoleObject[]>();
   for (const d of [...cards].sort((a, b) => a.placePath.join("\u0000").localeCompare(b.placePath.join("\u0000"))))
     groups.set(d.placePath.join(" · "), [...(groups.get(d.placePath.join(" · ")) ?? []), d]);

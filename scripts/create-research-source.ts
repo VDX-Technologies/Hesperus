@@ -1,9 +1,3 @@
-/**
- * Creates the push source a research pipeline sends with: module "custom", bound to one project,
- * so its token writes that project's results (and datasets) and nothing else. Prints the token
- * once; it is not stored in clear.
- *   npx tsx scripts/create-research-source.ts <org-slug> <project external id or id> [source name]
- */
 import "./env";
 import { crossTenantAccess, crossTenantDb } from "../lib/engine/db";
 import { createResearchSource } from "../lib/research-source";

@@ -10,7 +10,6 @@ import { deleteObjectForm, saveObjectForm, saveObjectTypeForm } from "@/lib/obje
 import type { EventFormState } from "@/components/event-form";
 import { assignees, researchContext } from "./context";
 
-/** Saves a result's review (its state and note); only what changed, in the audit trail. */
 export async function reviewResult(form: FormData): Promise<void> {
   const slug = String(form.get("slug"));
   const id = String(form.get("id"));
@@ -35,10 +34,6 @@ export async function reviewResult(form: FormData): Promise<void> {
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const BATCH = 500;
 
-/**
- * Sets the review and / or the assignee of the selected results of a project, one audited change
- * per result; results already in that state are left alone.
- */
 export async function reviewMany(form: FormData): Promise<void> {
   const slug = String(form.get("slug"));
   const project = String(form.get("project"));
@@ -75,10 +70,6 @@ export async function reviewMany(form: FormData): Promise<void> {
   redirect(`${url.pathname}?${url.searchParams.size ? `${url.searchParams}&` : ""}${outcome}`);
 }
 
-/**
- * Records a text event (a lab note on a project, a comment on a result) and goes back to the page
- * it was written on; the engine checks the role, the subject's type and the text.
- */
 async function recordText(form: FormData, type: string, page: (slug: string, id: string) => string, extra: (db: Awaited<ReturnType<typeof researchContext>>["db"], id: string) => Promise<Record<string, unknown>>) {
   const slug = String(form.get("slug"));
   const id = String(form.get("id"));
@@ -99,15 +90,10 @@ async function recordText(form: FormData, type: string, page: (slug: string, id:
   redirect(page(slug, id) + outcome);
 }
 
-/** Adds a note to a project's lab notebook. */
 export async function addLabNote(form: FormData): Promise<void> {
   await recordText(form, RESEARCH.labNote, (slug, id) => `/research/o/${slug}/p/${id}/notes`, async () => ({}));
 }
 
-/**
- * Adds a comment to a result, or a reply: `reply_to` is the root id of the comment answered, so a
- * thread holds together when that comment is later corrected.
- */
 export async function addComment(form: FormData): Promise<void> {
   await recordText(form, RESEARCH.comment, (slug, id) => `/research/o/${slug}/r/${id}`, async (db, id) => {
     const to = Number(form.get(RESEARCH.replyTo) || 0);
@@ -120,10 +106,6 @@ export async function addComment(form: FormData): Promise<void> {
 
 export type QuickReviewState = { error?: string; ok?: number } | null;
 
-/**
- * A review from the queue: saved without leaving the page, which then shows the next result
- * still to review (the one just reviewed has left the queue).
- */
 export async function quickReview(_prev: QuickReviewState, form: FormData): Promise<QuickReviewState> {
   const slug = String(form.get("slug"));
   const id = String(form.get("id"));
@@ -143,7 +125,6 @@ export async function quickReview(_prev: QuickReviewState, form: FormData): Prom
   return { ok: Date.now() };
 }
 
-/** Creates or replaces a custom object type from the schema editor (owner only). */
 export async function saveObjectTypeAction(_prev: EventFormState, form: FormData): Promise<EventFormState> {
   const slug = String(form.get("slug"));
   const { db, author } = await researchContext(slug);
@@ -153,7 +134,6 @@ export async function saveObjectTypeAction(_prev: EventFormState, form: FormData
   redirect(`/research/o/${slug}/objects/${encodeURIComponent(r.saved)}`);
 }
 
-/** Creates an object of a custom type, or with `id` changes its name, properties and links. */
 export async function saveObjectAction(_prev: EventFormState, form: FormData): Promise<EventFormState> {
   const slug = String(form.get("slug"));
   const { db, author } = await researchContext(slug);
@@ -163,7 +143,6 @@ export async function saveObjectAction(_prev: EventFormState, form: FormData): P
   redirect(`/research/o/${slug}/objects/${encodeURIComponent(r.saved.type)}?saved=${r.saved.id}`);
 }
 
-/** Deletes an object of a custom type nothing points at. */
 export async function deleteObjectAction(form: FormData): Promise<void> {
   const slug = String(form.get("slug"));
   const { db, author } = await researchContext(slug);
@@ -173,7 +152,6 @@ export async function deleteObjectAction(form: FormData): Promise<void> {
   redirect(error ? `${base}?error=${error}` : base);
 }
 
-/** Saves the filters, sort, columns and charts of a project's results table as a named view. */
 export async function saveView(form: FormData): Promise<void> {
   const slug = String(form.get("slug"));
   const project = String(form.get("project"));
@@ -196,7 +174,6 @@ export async function saveView(form: FormData): Promise<void> {
   redirect(`${home}?${query ? `${query}&` : ""}${outcome}`);
 }
 
-/** Deletes a saved view of a project. */
 export async function deleteView(form: FormData): Promise<void> {
   const slug = String(form.get("slug"));
   const project = String(form.get("project"));

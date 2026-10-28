@@ -1,13 +1,9 @@
-// Web push for alarms: every browser subscribed to the organization (push_subscriptions) gets a
-// notification when a warning or alarm opens. Registered as an alert hook; ingest imports this module.
 import webpush from "web-push";
 import { forTenant } from "./db";
 import { onAlert } from "./hooks";
 import { getPackageDef } from "../packages/ui";
 import type { Locale } from "../packages/types";
 
-// Dashboard values may include surrounding quotes or standard Base64 padding. Normalize those before
-// setup, and keep an invalid optional push configuration from failing route collection during build.
 const clean = (v: string | undefined) => v?.trim().replace(/^["']|["']$/g, "") || undefined;
 const vapidKey = (value: string | undefined, byteLength: number) => {
   const key = clean(value);

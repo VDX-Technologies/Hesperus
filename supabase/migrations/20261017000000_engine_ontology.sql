@@ -1,51 +1,23 @@
--- VDX Engine, phase 1: the ontology.
---
--- A sector-agnostic data model. Nothing here knows about any module: modules (Stoma, ...)
--- are configuration packages that register object types and metric keys as rows.
---
---   object_types  -> what kinds of things exist (typed property schema, owned by a module)
---   objects       -> the things (properties validated against their type, plus runtime state)
---   links         -> typed relations between objects
---   events        -> things that happened (severity, payload), tied to one or more objects
---   metrics       -> narrow time series (object, metric, ts, value), partitioned by day
---   metric_rollups-> 5 min / 1 h aggregates (min, max, avg, count)
---   documents     -> files on object storage, metadata and extracted text
---   sources       -> where data comes from (push / pull / upload connectors)
---   raw_inbox     -> buffer of raw messages, flushed hourly to object storage in batches
---   engine_settings -> every limit, window and frequency used by jobs and app
---
--- Every tenant table carries tenant_id and Row Level Security. Writes of data (metrics,
--- events, raw) go through the service role used by ingestion; users only read them.
--- Standard Postgres only. Existing tables are untouched.
-
--- ---------------------------------------------------------------------------------------
--- Dictionaries
-
 create table public.metric_keys (
   id smallint generated always as identity primary key,
   module text not null,
   key text not null,
   unit text,
-  label jsonb not null default '{}',           -- {"en": "...", "it": "..."}
+  label jsonb not null default '{}',
   unique (module, key)
 );
 
 create table public.object_types (
   id uuid primary key default gen_random_uuid(),
-  tenant_id uuid references public.organizations (id) on delete cascade,  -- null = global
+  tenant_id uuid references public.organizations (id) on delete cascade,
   module text not null,
   key text not null,
   name jsonb not null default '{}',
-  properties jsonb not null default '{}',      -- {"prop": {"type": "number", "required": true, ...}}
+  properties jsonb not null default '{}',
   created_at timestamptz not null default now()
 );
 create unique index object_types_global_key on public.object_types (module, key) where tenant_id is null;
 create unique index object_types_tenant_key on public.object_types (tenant_id, module, key) where tenant_id is not null;
-
--- ---------------------------------------------------------------------------------------
--- Property validation. Schema: {"name": {"type": t, "required": bool, "enum": [...],
--- "min": n, "max": n}} with t in string, number, integer, boolean, object, array, timestamp.
--- Unknown properties are rejected. Returns null when valid, else a readable error.
 
 create or replace function public.validate_properties(schema jsonb, props jsonb) returns text
 language plpgsql immutable as $$
@@ -113,17 +85,14 @@ begin
 end;
 $$;
 
--- ---------------------------------------------------------------------------------------
--- Objects and links
-
 create table public.objects (
   id uuid primary key default gen_random_uuid(),
   tenant_id uuid not null references public.organizations (id) on delete cascade,
   type_id uuid not null references public.object_types (id),
-  external_id text,                            -- id in the source system (serial, node id, ...)
+  external_id text,
   name text,
-  properties jsonb not null default '{}',      -- validated against the type
-  state jsonb not null default '{}',           -- runtime state (stateful derived metrics, ...)
+  properties jsonb not null default '{}',
+  state jsonb not null default '{}',
   status text,
   last_seen timestamptz,
   created_at timestamptz not null default now(),
@@ -155,7 +124,7 @@ create trigger objects_validate before insert or update of type_id, properties, 
 create table public.links (
   id uuid primary key default gen_random_uuid(),
   tenant_id uuid not null,
-  type text not null,                          -- 'located_in', 'connected_to', ...
+  type text not null,
   src_id uuid not null,
   dst_id uuid not null,
   properties jsonb not null default '{}',
@@ -166,9 +135,6 @@ create table public.links (
 );
 create index links_dst on public.links (dst_id);
 
--- ---------------------------------------------------------------------------------------
--- Sources (declared before events/raw that reference them)
-
 create table public.sources (
   id uuid primary key default gen_random_uuid(),
   tenant_id uuid not null references public.organizations (id) on delete cascade,
@@ -176,7 +142,7 @@ create table public.sources (
   connector text not null check (connector in ('push', 'pull', 'upload')),
   module text not null,
   config jsonb not null default '{}',
-  token_hash text unique,                      -- sha256 of the push token
+  token_hash text unique,
   token_hint text,
   status text not null default 'active' check (status in ('active', 'paused', 'error')),
   last_seen timestamptz,
@@ -184,14 +150,11 @@ create table public.sources (
   created_at timestamptz not null default now()
 );
 
--- ---------------------------------------------------------------------------------------
--- Events
-
 create table public.events (
   id bigint generated always as identity primary key,
   tenant_id uuid not null references public.organizations (id) on delete cascade,
   ts timestamptz not null default now(),
-  type text not null,                          -- 'module.code'
+  type text not null,
   severity text not null check (severity in ('info', 'warn', 'alarm')),
   payload jsonb not null default '{}',
   source_id uuid references public.sources (id) on delete set null,
@@ -209,9 +172,6 @@ create table public.event_objects (
 );
 create index event_objects_object on public.event_objects (object_id);
 
--- ---------------------------------------------------------------------------------------
--- Metrics: narrow, partitioned by day; retention drops whole partitions.
-
 create table public.metrics (
   tenant_id uuid not null,
   object_id uuid not null,
@@ -228,7 +188,7 @@ create table public.metric_rollups (
   tenant_id uuid not null,
   object_id uuid not null,
   metric_id smallint not null references public.metric_keys (id),
-  res integer not null check (res in (300, 3600)),   -- seconds
+  res integer not null check (res in (300, 3600)),
   bucket timestamptz not null,
   min double precision not null,
   max double precision not null,
@@ -239,8 +199,6 @@ create table public.metric_rollups (
 );
 create index metric_rollups_res_bucket on public.metric_rollups (res, bucket);
 
--- Creates daily partitions from today (UTC) to today + days_ahead. Days whose rows already
--- sit in the default partition are skipped (the attach would fail); they stay readable.
 create or replace function public.ensure_metric_partitions(days_ahead integer default null)
 returns integer language plpgsql as $$
 declare
@@ -265,13 +223,10 @@ begin
 end;
 $$;
 
--- ---------------------------------------------------------------------------------------
--- Documents (structure only for now)
-
 create table public.documents (
   id uuid primary key default gen_random_uuid(),
   tenant_id uuid not null references public.organizations (id) on delete cascade,
-  storage_key text not null unique,            -- key on object storage
+  storage_key text not null unique,
   filename text,
   content_type text,
   size bigint,
@@ -292,10 +247,6 @@ create table public.document_objects (
   foreign key (tenant_id, object_id) references public.objects (tenant_id, id) on delete cascade
 );
 
--- ---------------------------------------------------------------------------------------
--- Raw inbox: every accepted message lands here, then an hourly job writes one gzip batch
--- per source per hour to object storage and deletes the flushed rows.
-
 create table public.raw_inbox (
   id bigint generated always as identity primary key,
   tenant_id uuid not null references public.organizations (id) on delete cascade,
@@ -304,9 +255,6 @@ create table public.raw_inbox (
   body jsonb not null
 );
 create index raw_inbox_source_received on public.raw_inbox (source_id, received_at);
-
--- ---------------------------------------------------------------------------------------
--- Settings: one place for every limit, window and frequency (jobs in SQL read it too).
 
 create table public.engine_settings (
   key text primary key,
@@ -337,9 +285,6 @@ insert into public.engine_settings (key, value, description) values
   ('quota.alert_ratio',             '0.8',   'Alert when a quota reaches this fraction'),
   ('health.source_silent_min',      '30',    'Alert when a source sends nothing for this long');
 
--- ---------------------------------------------------------------------------------------
--- Row Level Security
-
 alter table public.metric_keys enable row level security;
 alter table public.object_types enable row level security;
 alter table public.objects enable row level security;
@@ -351,7 +296,7 @@ alter table public.metrics enable row level security;
 alter table public.metric_rollups enable row level security;
 alter table public.documents enable row level security;
 alter table public.document_objects enable row level security;
-alter table public.raw_inbox enable row level security;          -- service role only
+alter table public.raw_inbox enable row level security;
 alter table public.engine_settings enable row level security;
 
 create policy "read metric keys" on public.metric_keys for select to authenticated using (true);

@@ -1,5 +1,3 @@
-// What every register page, action and export starts from: the organization, the packages it
-// has enabled (their event types) and the person, as an author.
 import "server-only";
 import { requireOrg } from "@/lib/auth";
 import { tenantDb } from "@/lib/engine/db";
@@ -15,12 +13,10 @@ export async function registerContext(slug: string) {
   return { org, db: tenantDb(org.id), pkgs, author, user };
 }
 
-/** The type from the URL segment ("agronomy.treatment", encoded or not). */
 export async function typeFrom(ctx: Awaited<ReturnType<typeof registerContext>>, param: string): Promise<EventTypeInfo | null> {
   return getEventType(ctx.db, ctx.pkgs, decodeURIComponent(param));
 }
 
-/** Names of every object of the type's subject, archived ones too: rows keep pointing at them. */
 export async function objectNames(ctx: Awaited<ReturnType<typeof registerContext>>, t: EventTypeInfo) {
   return new Map((await subjectObjects(ctx.db, t.subject, { all: true })).map((o) => [o.id, o.name]));
 }

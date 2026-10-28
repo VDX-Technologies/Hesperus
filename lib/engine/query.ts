@@ -1,5 +1,3 @@
-// Time series reads. The span picks the level: up to query.raw_max_hours from raw metrics,
-// up to query.rollup_5m_max_days from 5 min rollups, longer from hourly rollups.
 import type { Db, TenantDb } from "./db";
 import { getSettings, num } from "./settings";
 
@@ -29,7 +27,6 @@ export async function pickLevel(db: Db, from: Date, to: Date): Promise<Level> {
   return "1h";
 }
 
-/** Series per metric key for one object, at the level the span calls for (or a forced one). */
 export async function series(
   db: TenantDb,
   q: { objectId: string; module: string; metrics: string[]; from: Date; to: Date; level?: Level },
@@ -53,7 +50,6 @@ export async function series(
   return { level, series: out };
 }
 
-/** Five-minute sensor summaries for several objects in one bounded dashboard query. */
 export async function multiObjectSeries(
   db: TenantDb,
   q: { objectIds: string[]; module: string; metrics: string[]; from: Date; to: Date },

@@ -1,4 +1,3 @@
-// A type as the schema editor edits it: the drafts it starts from, filled from what is saved.
 import type { Schema } from "./engine/schema";
 import type { ObjectTypeInfo } from "./engine/custom-objects";
 import type { FieldDraft, TypeDraft } from "../components/registers/type-editor";
@@ -17,7 +16,6 @@ export const fieldDrafts = (schema: Schema, locale: string, fromSubject: Record<
     multiline: s.format === "text",
   }));
 
-/** The draft of a saved custom object type. */
 export const objectTypeDraft = (o: ObjectTypeInfo, locale: string): TypeDraft => ({
   key: o.key,
   name: { it: o.name.it ?? "", en: o.name.en ?? "" },

@@ -1,17 +1,11 @@
 import type { Locale } from "@/lib/packages/types";
 
-/**
- * How each engine setting is shown in /admin/settings: human units instead of raw JSON.
- * Keys not listed here fall back to a JSON input.
- */
 type L = Record<Locale, string>;
 type Unit = { label: string; factor: number };
 export type Field = {
   key: string;
   label: L;
-  /** Units the value can be typed in; factor converts to the stored value. */
   units: Unit[];
-  /** Empty input stores null, shown with this hint. */
   nullable?: L;
   step?: number;
 };
@@ -106,10 +100,8 @@ export const GROUPS: Group[] = [
   },
 ];
 
-/** Shown elsewhere on the page (alerts form). */
 export const HIDDEN = new Set(["alerts.email_to", "alerts.email_from", "alerts.repeat_h"]);
 
-/** Largest unit that keeps the value readable (≥ 1, as round as possible). */
 export function display(f: Field, value: unknown): { amount: string; unit: number } {
   if (value === null || value === undefined) return { amount: "", unit: 0 };
   const v = Number(value);
@@ -121,7 +113,6 @@ export function display(f: Field, value: unknown): { amount: string; unit: numbe
   return { amount: String(Math.round(amount * 1000) / 1000), unit };
 }
 
-/** Stored value from the form, or an error message. */
 export function parse(f: Field, amount: string, unit: string): number | null | Error {
   const a = amount.trim().replace(",", ".");
   if (!a) return f.nullable ? null : new Error(f.key);

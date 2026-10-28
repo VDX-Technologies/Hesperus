@@ -1,4 +1,3 @@
-// Per-source token bucket on push: burst, refill, 429 wait, last_error and the health flag.
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { Client } from "pg";
 import { freshDb } from "../db/setup";
@@ -29,7 +28,7 @@ describe("ingest rate limit", () => {
   it("allows the burst, then asks to wait until a token refills", async () => {
     for (let i = 0; i < 3; i++) expect(await takeIngestToken(db, a.id, T0)).toBe(0);
     const wait = await takeIngestToken(db, a.id, T0);
-    expect(wait).toBeCloseTo(1, 5); // 60/min = one token per second
+    expect(wait).toBeCloseTo(1, 5);
     expect((await db.query(`select last_error from sources where id = $1`, [a.id])).rows[0].last_error).toBe("rate limited");
   });
 
@@ -46,7 +45,7 @@ describe("ingest rate limit", () => {
 
   it("health flags a source limited more than health.rate_limited_per_h times this hour", async () => {
     const check = async (id: string) => (await collectHealth(db, undefined, at(100))).checks.find((c) => c.key === `ratelimit.${id}`);
-    expect((await check(a.id))?.ok).toBe(false); // limited 3 times
+    expect((await check(a.id))?.ok).toBe(false);
     expect((await check(b.id))?.ok).toBe(true);
     expect((await collectHealth(db, undefined, at(3700))).checks.find((c) => c.key === `ratelimit.${a.id}`)?.ok).toBe(true);
   });

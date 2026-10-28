@@ -58,11 +58,11 @@ describe("health checks", () => {
     await store.putNew("raw/b", new Uint8Array(5));
     expect(await store.usage("raw/")).toEqual({ objects: 2, bytes: 15 });
     await set("quota.r2_bytes", 16);
-    expect((await check("quota.r2_bytes", at("10:00:00"), store))?.ok).toBe(false); // 15 >= 0.8 * 16
+    expect((await check("quota.r2_bytes", at("10:00:00"), store))?.ok).toBe(false);
   });
 
   it("flags an active source that went silent", async () => {
-    expect(await check(`source.${source.id}`, at("10:00:00"))).toBeUndefined(); // never pushed
+    expect(await check(`source.${source.id}`, at("10:00:00"))).toBeUndefined();
     await db.query(`update sources set last_seen = $1`, [at("09:50:00")]);
     expect((await check(`source.${source.id}`, at("10:00:00")))?.ok).toBe(true);
     expect((await check(`source.${source.id}`, at("10:31:00")))?.ok).toBe(false);
@@ -91,7 +91,7 @@ describe("notices", () => {
     await set("alerts.repeat_h", 1);
     expect((await updateNotices(db, [bad], at("12:00:00"))).repeated).toHaveLength(1);
     expect((await updateNotices(db, [good], at("13:00:00"))).resolved).toEqual(["x is broken"]);
-    expect((await updateNotices(db, [bad], at("14:00:00"))).opened).toHaveLength(1); // reopens
+    expect((await updateNotices(db, [bad], at("14:00:00"))).opened).toHaveLength(1);
     await set("alerts.repeat_h", 24);
   });
 
@@ -159,12 +159,12 @@ describe("usage metering", () => {
     expect(await reconcileStorage(db, inner, at("03:00:00"))).toEqual({ objects: 1, bytes: 100 });
     await metered(db, inner, async (s) => {
       await s.putNew("docs/a", new Uint8Array(20), "x");
-      await s.putNew("docs/a", new Uint8Array(20), "x"); // already there: no bytes added
+      await s.putNew("docs/a", new Uint8Array(20), "x");
     });
     const listing = new MeteredStore(inner);
     const r2 = (await collectHealth(db, listing, at("10:00:00"))).r2;
     expect(r2).toEqual({ objects: 2, bytes: 120, measured_at: at("03:00:00").toISOString() });
-    expect(listing.ops.writes).toBe(0); // read from the gauge, not the bucket
+    expect(listing.ops.writes).toBe(0);
     await inner.delete("docs/old");
     await reconcileStorage(db, inner, at("04:00:00"));
     expect((await collectHealth(db, undefined, at("10:00:00"))).r2).toEqual({ objects: 1, bytes: 20, measured_at: at("04:00:00").toISOString() });

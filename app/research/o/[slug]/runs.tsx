@@ -1,4 +1,3 @@
-// What the run pages share: a run's outcome, coloured when it went wrong, and its short label.
 import type { EventRow } from "@/lib/engine/events";
 import type { PropertySpec } from "@/lib/engine/package";
 import { fieldText } from "@/lib/engine/registers";
@@ -14,6 +13,5 @@ export function Outcome({ spec, value, locale }: { spec?: PropertySpec; value: u
   return tone ? <span className={`rounded border px-1.5 py-0.5 text-xs ${tone}`}>{text}</span> : <>{text}</>;
 }
 
-/** A run as a choice in a list: when it ran and on which commit. */
 export const runLabel = (e: EventRow, locale: Locale) =>
   `${e.ts.toLocaleString(locale)}${e.payload.commit ? ` · ${String(e.payload.commit).slice(0, 10)}` : ""}${e.payload[RESEARCH.outcome] ? ` · ${String(e.payload[RESEARCH.outcome])}` : ""}`;

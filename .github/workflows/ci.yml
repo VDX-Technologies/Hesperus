@@ -9,8 +9,6 @@ jobs:
   check:
     runs-on: ubuntu-latest
     services:
-      # Supabase's Postgres (pg_cron, roles). No migrations here: tests/db/setup.ts builds a fresh
-      # database per test file from migrations-pushed + migrations.
       postgres:
         image: supabase/postgres:17.11.0.003
         env:

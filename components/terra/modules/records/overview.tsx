@@ -9,10 +9,8 @@ import { SectionTitle } from "@/components/ui";
 import { EntryList } from "./entries";
 import { Doses, Heatmap, Kpis, Shares, Signals, Weeks } from "./analysis";
 
-/** Records on the organization overview: totals, the work week by week, signals, then the latest entries. */
 export async function RecordsOverview({ orgId, slug, t, locale }: { orgId: string; slug: string; t: Dict; locale: Locale; period?: number }) {
   const entries = await loadEntries(tenantDb(orgId));
-  // files about agronomy work go to their own registers: nothing left here, nothing to show
   if (!entries.length) return null;
   const partial = entries.length > ANALYSIS_ENTRY_LIMIT;
   const a = analyze(partial ? entries.slice(0, ANALYSIS_ENTRY_LIMIT) : entries, new Date(), 5, partial);

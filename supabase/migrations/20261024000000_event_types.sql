@@ -1,21 +1,10 @@
--- Typed events and data entered by people.
---   event_types     -> payload schema per event type ('module.key'), same format as
---                      object_types.properties plus the "quantity" type {value, unit}
---   events          -> who recorded it and when (recorded_at, author), and corrections:
---                      a correction is a new event that supersedes the previous version;
---                      the old one is kept, events_current shows only the latest
---   sources         -> new connector kind 'manual' (one per module per tenant)
--- Payloads of declared types are validated whatever the origin (push, upload, manual,
--- replay). Undeclared types (alert.*, records.entry, ...) stay free-form.
--- Existing rows: recorded_at is backfilled from ts, the other new columns stay null.
-
 create table public.event_types (
   id uuid primary key default gen_random_uuid(),
-  tenant_id uuid references public.organizations (id) on delete cascade,  -- null = global
+  tenant_id uuid references public.organizations (id) on delete cascade,
   module text not null,
   key text not null,
   name jsonb not null default '{}',
-  fields jsonb not null default '{}',          -- {"field": {"type": ..., "required": ..., "units": [...]}}
+  fields jsonb not null default '{}',
   created_at timestamptz not null default now()
 );
 create unique index event_types_global_key on public.event_types (module, key) where tenant_id is null;
@@ -27,10 +16,6 @@ create policy "read event types" on public.event_types for select
 create policy "manage event types" on public.event_types for all
   using (case when tenant_id is null then public.is_platform_admin() else public.can_manage(tenant_id) end)
   with check (case when tenant_id is null then public.is_platform_admin() else public.can_manage(tenant_id) end);
-
--- ---------------------------------------------------------------------------------------
--- validate_properties gains the "quantity" type: {"value": number, "unit": string}, with
--- "units" listing the allowed units and min/max applying to the value.
 
 create or replace function public.validate_properties(schema jsonb, props jsonb) returns text
 language plpgsql immutable as $$
@@ -110,15 +95,12 @@ begin
 end;
 $$;
 
--- ---------------------------------------------------------------------------------------
--- Events: author, recording time, versions.
-
 alter table public.events
   add column recorded_at timestamptz,
-  add column author uuid,                      -- auth user id; null for machine events
-  add column author_label text,                -- email at the time, kept if the user goes
-  add column supersedes bigint unique,         -- previous version (one correction per version)
-  add column root_id bigint,                   -- first version of the chain
+  add column author uuid,
+  add column author_label text,
+  add column supersedes bigint unique,
+  add column root_id bigint,
   add foreign key (tenant_id, supersedes) references public.events (tenant_id, id) on delete cascade;
 
 update public.events set recorded_at = ts where recorded_at is null;
@@ -162,8 +144,6 @@ $$;
 create trigger events_validate before insert on public.events
   for each row execute function public.events_validate();
 
--- What people recorded is never changed or removed: corrections are new versions.
--- Deletes still pass inside a cascade (organization removed).
 create or replace function public.events_immutable() returns trigger
 language plpgsql as $$
 begin
@@ -177,14 +157,10 @@ $$;
 create trigger events_immutable before update or delete on public.events
   for each row when (old.author is not null) execute function public.events_immutable();
 
--- Latest version of every event (machine events are their own latest version). Read by the
--- engine only (the view would run with its owner's rights, so clients get no grant on it).
 create view public.events_current as
   select e.* from public.events e
    where not exists (select 1 from public.events n where n.supersedes = e.id);
 revoke all on public.events_current from public, anon, authenticated;
-
--- ---------------------------------------------------------------------------------------
 
 alter table public.sources drop constraint sources_connector_check;
 alter table public.sources add constraint sources_connector_check

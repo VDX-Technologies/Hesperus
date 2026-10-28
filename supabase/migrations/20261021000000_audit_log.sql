@@ -1,7 +1,3 @@
--- Append-only audit log: who changed what, per tenant (tenant_id null = platform events).
--- object_id has no foreign key so the history of a deleted object stays readable.
--- Rows are written by the engine only; nothing may update or delete them except the
--- retention purge below (retention.audit_days, null = keep forever).
 insert into public.engine_settings (key, value, description) values
   ('retention.audit_days', '365', 'Days of activity history kept (null = forever)')
 on conflict (key) do nothing;
@@ -10,11 +6,11 @@ create table public.audit_log (
   id bigserial primary key,
   tenant_id uuid references public.organizations (id) on delete cascade,
   at timestamptz not null default now(),
-  actor uuid,                 -- auth user, null for the system
-  actor_label text,           -- e-mail at the time, kept if the user goes away
-  action text not null,       -- dotted verb, e.g. place.create
+  actor uuid,
+  actor_label text,
+  action text not null,
   object_id uuid,
-  subject text,               -- human label of the target at the time
+  subject text,
   data jsonb not null default '{}'
 );
 create index audit_log_tenant_at on public.audit_log (tenant_id, at desc);
@@ -24,7 +20,6 @@ alter table public.audit_log enable row level security;
 create policy audit_log_read on public.audit_log for select
   using (case when tenant_id is null then public.is_platform_admin() else public.can_read(tenant_id) end);
 
--- Append-only: updates always fail, deletes only inside audit_purge (or an org cascade).
 create or replace function public.audit_log_guard() returns trigger language plpgsql as $$
 begin
   if tg_op = 'DELETE' and (current_setting('vdx.audit_purge', true) = 'on' or pg_trigger_depth() > 1) then
@@ -50,7 +45,6 @@ begin
 end $$;
 revoke all on function public.audit_purge(timestamptz) from public, anon, authenticated;
 
--- Same maintenance entry point, now also trimming the audit log.
 create or replace function public.engine_maintenance(p_now timestamptz default now())
 returns jsonb language plpgsql as $$
 declare
@@ -77,7 +71,6 @@ begin
 end;
 $$;
 
--- Acknowledging an alert is recorded too (it runs as the user, so it writes its own row).
 create or replace function public.ack_alert(alert_id bigint) returns boolean
 language plpgsql security definer set search_path = public as $$
 declare t uuid; obj uuid;

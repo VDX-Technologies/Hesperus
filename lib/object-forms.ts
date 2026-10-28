@@ -1,6 +1,3 @@
-// The forms of the custom objects and their types, read into the engine's calls. Every console
-// that edits them (Terra's registers, Research) wraps these in its own server actions, which only
-// add where the user lands afterwards: the checks and the writes are the engine's, the same for all.
 import { ManualEventError, canRecord, type Author } from "./engine/manual";
 import type { TenantDb } from "./engine/db";
 import { payloadFromForm } from "./engine/schema";
@@ -9,11 +6,9 @@ import {
 } from "./engine/custom-objects";
 import type { EventFormState } from "../components/event-form";
 
-/** The text fields of a form (files left out). */
 export const formText = (form: FormData) =>
   Object.fromEntries([...form].filter(([, v]) => typeof v === "string")) as Record<string, string>;
 
-/** Server error to a form state: validation text as is, the rest as a translated code. */
 export function formError(e: unknown): EventFormState {
   if (!(e instanceof ManualEventError)) throw e;
   if (e.status === 400) {
@@ -25,7 +20,6 @@ export function formError(e: unknown): EventFormState {
 
 type Saved<T> = { saved: T; state?: undefined } | { saved?: undefined; state: EventFormState };
 
-/** Creates or replaces a custom object type from the editor's definition (owner only). */
 export async function saveObjectTypeForm(db: TenantDb, author: Author, form: FormData): Promise<Saved<string>> {
   if (author.role !== "owner") return { state: { error: "manualErr_403" } };
   let input: ObjectTypeInput;
@@ -41,7 +35,6 @@ export async function saveObjectTypeForm(db: TenantDb, author: Author, form: For
   }
 }
 
-/** Creates an object of a custom type, or with `id` changes its name, properties and links. */
 export async function saveObjectForm(db: TenantDb, author: Author, form: FormData): Promise<Saved<{ type: string; id: string }>> {
   if (!canRecord(author.role)) return { state: { error: "manualErr_403" } };
   const t = await getObjectType(db, String(form.get("type")));
@@ -59,7 +52,6 @@ export async function saveObjectForm(db: TenantDb, author: Author, form: FormDat
     } else {
       const o = await getObject(db, id);
       if (!o || o.type !== t.type) return { state: { error: "manualErr_404" } };
-      // links first: a property following a parent's schema is checked against the new parent
       for (const [k, v] of Object.entries(links)) if ((o.links[k] ?? "") !== v) await setLink(db, author, id, k, v || null);
       const patch = Object.fromEntries(
         Object.keys(t.properties)
@@ -74,7 +66,6 @@ export async function saveObjectForm(db: TenantDb, author: Author, form: FormDat
   return { saved: { type: t.type, id } };
 }
 
-/** Deletes an object of a custom type nothing points at; the error code to show, or "" when done. */
 export async function deleteObjectForm(db: TenantDb, author: Author, form: FormData): Promise<string> {
   try {
     await deleteObject(db, author, String(form.get("id")));

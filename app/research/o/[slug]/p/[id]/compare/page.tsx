@@ -11,10 +11,6 @@ import { Outcome } from "../../../runs";
 const STATE: Record<string, string> = { changed: "text-warn", onlyA: "text-alarm", onlyB: "text-ok", same: "text-dim" };
 const shown = (v: unknown) => (v === undefined ? "—" : typeof v === "string" ? v : JSON.stringify(v));
 
-/**
- * Two runs of a project side by side: what they reported, their parameters (the differences
- * first) and how many results each produced, by review.
- */
 export default async function Compare(props: PageProps<"/research/o/[slug]/p/[id]/compare">) {
   const { slug, id } = await props.params;
   const sp = await props.searchParams;
@@ -35,7 +31,6 @@ export default async function Compare(props: PageProps<"/research/o/[slug]/p/[id
   const objects = fields.filter(([, s]) => s.type === "object");
   const review = resultType?.properties[RESEARCH.review];
   const values = [undefined, ...(review?.enum ?? [])];
-  // per run: the results it produced, then those with each review value
   const counts = await Promise.all(runs.map((r) => Promise.all(values.map(async (v) => (await searchObjects(db, RESEARCH.result, {
     linkedTo: { key: RESEARCH.link, id: project.id },
     where: { [RESEARCH.runRef]: r.id, ...(v === undefined ? {} : { [RESEARCH.review]: v }) },

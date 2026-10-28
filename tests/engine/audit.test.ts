@@ -1,5 +1,3 @@
-// Audit log: rows are append-only, scoped to their tenant (also under RLS), alert acks are
-// recorded by the database, and retention trims old rows only through the purge.
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { Client } from "pg";
 import { freshDb } from "../db/setup";
@@ -90,7 +88,6 @@ describe("audit log", () => {
     await db.query(`update engine_settings set value = '365' where key = 'retention.audit_days'`);
     expect((await db.query(`select audit_purge() as n`)).rows[0].n).toBe(1);
     expect((await listAudit(A)).map((e) => e.action)).toEqual(["object.update"]);
-    // the purge flag does not leak: a plain delete still fails afterwards
     await expect(db.query(`delete from audit_log`)).rejects.toThrow(/append-only/);
     expect((await db.query(`select engine_maintenance() -> 'audit_purged' as n`)).rows[0].n).toBe(0);
   });

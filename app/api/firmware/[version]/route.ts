@@ -1,4 +1,3 @@
-/** GET /api/firmware/<version> - the firmware binary, for the nodes (same auth as the manifest). */
 import { getRelease } from "@/lib/engine/firmware";
 import { storeFromEnv } from "@/lib/engine/store";
 import { nodeSource } from "../node-auth";

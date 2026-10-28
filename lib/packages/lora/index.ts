@@ -1,8 +1,3 @@
-// LoRa module package: greenhouse climate nodes behind a LoRa gateway.
-// normalize() turns one gateway payload into node metrics (the physics lives in
-// model.ts); step() carries the counters that need hours of history (leaf wetness,
-// botrytis and mildew risk, irrigation pauses) in the node's package state. Alarms are plain
-// engine rules over these metrics, built from the customer's thresholds by rulesFromConfig().
 import { ValidationError, type ModulePackage } from "../../engine/package";
 import { DEFAULTS, dewPoint, irFrame, luxToPar, rulesFromConfig, lora, vpd, type LoraConfig } from "./model";
 
@@ -17,7 +12,6 @@ const pct = (a: number[], p: number) => {
 };
 const round = (v: number | null, d: number) => (v === null ? null : Math.round(v * 10 ** d) / 10 ** d);
 
-/** What the node reports about itself (firmware, signal, sensors it found at boot), for the admin. */
 function deviceInfo(p: Record<string, unknown>) {
   const fw = typeof p.fw === "string" ? p.fw.slice(0, 20) : null;
   let sensors: Record<string, boolean> | null = null;
@@ -30,7 +24,6 @@ function deviceInfo(p: Record<string, unknown>) {
 }
 const inMildRange = (t: number | null | undefined) => typeof t === "number" && t >= 10 && t <= 25;
 
-/** Counters need hours of history; these are fixed so step() does not depend on rules. */
 const HOTSPOT_DELTA = DEFAULTS.hotspotDelta;
 
 const HELPERS = [
@@ -99,7 +92,7 @@ export const loraPackage: ModulePackage = {
   step(m, ts, st, context) {
     const now = ts.getTime();
     const prevTs = num(st.ts);
-    if (prevTs !== null && now <= prevTs) return; // late point: no counters, state untouched
+    if (prevTs !== null && now <= prevTs) return;
     const rh = m.rh ?? null, t = m.temp_c ?? null, margin = m.cond_margin ?? null;
     const cfg: LoraConfig = { ...DEFAULTS };
     for (const key of Object.keys(DEFAULTS) as (keyof LoraConfig)[]) {
@@ -116,7 +109,6 @@ export const loraPackage: ModulePackage = {
       }
     }
 
-    // A sudden humidity jump is an irrigation boom: humidity and condensation rules pause.
     let until = num(st.irrigation_until) ?? 0;
     const prevRh = num(st.rh);
     if (rh !== null && prevRh !== null && rh - prevRh >= cfg.irrigationJump) until = now + cfg.irrigationHoldS * 1000;
@@ -124,12 +116,10 @@ export const loraPackage: ModulePackage = {
     m.rh_ctl = irrigating ? null : rh;
     m.cond_ctl = irrigating ? null : margin;
 
-    // Hours since the previous point, capped so a data gap does not count as hours of risk.
     const dtH = prevTs !== null ? Math.min(1, (now - prevTs) / 3600000) : 0;
     const wet = (margin !== null && margin <= cfg.leafDewAlarm) || (rh !== null && rh >= 97);
     const wetH = wet ? (num(st.wet_h) ?? 0) + dtH : 0;
     const humidH = rh !== null && rh >= 90 && inMildRange(t) ? (num(st.humid_h) ?? 0) + dtH : 0;
-    // Powdery mildew, simplified Gubler-Thomas: a day with >= 6 h at 21-30 °C adds 20, else -10.
     const day = ts.toISOString().slice(0, 10);
     let base = num(st.pm_base) ?? 0, hours = num(st.pm_hours) ?? 0;
     if (typeof st.pm_day === "string" && st.pm_day !== day) {

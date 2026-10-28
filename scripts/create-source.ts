@@ -1,7 +1,3 @@
-/**
- * Creates a push source and prints its token (shown only once).
- *   npx tsx scripts/create-source.ts <org-slug> <module> <name>
- */
 import "./env";
 import { crossTenantAccess, crossTenantDb } from "../lib/engine/db";
 import { createSource } from "../lib/engine/sources";

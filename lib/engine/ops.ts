@@ -1,6 +1,3 @@
-// The organization's operating picture: every register read together over a chosen period.
-// The accumulator keeps work proportional to the number of events and avoids retaining the
-// entire event history in memory when the dashboard pages through a large tenant.
 import type { Period } from "../packages/agronomy/dashboard";
 
 const DAY = 86_400_000;
@@ -18,7 +15,6 @@ export interface OpsObject {
   id: string;
   name: string;
   hectares: number | null;
-  /** Objects that registers are about (crops); others only show up in the matrix. */
   tracked: boolean;
 }
 
@@ -30,7 +26,6 @@ export interface RegisterStat {
   ha: number;
   objects: number;
   last: number | null;
-  /** Entries per bucket across the period, oldest first. */
   spark: number[];
 }
 
@@ -43,12 +38,9 @@ export interface Cycle {
   sown: number | null;
   treated: number | null;
   harvested: number | null;
-  /** Treatments in the period. */
   treatments: number;
-  /** Harvested kg in the period, and per hectare when the area is known. */
   yieldKg: number;
   yieldHa: number | null;
-  /** Days since anything was recorded on it. */
   idle: number | null;
   status: "ok" | "due" | "never";
 }
@@ -88,7 +80,6 @@ const kgOf = (e: OpsEvent) => {
 const amount = (e: OpsEvent, unit: "L" | "kg") => (qty(e.payload.quantity)?.unit === unit ? qty(e.payload.quantity)!.value : 0);
 const is = (e: OpsEvent, key: string) => e.type.endsWith(`.${key}`);
 
-/** Incremental version of the operating-picture calculation. */
 export class OperationsAccumulator {
   private readonly end: number;
   private readonly currentFrom: number | null;
@@ -119,7 +110,6 @@ export class OperationsAccumulator {
     }
   }
 
-  /** Add a chronological or keyset-paged event to period totals and the time series. */
   push(e: OpsEvent) {
     this.oldest = Math.min(this.oldest, e.ts);
     this.setLatestType(e.type, e.ts);
@@ -146,7 +136,6 @@ export class OperationsAccumulator {
     }
   }
 
-  /** Seed latest per-object/type events from a compact full-history database query. */
   addHistory(e: OpsEvent) {
     this.setLatestType(e.type, e.ts);
     for (const id of e.objectIds) {
@@ -157,7 +146,6 @@ export class OperationsAccumulator {
     }
   }
 
-  /** Include register types whose latest event predates the selected period. */
   setLatestType(type: string, ts: number) {
     if (ts > (this.lastByType.get(type) ?? -Infinity)) this.lastByType.set(type, ts);
   }
@@ -223,7 +211,7 @@ export class OperationsAccumulator {
     const ago = (t: number | null) => (t === null ? null : Math.max(0, Math.floor((this.now.getTime() - t) / DAY)));
     const latest = (byType: Map<string, OpsEvent> | undefined, key: string) => {
       let at: number | null = null;
-      for (const [type, e] of byType ?? []) if (is(e, key) && (at === null || e.ts > at)) at = e.ts;
+      for (const e of byType?.values() ?? []) if (is(e, key) && (at === null || e.ts > at)) at = e.ts;
       return at;
     };
     const cycles = this.objects.filter((o) => o.tracked).map((o): Cycle => {
@@ -285,7 +273,6 @@ export class OperationsAccumulator {
   }
 }
 
-/** `types` in display order: every register the organization has, used or not. */
 export function operations(events: OpsEvent[], types: string[], objects: OpsObject[], period: Period, now = new Date()): Ops {
   const accumulator = new OperationsAccumulator(types, objects, period, now);
   for (const e of events) accumulator.push(e);

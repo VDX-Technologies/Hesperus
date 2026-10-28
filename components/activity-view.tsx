@@ -6,11 +6,9 @@ import { ActivityList } from "@/components/activity-list";
 
 const PAGE = 100;
 
-/** The organization's audit trail, newest first, a page at a time; `href` is the page showing it. */
 export async function ActivityView({ db, before, href }: { db: TenantDb; before?: string | string[]; href: string }) {
   const { t, locale } = await getT();
   const entries = await listAudit(db, { limit: PAGE, before: Number(before) || undefined });
-  // current names of the objects the rows point at (deleted ones simply have none)
   const ids = [...new Set(entries.map((e) => e.objectId).filter((x): x is string => !!x))];
   const { rows } = ids.length
     ? await db.query<{ id: string; name: string }>(`select id, coalesce(name, external_id, '') as name from objects where tenant_id = $1 and id = any($2)`, [db.tenantId, ids])

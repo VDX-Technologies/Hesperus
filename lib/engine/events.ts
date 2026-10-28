@@ -1,6 +1,3 @@
-// Generic event reads: by object (with everything placed below it), by type, by period, by
-// payload fields, and the version history of a corrected event. Only latest versions unless
-// asked otherwise.
 import type { TenantDb } from "./db";
 import type { Severity } from "./package";
 
@@ -15,38 +12,28 @@ export interface EventRow {
   author: string | null;
   authorLabel: string | null;
   supersedes: number | null;
-  /** Why the event was voided, on the version that voids it. */
   voided: string | null;
   rootId: number;
-  /** 1 for the first version, 2 for its first correction, ... */
   version: number;
   objectIds: string[];
 }
 
 export interface EventQuery {
-  /** Events of this object; with `recursive` (default) also of the places and objects below it. */
   objectId?: string;
   recursive?: boolean;
   types?: string[];
   from?: Date;
   to?: Date;
-  /** Payload must contain these values (jsonb containment). */
   payload?: Record<string, unknown>;
   author?: string;
-  /** false = every version, not only the latest. */
   current?: boolean;
-  /** Only the voided events (their voiding version). */
   voided?: boolean;
   limit?: number;
-  /** Paging: events older than this id. */
   before?: number;
-  /** Keyset paging: events after this one in the chosen order (never an offset). */
   after?: Cursor;
-  /** Oldest first instead of newest first. */
   asc?: boolean;
 }
 
-/** Position of an event in (ts, id) order. */
 export type Cursor = { ts: Date; id: number };
 
 export const cursorOf = (e: { ts: Date; id: number }): string => `${e.ts.toISOString()}_${e.id}`;
@@ -73,7 +60,6 @@ const toRow = (r: Raw): EventRow => ({
   version: r.version, objectIds: r.object_ids,
 });
 
-/** Newest event time first (then newest id), or oldest first with `asc`. */
 export async function listEvents(db: TenantDb, q: EventQuery = {}): Promise<EventRow[]> {
   const table = q.current === false ? "events" : q.voided ? "(select * from events where voided is not null)" : "events_current";
   const { rows } = await db.query<Raw>(
@@ -103,7 +89,6 @@ export async function listEvents(db: TenantDb, q: EventQuery = {}): Promise<Even
   return rows.map(toRow);
 }
 
-/** The latest event of a type recorded by a user (for "repeat last"); null when none. */
 export async function lastEventBy(db: TenantDb, userId: string, type: string): Promise<EventRow | null> {
   const { rows } = await db.query<Raw>(
     `select ${COLS} from events_current e where e.tenant_id = $1 and e.author = $2 and e.type = $3
@@ -118,7 +103,6 @@ export async function getEvent(db: TenantDb, id: number): Promise<EventRow | nul
   return rows[0] ? toRow(rows[0]) : null;
 }
 
-/** Every version of the event's chain, first version first. */
 export async function eventHistory(db: TenantDb, id: number): Promise<EventRow[]> {
   const { rows } = await db.query<Raw>(
     `select ${COLS} from events e
@@ -130,7 +114,6 @@ export async function eventHistory(db: TenantDb, id: number): Promise<EventRow[]
   return rows.map(toRow);
 }
 
-/** Every matching event, read `chunk` rows at a time with the keyset (for exports). */
 export async function* allEvents(db: TenantDb, q: Omit<EventQuery, "limit" | "after">, chunk = 500): AsyncGenerator<EventRow> {
   let after: Cursor | undefined;
   for (;;) {
@@ -150,7 +133,6 @@ export interface DashboardEvent {
   objectIds: string[];
 }
 
-/** Lightweight paged event reads for dashboard aggregates; omit version-history work. */
 export async function* allDashboardEvents(
   db: TenantDb,
   q: { types: string[]; from?: Date; to?: Date },
@@ -184,7 +166,6 @@ export async function* allDashboardEvents(
   }
 }
 
-/** Latest event for each tracked object and register type, independent of dashboard period. */
 export async function latestDashboardObjectEvents(db: TenantDb, objectIds: string[], types: string[]): Promise<DashboardEvent[]> {
   if (!objectIds.length || !types.length) return [];
   const { rows } = await db.query<{ id: string; ts: Date; type: string; payload: Record<string, unknown>; author_label: string | null; object_id: string }>(
@@ -200,7 +181,6 @@ export async function latestDashboardObjectEvents(db: TenantDb, objectIds: strin
   }));
 }
 
-/** Latest timestamp per register type, including events without an object link. */
 export async function latestDashboardEventTimes(db: TenantDb, types: string[]): Promise<Map<string, Date>> {
   if (!types.length) return new Map();
   const { rows } = await db.query<{ type: string; ts: Date }>(

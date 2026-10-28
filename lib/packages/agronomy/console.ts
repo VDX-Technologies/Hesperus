@@ -1,5 +1,3 @@
-// Reads for the Agronomy console: crops with their place, the treatments register with its
-// filters, autocomplete from what was already written, and the LoRa sensors in a crop's area.
 import "server-only";
 import type { TenantDb } from "../../engine/db";
 import { listEvents, type EventRow } from "../../engine/events";
@@ -31,7 +29,6 @@ export interface TreatmentFilters {
   cropId?: string;
   product?: string;
   adversity?: string;
-  /** yyyy-mm-dd, both days included */
   from?: string;
   to?: string;
 }
@@ -42,7 +39,6 @@ const day = (s: string | undefined, plus = 0) => {
   return Number.isNaN(d.getTime()) ? undefined : new Date(d.getTime() + plus * 86400000);
 };
 
-/** Treatments, latest versions only, newest first; product and adversity match exactly. */
 export async function listTreatments(db: TenantDb, f: TreatmentFilters = {}, crops?: CropInfo[], limit = 1000): Promise<RegisterRow[]> {
   const payload: Record<string, unknown> = {};
   if (f.product) payload.product = f.product;
@@ -60,7 +56,6 @@ export async function listTreatments(db: TenantDb, f: TreatmentFilters = {}, cro
   return events.map((e: EventRow) => toRegisterRow(e, byId));
 }
 
-/** Products and adversities written before, most used first, for autocomplete. */
 export async function suggestions(db: TenantDb): Promise<{ product: string[]; adversity: string[] }> {
   const { rows } = await db.query<{ field: "product" | "adversity"; v: string }>(
     `select f.field, e.payload->>f.field v
@@ -75,7 +70,6 @@ export async function suggestions(db: TenantDb): Promise<{ product: string[]; ad
   };
 }
 
-/** LoRa sensors located in the crop's area (or below it); empty when the crop has no place. */
 export async function sensorsInPlace(db: TenantDb, placeId: string | null): Promise<{ id: string; name: string }[]> {
   if (!placeId) return [];
   const { rows } = await db.query<{ id: string; name: string | null; external_id: string | null }>(

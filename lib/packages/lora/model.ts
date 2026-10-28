@@ -1,6 +1,3 @@
-// LoRa model shared by the engine package (normalize, step, rules) and the console
-// (settings, presets, metrics, alert texts). Thermal frames come from the node's infrared
-// array (row-major °C, ir_w x ir_h); only the latest one is kept, in the node's properties.
 import type { Locale, PackageDef, SettingDef } from "../types";
 import type { RuleSpec } from "../../engine/rules";
 
@@ -11,16 +8,16 @@ export interface LoraConfig {
   rhMin: number;
   rhMax: number;
   rhMargin: number;
-  leafDewWarn: number; // °C above dew point
+  leafDewWarn: number;
   leafDewAlarm: number;
-  co2LowWarn: number; // ppm
-  irrigationJump: number; // %RH rise between two readings
+  co2LowWarn: number;
+  irrigationJump: number;
   irrigationHoldS: number;
-  botrytisHours: number; // hours of RH >= 90 % at 10-25 °C
-  downyHours: number; // hours of wet leaves at 10-25 °C
-  stressDelta: number; // leaf above air by this much in daylight = water stress
-  leafHeat: number; // °C
-  hotspotDelta: number; // pixel above the canopy median by this much = hot spot
+  botrytisHours: number;
+  downyHours: number;
+  stressDelta: number;
+  leafHeat: number;
+  hotspotDelta: number;
 }
 
 export const DEFAULTS: LoraConfig = {
@@ -42,7 +39,6 @@ export const DEFAULTS: LoraConfig = {
   hotspotDelta: 3,
 };
 
-/** Dew point, Magnus formula, °C. */
 export function dewPoint(t: number, rh: number): number {
   const a = 17.62,
     b = 243.12;
@@ -50,18 +46,15 @@ export function dewPoint(t: number, rh: number): number {
   return (b * g) / (a - g);
 }
 
-/** Leaf-to-air vapour pressure deficit, kPa (air temperature if the leaf is unknown). */
 export function vpd(t: number, rh: number, leaf: number | null): number {
   const es = (x: number) => 0.6108 * Math.exp((17.27 * x) / (x + 237.3));
   return es(leaf ?? t) - (es(t) * rh) / 100;
 }
 
-/** Sunlight approximation: PAR (µmol/m²/s) ≈ lux / 54. Good enough without a PAR sensor. */
 export const luxToPar = (lux: number) => lux / 54;
 
 const num = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
 
-/** Thermal frame from the payload, or null if missing or malformed. */
 export function irFrame(payload: Record<string, unknown>): { w: number; h: number; data: number[] } | null {
   const ir = payload.ir;
   if (!Array.isArray(ir) || !ir.length || !ir.every((x) => typeof x === "number" && Number.isFinite(x))) return null;
@@ -167,7 +160,6 @@ const SETTINGS: SettingDef[] = [
 
 type P = { value: string; limit: string; near: boolean };
 const TEXTS: Record<string, Record<Locale, (p: P) => string>> = {
-  // near: the _warn rule, still inside the limits but within the early-warning margin
   temp_high: {
     en: (p) => `Air temperature ${p.value} °C, ${p.near ? "close to the maximum of" : "above"} ${p.limit} °C`,
     it: (p) => `Temperatura dell'aria ${p.value} °C, ${p.near ? "vicina alla massima di" : "sopra"} ${p.limit} °C`,
@@ -218,10 +210,6 @@ const TEXTS: Record<string, Record<Locale, (p: P) => string>> = {
   },
 };
 
-/**
- * The customer's thresholds as engine rules. Warning and alarm levels are separate families
- * (`<code>_warn` and `<code>`); the climate ones are also pushed to the node's status ring.
- */
 export function rulesFromConfig(c: Partial<LoraConfig>): RuleSpec[] {
   const k = { ...DEFAULTS, ...c };
   const r = (key: string, metric: string, op: RuleSpec["op"], threshold: number, severity: RuleSpec["severity"], push = false): RuleSpec =>

@@ -1,6 +1,3 @@
-// Push ingestion: archive every message as received, then normalize it through the source's
-// module package into objects, metrics and events. A bad message is kept in the raw archive
-// and reported; it never blocks the rest of the batch.
 import { createHash } from "node:crypto";
 import { forTenant, inTransaction, type Db } from "./db";
 import type { ModulePackage, Normalized } from "./package";
@@ -19,11 +16,8 @@ export interface IngestResult {
   metrics: number;
   events: number;
   alerts: { opened: number; resolved: number };
-  /** Configs to forward to devices whose acknowledged version is out of date. */
   configs: ({ type: string; externalId: string } & DeviceConfig)[];
-  /** Objects written by the batch. */
   objectIds: string[];
-  /** Metric keys the package does not declare, with how many values were dropped. */
   undeclared?: Record<string, number>;
 }
 
@@ -40,20 +34,14 @@ function canonical(value: unknown): string {
 
 const hash = (value: string) => createHash("sha256").update(value).digest("hex");
 
-/**
- * Properties a message may write. `config` holds the per-object thresholds the step reads and
- * is set from the console only, so a device cannot override its own thresholds and models.
- */
 function deviceProperties(properties: Record<string, unknown> | undefined): Record<string, unknown> {
   if (!properties || !("config" in properties)) return properties ?? {};
   return Object.fromEntries(Object.entries(properties).filter(([key]) => key !== "config"));
 }
 
-/** Upserts the package's object types, event types and metric keys once per declaration and database. */
 export async function registerPackage(db: Db, pkg: ModulePackage, cache = true): Promise<Registry> {
   let byPkg = registries.get(db);
   if (cache && !byPkg) registries.set(db, (byPkg = new Map()));
-  // keyed by what the package declares, so a changed package registers again on a warm instance
   const key = `${pkg.id}\u0000${hash(canonical([pkg.objectTypes, pkg.eventTypes ?? [], pkg.metrics, pkg.derived ?? []]))}`;
   const cached = cache ? byPkg?.get(key) : undefined;
   if (cached) return cached;
@@ -90,7 +78,6 @@ export async function registerPackage(db: Db, pkg: ModulePackage, cache = true):
   return reg;
 }
 
-/** Per-source token bucket (ingest.rate_per_min, ingest.burst). 0 = go on, else seconds to wait. */
 export async function takeIngestToken(db: Db, sourceId: string, now = new Date()): Promise<number> {
   const { rows } = await db.query<{ wait: number }>(`select ingest_take($1, $2) wait`, [sourceId, now]);
   return Number(rows[0].wait);
@@ -134,8 +121,6 @@ async function ingestPushWork(
     }
   });
 
-  // 2. Objects, once per (type, externalId); the newest message by ts wins on name and properties
-  // (a stable sort, so equal times keep arrival order), not the last one in the batch.
   type Obj = {
     type: string; typeId: string; externalId: string; name?: string; properties: object; ts: Date; configAck?: number;
   };
@@ -202,7 +187,6 @@ async function ingestPushWork(
   }
   result.objectIds = [...objectIds.values()];
 
-  // Derived metrics and the package step, in time order so they see the previous point.
   if (pkg.derived?.length || pkg.step) {
     const ordered = [...items].sort((a, b) => (a.n.ts ?? now).getTime() - (b.n.ts ?? now).getTime());
     for (const { n } of ordered) {
@@ -230,7 +214,6 @@ async function ingestPushWork(
     );
   }
 
-  // 3. Metrics in one statement; replays of the same (object, metric, ts) are ignored.
   const mObj: string[] = [], mKey: number[] = [], mTs: Date[] = [], mVal: number[] = [];
   const points: Point[] = [];
   for (const { n } of items) {
@@ -239,7 +222,6 @@ async function ingestPushWork(
       if (typeof value !== "number" || !Number.isFinite(value)) continue;
       const metricId = reg.metrics.get(key);
       if (metricId === undefined) {
-        // undeclared metrics stay in the raw archive only, counted so the source shows them
         (result.undeclared ??= {})[key] = (result.undeclared[key] ?? 0) + 1;
         continue;
       }
@@ -258,7 +240,6 @@ async function ingestPushWork(
     result.metrics = r.rowCount ?? 0;
   }
 
-  // 4. Events, linked to their object.
   const withEvents = opts.events ?? !opts.replay;
   if (withEvents) {
     const idempotencyKeys: string[] = [], timestamps: Date[] = [], eventTypes: string[] = [];
@@ -294,7 +275,6 @@ async function ingestPushWork(
     }
   }
 
-  // 5. Rules and device configs. Replays rebuild data only: they never raise alerts.
   let transitions: AlertTransition[] = [];
   if (!opts.replay) {
     const rules = await loadRules(forTenant(db, source.tenant_id), pkg.id);
@@ -318,7 +298,6 @@ async function ingestPushWork(
   return { result, transitions };
 }
 
-/** Ingests a bounded batch inside the caller's already-open transaction. */
 export async function ingestPushInTransaction(
   db: Db,
   source: Source,
@@ -356,7 +335,6 @@ export async function ingestPush(
   const maxBatch = num(settings, "ingest.max_batch", 500);
   if (messages.length > maxBatch) throw new ValidationError(`batch too large (max ${maxBatch})`);
   const maxFuture = num(settings, "ingest.max_future_s", 300) * 1000;
-  // Keep normal push payloads in the durable inbox even if their transaction later rolls back.
   if (!opts.replay) await db.query(
     `insert into raw_inbox (tenant_id, source_id, received_at, body)
      select $1, $2, $3, b from jsonb_array_elements($4::jsonb) b`,

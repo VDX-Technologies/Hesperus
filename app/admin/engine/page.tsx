@@ -16,7 +16,6 @@ import { SectionTitle } from "@/components/ui";
 
 const PATH = "/admin/engine";
 
-// Shown once on the next render, then gone.
 async function showToken(token: string) {
   (await cookies()).set("new_source_token", token, { path: PATH, maxAge: 120, httpOnly: true, sameSite: "strict" });
   redirect(PATH);
@@ -34,7 +33,6 @@ async function addSource(formData: FormData) {
     connector: upload ? "upload" : "push",
     config: upload ? { mapping: {}, fixed: kind ? { kind } : {} } : {},
   });
-  // upload sources are used from the console, their token is never needed
   if (upload) redirect(PATH);
   await showToken(token);
 }
@@ -42,7 +40,6 @@ async function addSource(formData: FormData) {
 async function addResearchSource(formData: FormData) {
   "use server";
   const { user } = await requireAdmin();
-  // "<tenant id>:<project id>"
   const [org, project] = String(formData.get("project")).split(":");
   const { token } = await createResearchSource(crossTenantDb(crossTenantAccess.admin), org, project, {
     name: String(formData.get("name") ?? ""),
@@ -56,7 +53,6 @@ async function newToken(formData: FormData) {
   const { user } = await requireAdmin();
   const org = String(formData.get("org"));
   const id = String(formData.get("id"));
-  // the old token keeps working for a day, so devices can be moved to the new one
   const token = await rotateToken(tenantDb(org), id, 86_400);
   await record(tenantDb(org), user, "token.rotate", { objectId: id, subject: String(formData.get("name")), data: { grace: 86_400 } });
   await showToken(token);

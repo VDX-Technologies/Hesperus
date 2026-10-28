@@ -1,5 +1,3 @@
-// Reads for the customer console: objects of a package with their latest values and status,
-// and open alerts with their text. Pool queries bypass RLS, so every one filters on the tenant.
 import "server-only";
 import type { TenantDb } from "../engine/db";
 import { getPackageDef } from "./ui";
@@ -10,7 +8,6 @@ export interface ConsoleObject {
   externalId: string | null;
   name: string;
   type: string;
-  /** Where the object is (located_in), and the names from its site down to that place. */
   placeId: string | null;
   placePath: string[];
   properties: Record<string, unknown>;
@@ -33,7 +30,6 @@ export interface ConsoleAlert {
 
 const iso = (d: Date | null) => d?.toISOString() ?? null;
 
-/** Objects of one module, optionally one by id, with values of the last day and live status. */
 export async function listObjects(db: TenantDb, module: string, objectId?: string): Promise<ConsoleObject[]> {
   const pkg = getPackageDef(module);
   const { rows } = await db.query<{
@@ -87,7 +83,6 @@ export async function listObjects(db: TenantDb, module: string, objectId?: strin
   });
 }
 
-/** Alerts with the package's text; open and acknowledged ones unless `history` is set. */
 export async function listAlerts(
   db: TenantDb, locale: Locale, q: { objectId?: string; history?: boolean; limit?: number } = {},
 ): Promise<ConsoleAlert[]> {

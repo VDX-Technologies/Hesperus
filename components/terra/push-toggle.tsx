@@ -11,7 +11,6 @@ function urlBase64ToUint8Array(base64: string) {
   return Uint8Array.from(raw, (c) => c.charCodeAt(0));
 }
 
-/** Alarm notifications on this device (PWA web push). iPhone/iPad need the app on the Home Screen first. */
 export function PushToggle({
   slug,
   labels,

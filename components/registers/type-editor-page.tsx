@@ -4,7 +4,6 @@ import { FIELD_TYPES, label, subjectTypes } from "@/lib/engine/registers";
 import type { EventFormState } from "@/components/event-form";
 import { TypeEditor, type TypeDraft } from "@/components/registers/type-editor";
 
-/** The schema editor of an event or object type, saved by the console's own server action. */
 export async function TypeEditorPage({ db, slug, kind, draft, action }: {
   db: TenantDb;
   slug: string;

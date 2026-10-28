@@ -1,10 +1,3 @@
-/**
- * GET /api/cron/engine - the hourly maintenance (raw_inbox flush, then health) as a route, so it
- * does not depend on GitHub Actions alone. Called hourly by an external scheduler (cron-job.org)
- * with `Authorization: Bearer $CRON_SECRET`. Safe
- * next to scripts/flush-raw.ts and scripts/health.ts: the flush claims rows with skip locked and
- * a repeated health run only re-mails problems that are due.
- */
 import { timingSafeEqual } from "node:crypto";
 import { crossTenantAccess, crossTenantDb } from "@/lib/engine/db";
 import { flushRawInbox } from "@/lib/engine/archive";
@@ -32,7 +25,7 @@ export async function GET(request: Request) {
     flush = { rows: out.rows, objects: out.objects.length };
   } catch (e) {
     console.error("cron flush failed", e);
-    flush = { error: String(e) }; // health still runs: that is what it reports
+    flush = { error: String(e) };
   }
   const { report, mailed } = await metered(pool, store, (s) => runHealth(pool, { store: s, mailer: mailerFromEnv() }));
   const problems = report.checks.filter((c) => !c.ok).length;

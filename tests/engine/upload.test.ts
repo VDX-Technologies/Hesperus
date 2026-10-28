@@ -1,5 +1,3 @@
-// Upload connector: a CSV is stored once with a documents row, its rows go through the push
-// path with the source's column mapping, and the limits, duplicates and bad rows are reported.
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { Client } from "pg";
 import { freshDb } from "../db/setup";
@@ -15,7 +13,6 @@ import { parseDate, parseNumber, recordsPackage } from "../../lib/packages/recor
 
 vi.mock("server-only", () => ({}));
 const { listEntries } = await import("../../lib/packages/records/console");
-// what an upload wrote to a register, with the crop each row hangs on
 const work = async (type: string) =>
   (await db.query<{ ts: Date; payload: Record<string, unknown>; crop: string; author_label: string }>(
     `select e.ts, e.payload, o.name crop, e.author_label from events e join event_objects eo on eo.event_id = e.id join objects o on o.id = eo.object_id
@@ -94,9 +91,8 @@ describe("upload", () => {
     expect(doc.storage_key).toMatch(new RegExp(`^docs/${ORG}/${harvest.id}/[0-9a-f]{64}-raccolta_2026\\.csv$`));
     expect(store.objects.has(doc.storage_key)).toBe(true);
     const linked = await db.query(`select count(*)::int n from document_objects where document_id = $1`, [r.documentId]);
-    expect(linked.rows[0].n).toBe(2); // two subjects
+    expect(linked.rows[0].n).toBe(2);
 
-    // the rows are harvests on their crops, not a register of their own
     expect(await listEntries(A)).toHaveLength(0);
     const rows = await work("agronomy.harvest");
     expect(rows).toHaveLength(3);
@@ -119,9 +115,9 @@ describe("upload", () => {
     const csv = [
       "data,campo,prodotto,dose (l/ha),superficie ha,operatore",
       "05/09/2026,Vigna nord,Rame,\"2,5\",\"1,2\",Mario",
-      "06/09/2026,,Zolfo,3,1,Mario", // line 3: no subject
-      "31/09/2026,Vigna sud,Zolfo,3,1,Anna", // line 4: no such date
-      "07/09/2026,Vigna sud,Zolfo,tre,1,Anna", // line 5: bad number
+      "06/09/2026,,Zolfo,3,1,Mario",
+      "31/09/2026,Vigna sud,Zolfo,3,1,Anna",
+      "07/09/2026,Vigna sud,Zolfo,tre,1,Anna",
       "08/09/2026,Vigna sud,Zolfo,3,\"0,8\",Anna",
     ].join("\n");
     const r = await ingestUpload(db, store, treatments, { name: "trattamenti.csv", bytes: enc(csv) }, recordsPackage, USER, new Date(now.getTime() + 60e3));
@@ -132,7 +128,6 @@ describe("upload", () => {
 
     expect(r.register).toBe("treatment");
     const rame = (await work("agronomy.treatment")).find((e) => e.payload.product === "Rame")!;
-    // the quantity is the dose times the area, in litres from the dose column's header
     expect(rame.payload).toMatchObject({ area_ha: 1.2, quantity: { value: 3, unit: "L" }, operator: "Mario", adversity: "non indicata" });
     expect(rame.crop).toBe("Vigna nord");
     const [up] = await listUploads(A);
@@ -161,11 +156,9 @@ describe("upload", () => {
     await db.query(`update engine_settings set value = '2' where key = 'upload.files_per_day'`);
     await getSettings(db, true);
     expect(await status(ingestUpload(db, store, harvest, { name: "d.csv", bytes: enc("Data;Appezzamento\n1/9/26;c\n") }, recordsPackage, USER, now))).toBe(429);
-    // a day later the quota is free again
     const later = new Date(now.getTime() + 25 * 3600e3);
     expect(await status(ingestUpload(db, store, harvest, { name: "d.csv", bytes: enc("Data;Appezzamento\n1/9/26;c\n") }, recordsPackage, USER, later))).toBe(0);
 
-    // nothing was stored for the refused files
     const docs = await db.query(`select filename from documents where source_id = $1 order by created_at`, [harvest.id]);
     expect(docs.rows.map((d) => d.filename)).toEqual(["raccolta 2026.csv", "a.csv", "d.csv"]);
     await db.query(`update engine_settings set value = d.v::jsonb from (values ('upload.max_bytes', '5242880'), ('upload.max_rows', '5000'), ('upload.files_per_day', '50')) d(k, v) where key = d.k`);

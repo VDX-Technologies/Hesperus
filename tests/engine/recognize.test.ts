@@ -1,4 +1,3 @@
-// Column recognition: headers, values, known subjects and what earlier uploads taught.
 import { describe, expect, it } from "vitest";
 import { emptyMemory, learn, profile, recognize, signature } from "../../lib/packages/records/recognize";
 
@@ -50,14 +49,11 @@ describe("column recognition", () => {
 
   it("learns a supplier's own words and recognises its next file", () => {
     const first = { headers: ["Dt", "Cod. app", "Qli"], rows: [["03/09/2026", "VN-01", "12,5"], ["04/09/2026", "VS-02", "9"]] };
-    // the dates are found from the values alone
     expect(fields(recognize(first))[0]).toBe("date");
     const mem = learn(emptyMemory(), first, { Dt: "date", "Cod. app": "subject", Qli: "quantity" });
-    // the same columns again: mapped from memory, fully sure
     const again = recognize({ ...first, headers: ["Qli", "Dt", "Cod. app"] }, { memory: mem });
     expect(again.known).toBe(true);
     expect(again.signature).toBe(signature(first.headers));
-    // a new file with the same words, plus a column never seen
     const next = recognize(
       { headers: ["Dt", "Cod. app", "Qli", "Autista"], rows: [["05/09/2026", "VN-01", "14", "Gino"], ["06/09/2026", "VN-03", "11", "Pino"]] },
       { memory: mem },

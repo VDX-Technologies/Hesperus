@@ -1,4 +1,3 @@
-// The overview's operating picture: every register together, cycles per crop, matrix and signals.
 import { describe, expect, it } from "vitest";
 import { operations, type OpsEvent, type OpsObject } from "../../lib/engine/ops";
 
@@ -30,7 +29,7 @@ describe("operations", () => {
     expect(o.figures.yieldKg.value).toBe(9000);
     expect(o.figures.liters.value).toBe(6);
     expect(o.figures.kilos.value).toBe(3);
-    expect(o.figures.area.value).toBe(4); // treated area only
+    expect(o.figures.area.value).toBe(4);
     expect(o.registers.map((r) => [r.type, r.n.value])).toEqual([
       ["agronomy.treatment", 2], ["agronomy.sowing", 0], ["agronomy.harvest", 1], ["custom.pruning", 1],
     ]);
@@ -56,7 +55,6 @@ describe("operations", () => {
       { kind: "overdue", objectId: "b", name: "Mais", days: 80 },
       { kind: "never", objectId: "c", name: "Orzo" },
     ]));
-    // sown 233 days ago: not yet a missing harvest
     expect(o.signals.some((s) => s.kind === "unharvested")).toBe(false);
   });
 

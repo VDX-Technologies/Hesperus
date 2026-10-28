@@ -4,7 +4,6 @@ import type { Locale } from "@/lib/packages/types";
 import { signConsent } from "@/lib/consent-actions";
 import { SubmitButton } from "@/components/submit-button";
 
-/** Research consent document shown over the console until the user signs it (first access only). */
 export function ConsentGate({ slug, home, email, t, locale }: { slug: string; home: string; email?: string; t: Dict; locale: Locale }) {
   const doc = CONSENT_DOC[locale];
   return (

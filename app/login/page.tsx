@@ -21,9 +21,7 @@ export default async function Login(props: PageProps<"/login">) {
   const { t, locale } = await getT();
   return (
     <main className="safe-y relative flex min-h-dvh flex-col lg:flex-row">
-      {/* Brand panel: full height on desktop, compact header on phones */}
       <section className="relative overflow-hidden border-b border-line-soft bg-ink-950 px-6 pb-8 pt-8 lg:flex lg:w-1/2 lg:flex-col lg:justify-between lg:border-b-0 lg:border-r lg:p-12">
-        {/* Live VDX Core faces, dimmed under ink gradients so the logo stays readable */}
         <div className="pointer-events-none absolute inset-0 hidden brightness-[.6] saturate-[.85] lg:block" aria-hidden>
           <HeroFaces framed />
           <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_20%_10%,var(--color-ink-950)_0%,transparent_55%)]" />
@@ -41,7 +39,6 @@ export default async function Login(props: PageProps<"/login">) {
         <p className="relative mt-8 hidden text-xs text-dim lg:block">© {new Date().getFullYear()} VDX Technologies</p>
       </section>
 
-      {/* Form */}
       <section className="flex flex-1 flex-col px-6 py-8 lg:px-12">
         <form action={setLocale} className="flex justify-end text-xs">
           <input type="hidden" name="back" value="/login" />

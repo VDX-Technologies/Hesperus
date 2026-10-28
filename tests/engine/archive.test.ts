@@ -41,7 +41,7 @@ describe("raw archive", () => {
     await push("08:10:00", { sensor: "a", temp: 1 }, { bad: 1 });
     await push("08:50:00", { sensor: "a", temp: 2 });
     await push("09:05:00", { sensor: "a", temp: 3 });
-    await push("10:01:00", { sensor: "a", temp: 4 }); // current hour stays
+    await push("10:01:00", { sensor: "a", temp: 4 });
 
     const r = await flushRawInbox(pool, store, at("10:02:00"));
     expect(r.rows).toBe(4);
@@ -54,7 +54,6 @@ describe("raw archive", () => {
     expect(lines.map((l) => l.body)).toEqual([{ sensor: "a", temp: 1 }, { bad: 1 }, { sensor: "a", temp: 2 }]);
     expect(lines[0].received_at).toBe("2026-10-17T08:10:00.000Z");
 
-    // A late row for an already flushed hour never overwrites it.
     await db.query(`insert into raw_inbox (tenant_id, source_id, received_at, body) values ($1, $2, $3, '{"sensor":"late"}')`, [
       ORG, source.id, at("08:59:00"),
     ]);
@@ -84,7 +83,7 @@ describe("raw archive", () => {
     const r = await replaySource(db, store, source, testPkg);
     expect(r.total.metrics).toBe(2);
     expect((await replaySource(db, store, source, testPkg)).total.metrics).toBe(0);
-    expect(await inbox()).toBe(0); // replay does not re-archive
+    expect(await inbox()).toBe(0);
     expect((await db.query(`select count(*)::int n from events`)).rows[0].n).toBe(0);
   });
 });

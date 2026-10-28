@@ -2,7 +2,7 @@ import Link from "next/link";
 import type { TenantDb } from "@/lib/engine/db";
 import { allDashboardEvents, latestDashboardEventTimes, latestDashboardObjectEvents } from "@/lib/engine/events";
 import { label as nameOf, type EventTypeInfo } from "@/lib/engine/registers";
-import { OperationsAccumulator, type Figure, type OpsEvent, type OpsObject, type Signal } from "@/lib/engine/ops";
+import { OperationsAccumulator, type Figure, type OpsObject, type Signal } from "@/lib/engine/ops";
 import type { Period } from "@/lib/packages/agronomy/dashboard";
 import type { ConsoleAlert } from "@/lib/packages/console";
 import { countUploads, type UploadedDocument } from "@/lib/engine/upload";
@@ -39,7 +39,6 @@ function Spark({ values, tone }: { values: number[]; tone: string }) {
   );
 }
 
-/** Objects with their kind; crops (what registers are about) are tracked through their cycle. */
 async function loadObjects(db: TenantDb, subjects: Set<string>): Promise<OpsObject[]> {
   const { rows } = await db.query<{ id: string; name: string; type: string; hectares: unknown; archived: boolean }>(
     `select o.id, coalesce(o.name, o.external_id, left(o.id::text, 8)) name, t.module || '.' || t.key type,
@@ -52,11 +51,6 @@ async function loadObjects(db: TenantDb, subjects: Set<string>): Promise<OpsObje
   }));
 }
 
-/**
- * The organization's operating picture across every register, file and alert: what was done,
- * where, against the period before, each crop's cycle and what needs a look. Modules add their
- * own depth below it.
- */
 export async function OpsBoard({
   db, slug, t, locale, period, types, alerts, uploads, health, openAlertCount, openAlarmCount, now = new Date(),
 }: {
@@ -143,7 +137,6 @@ export async function OpsBoard({
       : <div key={x.k} className={className}>{content}</div>;
   };
 
-  // registrations, files and alerts as one stream, newest first
   type Item = { ts: number; tone: string; title: string; text: string; href: string };
   const feedRowsToShow: Item[] = [
     ...feedRows.filter((e) => e.ts >= o.from).slice(0, 25).map((e) => ({

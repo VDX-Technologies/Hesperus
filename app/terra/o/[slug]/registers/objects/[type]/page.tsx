@@ -4,7 +4,6 @@ import { ObjectsView } from "@/components/registers/objects-view";
 import { deleteObjectAction, saveObjectAction } from "../../actions";
 import { registerContext } from "../../context";
 
-/** The objects of one custom type, in the registers. */
 export default async function Objects(props: PageProps<"/terra/o/[slug]/registers/objects/[type]">) {
   const { slug, type: param } = await props.params;
   const ctx = await registerContext(slug);

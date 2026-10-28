@@ -1,5 +1,3 @@
-// The firmware endpoints answer only Heltec nodes: a push source of the lora module, with a token
-// of the write scope (the one the node pushes with).
 import type { Db } from "@/lib/engine/db";
 import { FIRMWARE_MODULE } from "@/lib/engine/firmware";
 import { authSource } from "@/lib/engine/source-auth";

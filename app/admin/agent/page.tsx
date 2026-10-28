@@ -3,9 +3,6 @@ import { getT, timeAgo } from "@/lib/i18n";
 import { crossTenantAccess, crossTenantDb } from "@/lib/engine/db";
 import { SectionTitle } from "@/components/ui";
 
-// Anonymous, opt-in telemetry sent by VDX Agent installs (tables agent_installs / agent_turns,
-// written by POST /api/agent/telemetry). Not tied to any organisation.
-
 const RANGES = [7, 30, 90] as const;
 
 type ModelRow = {

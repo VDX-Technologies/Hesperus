@@ -1,4 +1,3 @@
-// Where the shared register views lead inside Research: its own pages, never another console's.
 import type { ObjectPaths } from "@/components/registers/objects-view";
 
 export const researchPaths = (slug: string): ObjectPaths => ({

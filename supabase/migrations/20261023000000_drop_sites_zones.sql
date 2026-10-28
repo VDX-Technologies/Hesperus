@@ -1,5 +1,3 @@
--- Drops the old sites and zones tables: 20261020010000_places_data moved them into place
--- objects with the same ids. Stops instead if a row was never moved, so nothing is lost.
 do $$
 declare missing int;
 begin

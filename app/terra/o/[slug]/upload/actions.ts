@@ -15,7 +15,6 @@ import { moveLegacyEntries } from "@/lib/packages/agronomy/import";
 
 export type UploadState = { error?: string; result?: Omit<UploadResult, "documentId"> } | null;
 
-/** Saves the column mapping chosen in the form, then loads the file through the source (owner only). */
 export async function uploadFile(_prev: UploadState, formData: FormData): Promise<UploadState> {
   const slug = String(formData.get("slug"));
   const { user, org, role } = await requireOrg(slug);
@@ -57,10 +56,6 @@ export type Preview =
   | { format: FileFormat; headers: string[]; rows: number; sample: string[][]; recognition: Recognition | null }
   | { error: string };
 
-/**
- * Reads a chosen file on the server and says what each column of its table is: the field, how sure,
- * and whether the register has seen files like it. The first rows come back for the preview.
- */
 export async function previewFile(formData: FormData): Promise<Preview> {
   const { org, role } = await requireOrg(String(formData.get("slug")));
   if (role !== "owner") return { error: "uploadOnlyOwner" };
@@ -89,7 +84,6 @@ export async function previewFile(formData: FormData): Promise<Preview> {
   return { format, headers: table.headers, rows: table.rows.length, sample: table.rows.slice(0, 5), recognition };
 }
 
-/** Owner-only actions on the uploaded files; each comes back to the page with a message. */
 async function owner(formData: FormData) {
   const slug = String(formData.get("slug"));
   const ctx = await requireOrg(slug);

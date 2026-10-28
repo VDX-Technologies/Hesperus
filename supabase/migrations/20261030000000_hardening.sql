@@ -1,4 +1,3 @@
--- Close public RPC access to platform settings and enforce member roles for alert acknowledgements.
 revoke execute on function public.engine_setting(text) from public, anon, authenticated;
 grant execute on function public.engine_setting(text) to service_role;
 
@@ -34,12 +33,10 @@ $$;
 revoke execute on function public.ack_alert(bigint) from public, anon;
 grant execute on function public.ack_alert(bigint) to authenticated;
 
--- Tie uploaded metrics to their source document so an atomic reprocess/delete removes them too.
 alter table public.metrics
   add column document_id uuid references public.documents (id) on delete cascade;
 create index metrics_document_id on public.metrics (document_id) where document_id is not null;
 
--- Preserve escalation and reopen notifications as distinct deliveries for each recipient.
 alter table public.weather_alerts
   add column notification_revision integer not null default 1 check (notification_revision > 0);
 alter table public.weather_notification_outbox

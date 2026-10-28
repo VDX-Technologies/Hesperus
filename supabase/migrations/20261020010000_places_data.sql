@@ -1,5 +1,3 @@
--- Moves sites and zones into place objects, keeping their ids. The old tables stay until
--- a later migration drops them.
 insert into public.objects (id, tenant_id, type_id, name, created_at)
 select s.id, s.org_id, (select id from public.object_types where module = 'core' and key = 'site' and tenant_id is null),
        s.name, s.created_at

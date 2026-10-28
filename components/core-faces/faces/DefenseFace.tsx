@@ -2,11 +2,9 @@ import { CoreShell } from "../CoreShell";
 import { noise } from "../data";
 import { CORE, SectionLabel } from "../ui";
 
-/** Map area in stage pixels: everything left of the inspector, above the timeline. */
 const MW = 1140;
 const MH = 800;
 
-/** Closed contour around a hill, wobbled by deterministic noise. */
 function contour(cx: number, cy: number, r: number, seed: number) {
   const n = 72;
   return (
@@ -31,7 +29,6 @@ const OTHERS = [
 ];
 const HISTORY = [0.15, 0.3, 0.45, 0.6, 0.75];
 
-/** Fixed sensors: cameras with their field of view, ground sensors as squares. */
 const CAMS = [
   { x: 470, y: 600, a: -60, id: "C-3" },
   { x: 900, y: 420, a: 200, id: "C-5" },
@@ -55,7 +52,6 @@ const EVENTS = [
   { t: "13:40:00", src: "OPS", tone: "ok" as const, text: "Handover, Rossi on duty" },
 ];
 
-/** Timeline: 12:30 → 14:30, event positions in minutes from the start. */
 const TICKS = ["12:30", "13:00", "13:30", "14:00", "14:30"];
 const MARKS = [
   { m: 70, tone: "ok" as const },
@@ -76,7 +72,6 @@ const KV = [
   ["Closest asset", "Gate 2 · 380 m"],
 ];
 
-/** Face 2: situational awareness for a perimeter, civil in tone. One track selected, everything else context. */
 export function DefenseFace() {
   return (
     <CoreShell workspace="Northern Site" nav={["Map", "Events", "Assets", "Settings"]} alerts={2}>
@@ -125,7 +120,6 @@ export function DefenseFace() {
             ))}
             <path d={TRACK} fill="none" stroke={CORE.warn} strokeOpacity="0.5" strokeWidth="1.5" className="core-draw" pathLength={1} />
             {HISTORY.map((f, i) => {
-              // Points sampled along the cubic by eye; the trail only has to read as "where it came from".
               const pts = [[566, 742], [590, 698], [612, 655], [645, 600], [690, 540]];
               return <circle key={f} cx={pts[i][0]} cy={pts[i][1]} r="2.5" fill={CORE.warn} opacity={0.25 + i * 0.12} />;
             })}

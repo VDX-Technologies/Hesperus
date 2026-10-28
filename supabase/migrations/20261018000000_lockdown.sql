@@ -1,8 +1,3 @@
--- Lockdown: metric partitions, realtime on engine tables, legacy MVP tables gone.
---
--- Partitions are tables of their own: they do not inherit RLS from public.metrics, and
--- Supabase grants new tables to anon/authenticated. Read metrics through the parent only.
-
 do $$
 declare p regclass;
 begin
@@ -39,9 +34,7 @@ begin
 end;
 $$;
 
--- Realtime: the console listens to objects and object_alerts (RLS still applies).
 alter publication supabase_realtime drop table public.devices, public.alerts;
 alter publication supabase_realtime add table public.objects, public.object_alerts;
 
--- Legacy MVP tables, replaced by the engine (objects, metrics, object_alerts, sources).
 drop table public.readings, public.alerts, public.gateways, public.devices;

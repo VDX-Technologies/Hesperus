@@ -1,7 +1,3 @@
-// Threshold rules: evaluated on every ingested point, they open and resolve alerts.
-// Rules with the same key form a family; for a given object the rule targeting that object
-// wins over the type-wide one, which is how per-device thresholds are expressed. Rules marked
-// push_to_device also make up the config sent back to the device.
 import type { Db, TenantDb } from "./db";
 import type { AlertTransition } from "./hooks";
 
@@ -39,7 +35,6 @@ export async function loadRules(db: TenantDb, module: string): Promise<Rule[]> {
   return rows;
 }
 
-/** The rules that apply to one object: per family, its own override or else the type-wide rule. */
 export function effectiveRules(rules: Rule[], type: string, objectId: string): Rule[] {
   const byKey = new Map<string, Rule>();
   for (const r of rules) {
@@ -53,13 +48,11 @@ export function effectiveRules(rules: Rule[], type: string, objectId: string): R
 const cmp = (op: Op, v: number, t: number) =>
   op === ">" ? v > t : op === ">=" ? v >= t : op === "<" ? v < t : v <= t;
 
-/** Still active: the value has not come back past the threshold by the hysteresis band. */
 const stillActive = (r: Rule, v: number) =>
   cmp(r.op, v, r.op.startsWith(">") ? r.threshold - r.hysteresis : r.threshold + r.hysteresis);
 
 const worse = (r: Rule, a: number, b: number) => (r.op.startsWith(">") ? Math.max(a, b) : Math.min(a, b));
 
-/** Evaluates points in time order. Points not newer than the last one evaluated are ignored. */
 export async function evaluateRules(
   db: Db, tenantId: string, rules: Rule[], points: Point[],
 ): Promise<AlertTransition[]> {
@@ -67,7 +60,9 @@ export async function evaluateRules(
   const byObjMetric = new Map<string, Point[]>();
   for (const p of points) {
     const k = `${p.objectId}\u0000${p.metric}`;
-    byObjMetric.get(k)?.push(p) ?? byObjMetric.set(k, [p]);
+    const list = byObjMetric.get(k);
+    if (list) list.push(p);
+    else byObjMetric.set(k, [p]);
   }
   for (const pts of byObjMetric.values()) {
     const { objectId, type, metric } = pts[0];
@@ -155,7 +150,6 @@ export interface DeviceConfig {
   thresholds: Record<string, { metric: string; op: Op; threshold: number; hysteresis: number; for_s: number }>;
 }
 
-/** Thresholds a device should apply locally; the version changes whenever any of them does. */
 export function deviceConfig(rules: Rule[], type: string, objectId: string): DeviceConfig | null {
   const own = effectiveRules(rules, type, objectId).filter((r) => r.push_to_device).sort((a, b) => a.key.localeCompare(b.key));
   if (!own.length) return null;
@@ -174,7 +168,6 @@ function fnv1a(s: string): number {
 export type RuleSpec = Pick<Rule, "key" | "metric" | "op" | "threshold" | "severity"> &
   Partial<Pick<Rule, "name" | "object_type" | "hysteresis" | "for_s" | "push_to_device">>;
 
-/** Creates or updates rules by family; with objectId they become that object's overrides. */
 export async function upsertRules(
   db: TenantDb, module: string, specs: RuleSpec[], objectId: string | null = null,
 ): Promise<number> {

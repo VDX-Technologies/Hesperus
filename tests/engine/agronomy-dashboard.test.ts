@@ -1,4 +1,3 @@
-// The overview's reading of the treatments: figures against the period before, crops by urgency, mixes.
 import { describe, expect, it } from "vitest";
 import { dashboard, periodFrom } from "../../lib/packages/agronomy/dashboard";
 import type { CropInfo, RegisterRow } from "../../lib/packages/agronomy/register";

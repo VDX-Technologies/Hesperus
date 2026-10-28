@@ -22,7 +22,6 @@ function Kpi({ label, value, sub, spark, color }: { label: string; value: string
 
 const total = (w: Record<string, number>) => Object.entries(w).reduce((a, [k, v]) => (k === "t" || k.startsWith("_") ? a : a + v), 0);
 
-/** Totals, weekly work by product and what deserves a look. */
 export function Kpis({ a, t, locale }: { a: Analysis; t: Dict; locale: Locale }) {
   const { totals } = a;
   const perWeek = a.weeks.map(total);
@@ -54,7 +53,6 @@ const series = (a: Analysis, t: Dict) =>
     key: k, label: k === "other" ? t.an_other : k, color: k === "other" ? PALETTE[5] : PALETTE[i % 5],
   }));
 
-/** Subjects × weeks: how many entries each subject had each week, darker for more. */
 export function Heatmap({ a, slug, t, locale }: { a: Analysis; slug: string; t: Dict; locale: Locale }) {
   if (a.weeks.length < 2 || !a.matrix.length) return null;
   const max = Math.max(1, ...a.matrix.flatMap((m) => m.cells));
@@ -90,7 +88,6 @@ export function Heatmap({ a, slug, t, locale }: { a: Analysis; slug: string; t: 
   );
 }
 
-/** Doses over time per product, the ones out of line ringed. */
 export function Doses({ a, t, locale }: { a: Analysis; t: Dict; locale: Locale }) {
   if (a.doses.length < 3) return null;
   const s = series(a, t).filter((x) => a.doses.some((d) => d.product === x.key));
@@ -101,7 +98,6 @@ export function Doses({ a, t, locale }: { a: Analysis; t: Dict; locale: Locale }
   );
 }
 
-/** Products by entries, Pareto style, and subjects ranked with their share and last entry. */
 export function Shares({ a, slug, t, locale }: { a: Analysis; slug: string; t: Dict; locale: Locale }) {
   const top = a.bySubject.length > 1 ? a.bySubject.slice(0, 10) : [];
   return (
@@ -166,7 +162,6 @@ function say(s: Signal, t: Dict, locale: Locale): string {
   }
 }
 
-/** Signals: each one a subject to look at and why. */
 export function Signals({ a, slug, t, locale, limit = 8 }: { a: Analysis; slug: string; t: Dict; locale: Locale; limit?: number }) {
   return (
     <div className="card divide-y divide-line-soft">

@@ -1,7 +1,3 @@
-// The field schema shared by object types and event types, checked in the app before a write
-// so people get a readable error; the database checks again with validate_properties (same
-// rules, same messages). Also turns form input (text, comma decimals) into typed values.
-// No server imports: the event form uses it in the browser.
 import type { PropertySpec } from "./package";
 
 export type Schema = Record<string, PropertySpec>;
@@ -11,7 +7,6 @@ const isObject = (v: unknown): v is Record<string, unknown> => typeof v === "obj
 
 export const KEY = /^[a-z][a-z0-9_]{0,39}$/;
 
-/** Problems of a field schema written by people (the schema editor, a project's result fields), null when fine. */
 export function checkFields(fields: Schema, types: readonly string[]): string | null {
   if (!isObject(fields)) return "fields must be an object";
   const entries = Object.entries(fields);
@@ -30,7 +25,6 @@ const pgList = (a: unknown[]) => `[${a.map((x) => JSON.stringify(x)).join(", ")}
 
 const jsonType = (v: unknown) => (v === null ? "null" : Array.isArray(v) ? "array" : typeof v);
 
-/** Mirror of the SQL validate_properties: null when valid, else the same error text. */
 export function validateProperties(schema: Schema, props: unknown): string | null {
   if (!isObject(props)) return "properties must be an object";
   for (const k of Object.keys(props)) if (!(k in schema)) return `unknown property "${k}"`;
@@ -74,7 +68,6 @@ export function validateProperties(schema: Schema, props: unknown): string | nul
   return null;
 }
 
-/** Accepts 1234.5, 1234,5, 1.234,5 and 1,234.5; null when not a number. */
 export function parseDecimal(v: string): number | null {
   let s = v.replace(/\s/g, "");
   const comma = s.lastIndexOf(","), dot = s.lastIndexOf(".");
@@ -84,18 +77,12 @@ export function parseDecimal(v: string): number | null {
   return /^-?\d*\.?\d+$/.test(s) && Number.isFinite(n) ? n : null;
 }
 
-/** Day-only input (yyyy-mm-dd) is kept at midday UTC so it stays on its day in any zone. */
 export function parseTimestamp(v: string): string | null {
   const s = v.trim();
   const d = /^\d{4}-\d{2}-\d{2}$/.test(s) ? new Date(`${s}T12:00:00Z`) : new Date(s);
   return Number.isNaN(d.getTime()) ? null : d.toISOString();
 }
 
-/**
- * Builds a payload from form strings: `name` for the value, `name.unit` for a quantity's unit.
- * Empty fields are left out. Returns the payload or, per field, why the text is not usable;
- * the schema rules themselves (required, enum, min, max) are checked by validateProperties.
- */
 export function payloadFromForm(schema: Schema, form: Record<string, string | undefined>): { payload: Record<string, unknown>; errors: Record<string, string> } {
   const payload: Record<string, unknown> = {};
   const errors: Record<string, string> = {};

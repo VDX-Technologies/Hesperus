@@ -1,8 +1,3 @@
-/**
- * Defines the VDX Agent telemetry types (agent_install, agent_turn) in an organization,
- * as its owner, through the schema editor's APIs. Safe to run again.
- *   npx tsx scripts/seed-agent-telemetry.ts <org-slug>
- */
 import "./env";
 import { crossTenantAccess, crossTenantDb, forTenant } from "../lib/engine/db";
 import { seedAgent } from "./agent/types";

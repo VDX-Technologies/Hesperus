@@ -1,7 +1,3 @@
--- Extra tokens per source, each with scopes and an optional expiry, so a device can hold a
--- write-only token, a pipeline a read-only one, and a rotation can keep the old token alive for a
--- while. The primary token on sources.token_hash keeps every scope and never expires.
--- Scopes: write (push messages, firmware), documents (push files), read (pipeline results).
 create table public.source_tokens (
   id uuid primary key default gen_random_uuid(),
   tenant_id uuid not null references public.organizations (id) on delete cascade,

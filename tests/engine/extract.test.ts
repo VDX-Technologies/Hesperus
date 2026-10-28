@@ -1,4 +1,3 @@
-// File reading: tables out of spreadsheets, delimited and laid out text and PDFs, text for the rest.
 import { describe, expect, it } from "vitest";
 import * as XLSX from "xlsx";
 import { PDFDocument, StandardFonts } from "pdf-lib";
@@ -39,7 +38,6 @@ describe("file reading", () => {
         ["2026-09-03", "Vigna nord", "1250.5"],
         ["2026-09-04 07:30", "Vigna sud", "980"],
       ]);
-      // an xlsx with a wrong name is still read
       if (bookType === "xlsx") expect((await extract("export.bin", "", bytes)).table?.rows.length).toBe(2);
     }
   });
@@ -50,7 +48,6 @@ describe("file reading", () => {
     const t = await extract("note.txt", "text/plain", enc(txt));
     expect(t.table?.headers).toEqual(["Data", "Prodotto", "Dose"]);
     expect(t.table?.rows).toEqual([["03/09/2026", "Rame ossicloruro", "2,5"], ["10/09/2026", "Zolfo", "3"]]);
-    // prose is text, not a table
     const prose = await extract("lettera.txt", "", enc("Gentile cliente, le scriviamo per conto dell'azienda.\nCordiali saluti, la direzione.\n"));
     expect(prose.table).toBeNull();
     expect(prose.text).toContain("Gentile cliente");

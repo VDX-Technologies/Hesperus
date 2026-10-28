@@ -13,8 +13,7 @@ let obj: string;
 let temp: number;
 const ORG = "00000000-0000-0000-0000-00000000000a";
 const H = 3_600_000;
-// Anchored to the real clock: partitions are created around now().
-const BASE = new Date(Math.floor(Date.now() / H) * H - 3 * H); // three hours ago, on the hour
+const BASE = new Date(Math.floor(Date.now() / H) * H - 3 * H);
 const t = (min: number) => new Date(BASE.getTime() + min * 60_000);
 
 beforeAll(async () => {
@@ -39,22 +38,22 @@ const rollups = async (res: number) =>
 
 describe("rollups", () => {
   it("rolls closed 5 min buckets and closed hours", async () => {
-    for (let m = 0; m < 70; m++) await put(t(m), m); // one per minute, 00:00..01:09
-    const r = await rollup(t(72)); // 01:10..01:15 bucket still open
+    for (let m = 0; m < 70; m++) await put(t(m), m);
+    const r = await rollup(t(72));
     expect(r.rollups_5m).toBe(14);
     const r5 = await rollups(300);
     expect(r5[0]).toMatchObject({ bucket: t(0), min: 0, max: 4, avg: 2, count: 5 });
     const r60 = await rollups(3600);
-    expect(r60).toHaveLength(1); // only the first hour is closed
+    expect(r60).toHaveLength(1);
     expect(r60[0]).toMatchObject({ bucket: t(0), min: 0, max: 59, avg: 29.5, count: 60 });
   });
 
   it("recomputes the lookback window for late data, not older buckets", async () => {
-    await put(new Date(t(2).getTime() + 30_000), 100); // late, older than the lookback
-    await put(new Date(t(61).getTime() + 30_000), 200); // late, inside the lookback
+    await put(new Date(t(2).getTime() + 30_000), 100);
+    await put(new Date(t(61).getTime() + 30_000), 200);
     await rollup(t(80));
     const r5 = await rollups(300);
-    expect(r5.find((r) => +r.bucket === +t(0)).count).toBe(5); // 01:10 - 60 min = 00:10: untouched
+    expect(r5.find((r) => +r.bucket === +t(0)).count).toBe(5);
     expect(r5.find((r) => +r.bucket === +t(60)).max).toBe(200);
   });
 
@@ -83,12 +82,11 @@ describe("retention", () => {
     const name = `metrics_${d.replaceAll("-", "")}`;
     await db.query(`create table ${name} partition of metrics for values from ('${d}T00:00:00Z') to ('${d}T00:00:00Z'::timestamptz + interval '1 day')`);
     await put(old, 1);
-    await put(new Date(Date.now() - 400 * day), 1); // default partition
+    await put(new Date(Date.now() - 400 * day), 1);
     await db.query(`insert into metric_rollups values ($1, $2, $3, 300, $4, 1, 1, 1, 1), ($1, $2, $3, 3600, $4, 1, 1, 1, 1)`, [
       ORG, obj, temp, new Date(Date.now() - 40 * day),
     ]);
 
-    // Rollups have not reached that far back: nothing raw is dropped.
     await db.query(`update engine_jobs set watermark = $1 where name = 'rollup'`, [new Date(Date.now() - 30 * day)]);
     let r = (await db.query(`select apply_retention() r`)).rows[0].r;
     expect(r).toMatchObject({ partitions_dropped: 0, default_rows: 1, rollups_5m: 1, rollups_1h: 0 });
@@ -97,7 +95,7 @@ describe("retention", () => {
     r = (await db.query(`select apply_retention() r`)).rows[0].r;
     expect(r.partitions_dropped).toBe(1);
     expect((await db.query(`select to_regclass($1) r`, [name])).rows[0].r).toBeNull();
-    expect((await rollups(3600)).length).toBeGreaterThan(2); // hourly kept forever
+    expect((await rollups(3600)).length).toBeGreaterThan(2);
   });
 
   it("maintenance runs everything and records the outcome", async () => {
@@ -106,7 +104,7 @@ describe("retention", () => {
     const { rows } = await db.query(`select last_ok, last_error, last_result from engine_jobs where name = 'maintenance'`);
     expect(rows[0].last_error).toBeNull();
     expect(rows[0].last_result).toEqual(r);
-    expect((await db.query(`select engine_schedule() s`)).rows[0].s).toBe(false); // no pg_cron here
+    expect((await db.query(`select engine_schedule() s`)).rows[0].s).toBe(false);
   });
 });
 

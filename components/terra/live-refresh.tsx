@@ -3,7 +3,6 @@ import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 
-/** Re-renders the page when this organization's objects or alerts change (Supabase Realtime). */
 export function LiveRefresh({ orgId }: { orgId: string }) {
   const router = useRouter();
   useEffect(() => {
@@ -18,7 +17,7 @@ export function LiveRefresh({ orgId }: { orgId: string }) {
       .on("postgres_changes", { event: "*", schema: "public", table: "objects", filter: `tenant_id=eq.${orgId}` }, refresh)
       .on("postgres_changes", { event: "*", schema: "public", table: "object_alerts", filter: `tenant_id=eq.${orgId}` }, refresh)
       .subscribe();
-    const every = setInterval(() => router.refresh(), 60_000); // also turns stale devices "offline"
+    const every = setInterval(() => router.refresh(), 60_000);
     return () => {
       clearTimeout(timer);
       clearInterval(every);

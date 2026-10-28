@@ -1,4 +1,3 @@
-// An uploaded file as it was loaded, from the archive, for anyone who can read the tenant.
 import { requireConsole } from "@/lib/auth";
 import { tenantDb } from "@/lib/engine/db";
 import { storeFromEnv } from "@/lib/engine/store";

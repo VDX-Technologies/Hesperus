@@ -1,7 +1,3 @@
--- Places are objects: core.site (a place of its own) and core.area (part of a site or of
--- another area). Hierarchy and position are links:
---   part_of     area -> site | area   (one parent per area, no cycles)
---   located_in  object -> site | area (one place per object; places use part_of)
 insert into public.object_types (module, key, name, properties) values
   ('core', 'site', '{"en": "Site", "it": "Sito"}', '{"notes": {"type": "string"}}'),
   ('core', 'area', '{"en": "Area", "it": "Area"}', '{"notes": {"type": "string"}}')

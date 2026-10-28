@@ -1,5 +1,3 @@
-// Two tenants on one pool: the TenantDb guard refuses unscoped queries, and every console,
-// series and rules read for org A returns nothing of org B.
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { Pool, type Client } from "pg";
 import { freshDb } from "../db/setup";
@@ -53,7 +51,6 @@ describe("TenantDb guard", () => {
 });
 
 describe("RLS on the direct pool", () => {
-  // queries the guard lets through but that would read org B without the database policy
   const leaky = `select b.tenant_id from objects a join objects b on true where a.tenant_id = $1 or $1 is not null`;
   it("limits every table of a tenant query to that tenant", async () => {
     const { rows } = await forTenant(pool, A).query(leaky, [A]);

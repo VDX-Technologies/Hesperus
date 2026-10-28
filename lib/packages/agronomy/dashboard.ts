@@ -1,6 +1,3 @@
-// The treatments read for the overview over a chosen period: figures against the period before,
-// a day-by-day series with its weekly trend, each active crop's state, and what the products and
-// adversities add up to. Pure: tests use it directly.
 import type { CropInfo, RegisterRow } from "./register";
 
 const DAY = 86_400_000;
@@ -9,12 +6,10 @@ export const PERIODS = [7, 30, 90, 365, 0] as const;
 export type Period = (typeof PERIODS)[number];
 export const periodFrom = (v: unknown): Period => (PERIODS.includes(Number(v) as Period) && v !== "" ? (Number(v) as Period) : 30);
 
-/** A crop with no treatment for longer than this is due a look. */
 export const OVERDUE_DAYS = 21;
 
 export interface Figure {
   value: number;
-  /** Same figure over the period before; null when the period is "all". */
   prev: number | null;
 }
 
@@ -24,7 +19,6 @@ export interface DayPoint {
   ha: number;
   L: number;
   kg: number;
-  /** Treatments per day, averaged over the 7 days up to this one. */
   avg: number;
 }
 
@@ -38,7 +32,6 @@ export interface CropState {
   inPeriod: number;
   ha: number;
   status: "ok" | "due" | "never";
-  /** Treatments per bucket across the period, oldest first. */
   spark: number[];
 }
 
@@ -103,7 +96,6 @@ export function dashboard(rows: RegisterRow[], crops: CropInfo[], period: Period
   const cur = sum(inside), prev = before && sum(before);
   const fig = (k: keyof typeof cur): Figure => ({ value: cur[k], prev: prev ? prev[k] : null });
 
-  // one point per day, empty days kept so gaps read as gaps
   const days: DayPoint[] = [];
   const at = new Map<number, DayPoint>();
   for (let t = from; t < end; t += DAY) {
@@ -143,7 +135,6 @@ export function dashboard(rows: RegisterRow[], crops: CropInfo[], period: Period
         status: days === null ? "never" : days > OVERDUE_DAYS ? "due" : "ok", spark,
       };
     })
-    // the ones waiting longest first, never treated at the top
     .sort((a, b) => (b.days ?? Infinity) - (a.days ?? Infinity) || a.name.localeCompare(b.name));
 
   return {

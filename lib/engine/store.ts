@@ -1,36 +1,25 @@
-// Object storage for the immutable raw archive. R2 (or any S3 API) in production, a local folder in development, memory in
-// tests. Writes never overwrite: put fails with "exists" so the caller picks another key. Only the
-// orphan sweep deletes (sweepOrphanDocuments, lib/engine/archive.ts).
 import { DeleteObjectCommand, GetObjectCommand, ListObjectsV2Command, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, join, relative, resolve, sep } from "node:path";
 
 export interface ObjectStore {
-  /** Creates key; returns false if it already exists (never overwrites). */
   putNew(key: string, body: Uint8Array, contentType: string): Promise<boolean>;
   get(key: string): Promise<Uint8Array | null>;
   list(prefix: string): Promise<string[]>;
-  /** Total objects and bytes under prefix. */
   usage(prefix: string): Promise<{ objects: number; bytes: number }>;
-  /** Keys under prefix with their size and when they were written. */
   entries(prefix: string): Promise<StoreEntry[]>;
-  /** Removes key; a missing key is not an error. */
   delete(key: string): Promise<void>;
 }
 
 export interface StoreEntry { key: string; size: number; modified: Date }
 
 export interface StoreOps {
-  writes: number; // class A: put, list
-  reads: number; // class B: get
-  bytes: number; // written by successful putNew
-  objects: number; // created by successful putNew
+  writes: number;
+  reads: number;
+  bytes: number;
+  objects: number;
 }
 
-/**
- * Counts the operations made through a store, for the monthly quota (engine_usage), and the bytes
- * it added, for the storage size (engine_gauges).
- */
 export class MeteredStore implements ObjectStore {
   ops: StoreOps = { writes: 0, reads: 0, bytes: 0, objects: 0 };
   constructor(private inner: ObjectStore) {}
@@ -59,7 +48,6 @@ export class MeteredStore implements ObjectStore {
     this.ops.writes++;
     return this.inner.entries(prefix);
   }
-  // deletes are free on R2
   delete(key: string) {
     return this.inner.delete(key);
   }
@@ -169,7 +157,6 @@ export class S3Store implements ObjectStore {
   }
 }
 
-/** Objects as files under a folder: for development with no R2 at hand. */
 export class FileStore implements ObjectStore {
   constructor(private root: string) {}
 
@@ -231,10 +218,6 @@ export class FileStore implements ObjectStore {
   }
 }
 
-/**
- * R2 from env: R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET (R2_ENDPOINT overrides).
- * Outside production with no R2 set, files go to .data/store in the project folder.
- */
 export function storeFromEnv(): ObjectStore {
   const { R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET, R2_ENDPOINT } = process.env;
   if (!R2_ACCESS_KEY_ID || !R2_SECRET_ACCESS_KEY || !R2_BUCKET) {

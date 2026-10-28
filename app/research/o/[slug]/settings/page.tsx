@@ -4,7 +4,6 @@ import { getConsent } from "@/lib/consent";
 import { Flash } from "@/components/flash";
 import { ConsentSettings } from "@/components/consent-settings";
 
-/** The person's own settings in Research: the consent they signed. */
 export default async function Settings(props: PageProps<"/research/o/[slug]/settings">) {
   const { slug } = await props.params;
   const { saved, error } = await props.searchParams;

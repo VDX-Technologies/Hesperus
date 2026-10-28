@@ -1,4 +1,3 @@
-// Column headers matched to register fields by the words they are written with.
 import { describe, expect, it } from "vitest";
 import { guessFields } from "../../lib/packages/records/model";
 

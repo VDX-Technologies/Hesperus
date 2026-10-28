@@ -1,6 +1,3 @@
--- Official weather warnings are stored separately from sensor alerts. A warning is tied to
--- a geocoded site only after its official GeoJSON geometry contains that site's coordinates.
-
 create table public.weather_locations (
   tenant_id uuid not null references public.organizations (id) on delete cascade,
   site_id uuid not null,
@@ -77,7 +74,6 @@ create table public.weather_notification_subscriptions (
 create index weather_notification_subscriptions_enabled
   on public.weather_notification_subscriptions (tenant_id) where enabled;
 
--- Durable and idempotent; a transient mail provider failure is retried by the scheduled worker.
 create table public.weather_notification_outbox (
   id bigint generated always as identity primary key,
   tenant_id uuid not null references public.organizations (id) on delete cascade,
@@ -112,7 +108,6 @@ create policy weather_outbox_read on public.weather_notification_outbox for sele
 
 insert into public.engine_jobs (name) values ('weather') on conflict do nothing;
 
--- One official request per country is shared by tenant syncs and manual refreshes.
 create table public.weather_source_cache (
   country_code text primary key check (country_code ~ '^[A-Z]{2}$'),
   fetched_at timestamptz,

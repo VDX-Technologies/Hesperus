@@ -2,11 +2,9 @@
 
 import { createContext, useContext, useLayoutEffect, useRef, useState } from "react";
 
-/** Every face is laid out once on a fixed canvas and scaled as a whole, so it stays sharp and proportioned. */
 export const STAGE = { w: 1600, h: 1000 };
 
 const ScaleContext = createContext(1);
-/** Current stage scale, for content that renders its own pixels (the 3D canvas). */
 export const useStageScale = () => useContext(ScaleContext);
 
 export function Stage({
@@ -17,9 +15,7 @@ export function Stage({
   className = "",
 }: {
   children: React.ReactNode;
-  /** Point of the canvas kept in view when cropping, as fractions of width and height. */
   focus?: [number, number];
-  /** Extra magnification on top of the fit. */
   zoom?: number;
   fit?: "cover" | "width";
   className?: string;

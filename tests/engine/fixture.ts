@@ -1,4 +1,3 @@
-// A minimal module package for engine tests: {sensor, t?, temp?, alarm?}.
 import { ValidationError, type ModulePackage } from "../../lib/engine/package";
 
 export const testPkg: ModulePackage = {

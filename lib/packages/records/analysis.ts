@@ -1,7 +1,3 @@
-// What a register's entries say once taken together: totals, how the work spreads over time,
-// subjects and products, and signals worth a decision (a subject left behind, a dose out of
-// line with the same product elsewhere, an entry that looks recorded twice). Plain statistics:
-// medians and median absolute deviation, so a few odd rows do not move the reference.
 import type { RecordEntry } from "./console";
 
 const DAY = 86_400_000;
@@ -32,18 +28,14 @@ export type Signal =
   | { kind: "twice"; objectId: string; subject: string; product: string; ts: string; days: number };
 
 export interface Analysis {
-  /** True when summaries use only the most recent capped window. */
   partial: boolean;
   totals: Totals;
-  /** Monday of each week (epoch ms) with entries per top product, "other" for the rest, area worked (_area) and its running total (_cum). */
   weeks: Record<string, number>[];
   products: string[];
   bySubject: Share[];
   byProduct: Share[];
   signals: Signal[];
-  /** Entries per subject per week (same weeks as `weeks`), busiest subjects first. */
   matrix: { key: string; objectId: string; cells: number[] }[];
-  /** Every dose of the top products, with whether it is out of line. */
   doses: { t: number; dose: number; product: string; subject: string; odd: boolean }[];
 }
 
@@ -100,7 +92,6 @@ export function analyze(entries: RecordEntry[], now = new Date(), topProducts = 
   const bySubject = [...subjects.values()].sort((a, b) => b.entries - a.entries);
   const byProduct = [...products.values()].sort((a, b) => b.entries - a.entries);
 
-  // weeks with the main products stacked; empty weeks are kept so gaps show
   const top = byProduct.slice(0, topProducts).map((p) => p.key);
   const weeks: Record<string, number>[] = [];
   if (rows.length) {
@@ -130,7 +121,6 @@ export function analyze(entries: RecordEntry[], now = new Date(), topProducts = 
 
   const signals: Signal[] = [];
   const doses: Analysis["doses"] = [];
-  // a subject idle for more than twice its usual gap between entries (at least 3 entries to know it)
   for (const s of bySubject) {
     const ts = subjectTimes.get(s.objectId!) ?? [];
     if (ts.length < 3) continue;
@@ -138,7 +128,6 @@ export function analyze(entries: RecordEntry[], now = new Date(), topProducts = 
     const days = (now.getTime() - ts.at(-1)!) / DAY;
     if (usual >= 1 && days > 2 * usual) signals.push({ kind: "idle", objectId: s.objectId!, subject: s.key, days: Math.round(days), usual: Math.round(usual) });
   }
-  // a dose far from the same product's median: beyond 3 MADs and at least half again or half less
   for (const p of byProduct) {
     const withDose = productDoses.get(p.key) ?? [];
     if (withDose.length < 3) continue;
@@ -153,7 +142,6 @@ export function analyze(entries: RecordEntry[], now = new Date(), topProducts = 
         signals.push({ kind: "dose", objectId: e.objectId, subject: e.subject, product: p.key, ts: e.ts, dose: d, usual: m });
     }
   }
-  // the same product on the same subject twice within two days
   const lastSeen = new Map<string, RecordEntry>();
   for (const e of rows) {
     const p = text(e.payload.product);
@@ -166,7 +154,6 @@ export function analyze(entries: RecordEntry[], now = new Date(), topProducts = 
     }
     lastSeen.set(k, e);
   }
-  // most pressing first: wrong doses, then doubles, then the longest idle
   const rank = { dose: 0, twice: 1, idle: 2 };
   signals.sort((a, b) => rank[a.kind] - rank[b.kind] || (a.kind === "idle" && b.kind === "idle" ? b.days - a.days : 0));
 

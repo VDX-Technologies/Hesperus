@@ -8,14 +8,12 @@ import { Stage } from "./Stage";
 
 const HOLD = 4000;
 
-/** Where each face keeps its most readable part when cropped: desktop, then phone. */
 const FACES: { el: () => React.ReactNode; focus: [number, number]; phone: [number, number] }[] = [
   { el: () => <LoraFace />, focus: [0.55, 0.3], phone: [0.3, 0.3] },
   { el: () => <DefenseFace />, focus: [0.62, 0.3], phone: [0.45, 0.5] },
   { el: () => <EnterpriseFace />, focus: [0.6, 0.3], phone: [0.82, 0.35] },
 ];
 
-/** The VDX Core faces behind the login form, looping with a soft dissolve. Paused off-screen and in hidden tabs. */
 export function HeroFaces({ framed = false }: { framed?: boolean } = {}) {
   const root = useRef<HTMLDivElement>(null);
   const [ready, setReady] = useState(false);
@@ -23,7 +21,6 @@ export function HeroFaces({ framed = false }: { framed?: boolean } = {}) {
   const [visible, setVisible] = useState(true);
   const [still, setStill] = useState(false);
   const [phone, setPhone] = useState(false);
-  // The first face just appears behind the title; the wipe starts with the first change.
   const [cycled, setCycled] = useState(false);
 
   useEffect(() => {
@@ -36,7 +33,6 @@ export function HeroFaces({ framed = false }: { framed?: boolean } = {}) {
     sync();
     rm.addEventListener("change", sync);
     mq.addEventListener("change", sync);
-    // Faces come in after first paint so the title stays the LCP.
     const t = requestAnimationFrame(() => setReady(true));
 
     let inView = true;

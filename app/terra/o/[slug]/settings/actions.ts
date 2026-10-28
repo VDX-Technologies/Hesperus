@@ -9,7 +9,6 @@ import { getPackageDef } from "@/lib/packages/ui";
 import { safePath } from "@/lib/safe-path";
 import { parseSettings } from "@/lib/settings";
 
-/** Company-wide thresholds of one module (owner or VDX), applied as the module's engine rules. */
 export async function saveOrgSettings(formData: FormData) {
   const slug = String(formData.get("slug"));
   const back = safePath(formData.get("back"));
@@ -27,7 +26,6 @@ export async function saveOrgSettings(formData: FormData) {
   redirect(`${back}?saved=1`);
 }
 
-/** Thresholds of one object (each has its own complete set), applied as its rule overrides. */
 export async function saveDeviceSettings(formData: FormData) {
   const slug = String(formData.get("slug"));
   const back = safePath(formData.get("back"));

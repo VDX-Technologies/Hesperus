@@ -17,7 +17,6 @@ import { moveLegacy } from "./upload/actions";
 const DAY = 86_400_000;
 const btn = "inline-flex items-center gap-1.5 rounded-md border border-line px-3 py-1.5 text-xs text-mist hover:border-ice/60 hover:text-frost";
 
-/** The organization's command center: current health, priorities and a compact operating picture. */
 export default async function Overview(props: PageProps<"/terra/o/[slug]">) {
   const { slug } = await props.params;
   const sp = await props.searchParams;

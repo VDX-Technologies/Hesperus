@@ -1,5 +1,3 @@
--- Minimal stand-in for what Supabase provides (auth schema, roles, realtime publication),
--- so engine migrations can be tested on plain Postgres. Applied only when auth is missing.
 create schema auth;
 create table auth.users (id uuid primary key, email text);
 create function auth.uid() returns uuid language sql stable as $$

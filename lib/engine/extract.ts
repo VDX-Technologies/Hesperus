@@ -1,8 +1,3 @@
-// Reads whatever a user uploads, with no network and no model: spreadsheets (xlsx, xls, ods…),
-// delimited text, Word documents, PDFs and plain text. Each file gives back its full text (kept
-// for search) and, when one can be found, a table: header row plus data rows. Spreadsheet header
-// rows are found under titles, Word tables are read as they are, and PDF tables are rebuilt from
-// where the words sit on the page.
 import * as XLSX from "xlsx";
 import { parseCsv, type Csv } from "./csv";
 
@@ -80,7 +75,6 @@ export function fileFormat(name: string, type = ""): FileFormat {
   return "other";
 }
 
-/** UTF-8 if valid, else Windows-1252 (what spreadsheets on Windows export). */
 export function decodeText(bytes: Uint8Array): string {
   try {
     return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
@@ -91,21 +85,15 @@ export function decodeText(bytes: Uint8Array): string {
 
 const filled = (row: string[]) => row.filter((c) => c.trim() !== "").length;
 
-/** Drops empty rows and columns that are empty in every row, then pads rows to the header. */
 function tidy(headers: string[], rows: string[][]): Table | null {
   rows = rows.filter((r) => filled(r) > 0);
   const width = Math.max(headers.length, ...rows.map((r) => r.length));
   const keep = Array.from({ length: width }, (_, i) => i).filter((i) => (headers[i] ?? "").trim() || rows.some((r) => (r[i] ?? "").trim()));
   if (keep.length < 2 || !rows.length) return null;
   const pick = (r: string[]) => keep.map((i) => (r[i] ?? "").trim());
-  // a header cell left blank is named after its column, so it can still be mapped
   return { headers: pick(headers).map((h, i) => h || `#${i + 1}`), rows: rows.map(pick) };
 }
 
-/**
- * The header of a grid: the first row, among the top ones, that fills at least half of the widest
- * row and is mostly words. Titles, dates and notes above a spreadsheet table are skipped.
- */
 export function findTable(grid: string[][]): Table | null {
   const width = Math.max(0, ...grid.slice(0, 50).map(filled));
   if (width < 2) return null;
@@ -114,7 +102,6 @@ export function findTable(grid: string[][]): Table | null {
     const cells = row.filter((c) => c.trim() !== "");
     const words = cells.filter((c) => !/^[-+]?[\d.,:/\s%€$]+$/.test(c)).length;
     if (cells.length >= Math.max(2, width / 2) && words >= cells.length * 0.6) {
-      // repeated headers (one per printed page) are not data
       const key = row.join("\u0000");
       return tidy(row, grid.slice(i + 1).filter((r) => r.join("\u0000") !== key));
     }
@@ -122,7 +109,6 @@ export function findTable(grid: string[][]): Table | null {
   return null;
 }
 
-/** Spreadsheet cells as text: dates as "YYYY-MM-DD" or "YYYY-MM-DD HH:mm", numbers unformatted. */
 function cellText(v: unknown): string {
   if (v instanceof Date) {
     const iso = v.toISOString();
@@ -131,11 +117,6 @@ function cellText(v: unknown): string {
   return v == null ? "" : String(v);
 }
 
-/**
- * Refuses a zip (xlsx, docx) whose entries add up to more than max bytes once inflated, read from
- * its central directory before any parser inflates it: a few hundred KB can declare gigabytes.
- * Not a zip, or no directory found: left to the parser. Zip64 sizes count as over the limit.
- */
 function checkZip(bytes: Uint8Array, max: number) {
   if (bytes[0] !== 0x50 || bytes[1] !== 0x4b) return;
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
@@ -184,7 +165,6 @@ function readSheet(bytes: Uint8Array, max: ReturnType<typeof limits>): Extracted
     }
     append(`# ${name}`);
     for (const row of grid) append(row.join("\t"));
-    // the sheet with the most rows is the data; the others are often notes or lookups
     const t = findTable(grid);
     if (t && t.rows.length > max.maxRows) throw new ExtractLimitError("rows", max.maxRows);
     if (t && (!table || t.rows.length > table.rows.length)) table = t;
@@ -192,7 +172,6 @@ function readSheet(bytes: Uint8Array, max: ReturnType<typeof limits>): Extracted
   return { format: "sheet", table: checkTable(table, max), text: text.join("\n") || null };
 }
 
-/** Delimited text; for a file not named .csv, most rows must have as many cells as the header. */
 function readDelimited(text: string, strict: boolean, max: ReturnType<typeof limits>): Table | null {
   let csv: Csv;
   try {
@@ -211,18 +190,12 @@ function readDelimited(text: string, strict: boolean, max: ReturnType<typeof lim
   return checkTable(findTable([csv.headers, ...csv.rows]), max);
 }
 
-/** A cell of a laid out line: its text and horizontal span. */
 interface Cell {
   text: string;
   x0: number;
   x1: number;
 }
 
-/**
- * A table out of laid out lines (PDF words by position, or plain text by character column): the
- * longest run of lines with two or more cells gives the header, then every later line with two or
- * more cells is a row, each cell going to the header column it sits under.
- */
 export function layoutTable(lines: Cell[][]): Table | null {
   let best: [number, number] = [0, 0];
   for (let i = 0; i < lines.length; ) {
@@ -232,13 +205,11 @@ export function layoutTable(lines: Cell[][]): Table | null {
     i = j + 1;
   }
   if (best[1] - best[0] < 3) return null;
-  // the header is the run's first line that is mostly words
   let h = best[0];
   while (h < best[1] - 2 && lines[h].filter((c) => /\p{L}/u.test(c.text)).length < lines[h].length * 0.6) h++;
   const head = lines[h];
   const centre = (c: Cell) => (c.x0 + c.x1) / 2;
   const column = (c: Cell) => {
-    // the header column it overlaps the most, else the nearest one
     let at = 0, score = -Infinity;
     head.forEach((hc, k) => {
       const s = Math.min(c.x1, hc.x1) - Math.max(c.x0, hc.x0) || -Math.abs(centre(c) - centre(hc));
@@ -261,7 +232,6 @@ export function layoutTable(lines: Cell[][]): Table | null {
   return tidy(head.map((c) => c.text), rows);
 }
 
-/** Plain text laid out in columns: cells are split on tabs or runs of two or more spaces. */
 function textLines(text: string, max: ReturnType<typeof limits>): Cell[][] {
   checkText(text, max.maxTextChars);
   let cellCount = 0;
@@ -284,7 +254,6 @@ async function readPdf(bytes: Uint8Array, max: ReturnType<typeof limits>): Promi
   const lines: Cell[][] = [];
   let charCount = 0, cellCount = 0;
   for (const page of items) {
-    // words on the same baseline (within a third of the font size) make a line, top to bottom
     const words = page.filter((w) => w.str.trim()).sort((a, b) => b.y - a.y || a.x - b.x);
     for (const w of words) {
       charCount += w.str.length;
@@ -298,7 +267,6 @@ async function readPdf(bytes: Uint8Array, max: ReturnType<typeof limits>): Promi
     }
     for (const l of pageLines) {
       l.sort((a, b) => a.x - b.x);
-      // a gap wider than about one space ends the cell
       const cells: Cell[] = [];
       for (const w of l) {
         cellCount++;
@@ -339,7 +307,6 @@ async function readWord(bytes: Uint8Array, max: ReturnType<typeof limits>): Prom
   const [{ value: html }, { value: text }] = await Promise.all([mammoth.convertToHtml({ buffer }), mammoth.extractRawText({ buffer })]);
   checkText(html, max.maxTextChars * 5);
   checkText(text, max.maxTextChars);
-  // the biggest table of the document
   let table: Table | null = null;
   let tableCount = 0, cellCount = 0;
   for (const [t] of html.matchAll(/<table[\s\S]*?<\/table>/g)) {
@@ -359,7 +326,6 @@ async function readWord(bytes: Uint8Array, max: ReturnType<typeof limits>): Prom
   return { format: "word", table: checkTable(table ?? layoutTable(textLines(text, max)), max), text: text.trim() || null };
 }
 
-/** Reads any file. A file that cannot be understood still comes back, with no table and no text. */
 export async function extract(name: string, type: string | undefined, bytes: Uint8Array, options: ExtractOptions = {}): Promise<Extracted> {
   const max = limits(options);
   if (bytes.length > max.maxBytes) throw new ExtractLimitError("bytes", max.maxBytes);
@@ -383,7 +349,6 @@ export async function extract(name: string, type: string | undefined, bytes: Uin
         return { format, table: checkTable(readDelimited(text, true, max) ?? layoutTable(textLines(text, max)), max), text };
       }
       case "other": {
-        // an unknown extension may still be a spreadsheet (a zip, or an old Office file) or text
         const zip = bytes[0] === 0x50 && bytes[1] === 0x4b, ole = bytes[0] === 0xd0 && bytes[1] === 0xcf;
         if (zip || ole) {
           try {
@@ -396,7 +361,6 @@ export async function extract(name: string, type: string | undefined, bytes: Uin
         }
         const text = decodeText(bytes);
         checkText(text, max.maxTextChars);
-        // binary files decode to many control characters
         if ((text.match(/[\u0000-\u0008\u000e-\u001f�]/g)?.length ?? 0) > text.length / 100) return { format, table: null, text: null };
         return { format: "text", table: checkTable(readDelimited(text, true, max) ?? layoutTable(textLines(text, max)), max), text };
       }

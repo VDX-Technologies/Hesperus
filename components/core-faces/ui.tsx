@@ -1,8 +1,3 @@
-/**
- * VDX Core UI kit for the marketing site: the same tokens as the real app (ink-800 cards, 14 px radius, Plex Mono
- * numbers, ok / warn / alarm colours), drawn as plain HTML and SVG so it stays sharp at any scale.
- */
-
 export const CORE = {
   ok: "#3ddc84",
   warn: "#f2b84b",
@@ -46,7 +41,6 @@ export function SectionLabel({ children }: { children: React.ReactNode }) {
 export type Line = { label: string; color: string; data: number[]; dashed?: boolean; right?: boolean };
 type Axis = { min: number; max: number; ticks: string[] };
 
-/** Time-series chart in the Core style. Solid lines draw in when the face becomes active (`.core-draw`). */
 export function Chart({
   lines,
   left,
@@ -65,9 +59,7 @@ export function Chart({
   width: number;
   height: number;
   legend?: boolean;
-  /** Horizontal threshold on the left axis. */
   limit?: { value: number; label: string };
-  /** Vertical marker at a sample index. */
   mark?: { at: number; n: number; label: string };
 }) {
   const pad = { l: 52, r: right ? 56 : 16, t: 12, b: legend ? 52 : 28 };

@@ -6,7 +6,6 @@ import type { Dict } from "@/lib/i18n";
 
 const COLS = RECORD_FIELDS.filter((f) => f !== "date" && f !== "subject");
 
-/** Register rows as a table on wide screens and as cards on phones; only filled columns are shown. */
 export function EntryList({ entries, slug, t, locale, showSubject = true }: {
   entries: RecordEntry[]; slug: string; t: Dict; locale: Locale; showSubject?: boolean;
 }) {

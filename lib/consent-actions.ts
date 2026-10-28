@@ -8,13 +8,11 @@ import { record } from "@/lib/engine/audit";
 import { CONSENT_VERSION } from "@/lib/consent";
 import { safePath } from "@/lib/safe-path";
 
-/** First-access signature of the research consent document (the only way to create the row); back to the console it showed on. */
 export async function signConsent(formData: FormData) {
   const slug = String(formData.get("slug"));
   const back = safePath(formData.get("back"));
   const name = String(formData.get("name") ?? "").trim().replace(/\s+/g, " ");
   const { supabase, user, org } = await requireOrg(slug);
-  // the browser already requires both; if bypassed, the document simply shows again
   if (formData.get("accept") !== "on" || name.length < 2 || name.length > 200) redirect(back);
   const { error } = await supabase.from("research_consents").insert({
     user_id: user.id,
@@ -22,15 +20,12 @@ export async function signConsent(formData: FormData) {
     signed_name: name,
     user_agent: ((await headers()).get("user-agent") ?? "").slice(0, 300),
   });
-  // 23505: already signed (double submit, other tab): the document is done either way
   if (error && error.code !== "23505") throw new Error(error.message);
   if (!error) await record(tenantDb(org.id), user, "consent.sign", { subject: "research", data: { version: CONSENT_VERSION } });
-  // the gate shows on every console's layout
   revalidatePath("/", "layout");
   redirect(back);
 }
 
-/** Withdraws or gives back the consent from the settings page. */
 export async function setConsent(formData: FormData) {
   const slug = String(formData.get("slug"));
   const back = safePath(formData.get("back"));

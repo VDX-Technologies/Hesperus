@@ -1,5 +1,3 @@
-// Typed events and the manual connector: one schema checked the same way in the app and in
-// the database whatever the origin, corrections as new versions, and the generic reads.
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { Client } from "pg";
 import { freshDb } from "../db/setup";

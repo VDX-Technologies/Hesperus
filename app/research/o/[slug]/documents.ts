@@ -1,4 +1,3 @@
-// A document of the tenant, read for a result's attachments: its bytes and how to serve them.
 import "server-only";
 import { storeFromEnv } from "@/lib/engine/store";
 import type { TenantDb } from "@/lib/engine/db";

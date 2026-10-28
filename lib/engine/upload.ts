@@ -1,6 +1,3 @@
-// Upload ingestion: the file is stored once on object storage with a documents row, then its
-// rows go through the push path (raw archive, normalize, metrics, events, rules) in batches.
-// The same bytes uploaded twice to one source are refused, so a retry never doubles events.
 import { createHash } from "node:crypto";
 import { forTenant, inTransaction, lockTenant, type Db, type TenantDb } from "./db";
 import type { ModulePackage } from "./package";
@@ -23,13 +20,10 @@ export interface UploadFile {
 
 export interface UploadResult {
   documentId: string;
-  /** False when the file is only kept as a document, with no rows read. */
   table: boolean;
-  /** The register the rows went to when the file was recognised as agronomy work. */
   register: Register | null;
   rows: number;
   accepted: number;
-  /** Rejected rows by line number in the file (the header is line 1). */
   rejected: { line: number; error: string }[];
   metrics: number;
   events: number;
@@ -67,8 +61,6 @@ export async function ingestUpload(
   ]);
   if (dup.rowCount) throw new ConnectorError(409, "this file was already uploaded");
 
-  // Read before storing anything: a CSV or spreadsheet that cannot be read leaves no trace. Any
-  // other file is kept even with no table in it; a table found in it is loaded when mapped.
   let found: Awaited<ReturnType<typeof extract>>;
   try {
     found = await extract(file.name, file.type, file.bytes, { maxBytes, maxRows });
@@ -82,18 +74,14 @@ export async function ingestUpload(
   const table = !!found.table && (sheet || found.table.headers.some((h) => mapping[h]));
   const messages = table ? await uploadConnector.messages(source, { table: found.table, maxRows }) : [];
 
-  // Content-addressed key: putNew refuses an existing key, which also catches a concurrent retry.
   const key = `docs/${source.tenant_id}/${source.id}/${sha256}-${safeName(file.name)}`;
-  // stored under the type its bytes show, never the one the browser claims
   const contentType = sniffType(file.bytes, found.format === "csv" ? "text/csv" : file.type);
-  // the archive never overwrites: a file deleted and loaded again finds its bytes already there
   if (await store.putNew(key, file.bytes, contentType)) await db.query(`select engine_count('r2.writes', 1, $1)`, [now]);
   else if ((await tdb.query(
     `select 1 from documents where tenant_id = $1 and storage_key = $2 and ($3::uuid is null or id <> $3)`,
     [source.tenant_id, key, options.replaceDocumentId ?? null],
   )).rowCount) throw new ConnectorError(409, "this file was already uploaded");
 
-  // what the file is about decides the register: treatments go to the treatments register
   const { fixed } = uploadConfig(source);
   const register = table ? classify(messages, `${String(fixed?.kind ?? "")} ${file.name}`) : null;
   const objectIds = new Set<string>();
@@ -102,7 +90,6 @@ export async function ingestUpload(
   try {
     const committed = await inTransaction(db, async (connection) => {
       const txdb = forTenant(connection, source.tenant_id);
-      // counted again under the lock: concurrent uploads cannot both take the last slot
       await lockTenant(connection, source.tenant_id, `documents:${source.id}`);
       if (await overLimit(txdb)) throw new ConnectorError(429, `too many uploads (max ${perDay} per day)`);
       if (options.replaceDocumentId) {
@@ -174,7 +161,6 @@ export async function ingestUpload(
   }
 }
 
-/** Saves how a source reads its files; `fixed` is kept when not given. Only the source's tenant can change it. */
 export async function saveUploadConfig(db: TenantDb, sourceId: string, cfg: UploadConfig, actor: Actor): Promise<void> {
   const mapping = Object.fromEntries(Object.entries(cfg.mapping).filter(([h, f]) => h.trim() && f.trim()));
   const { rows } = await db.query<{ name: string }>(
@@ -186,7 +172,6 @@ export async function saveUploadConfig(db: TenantDb, sourceId: string, cfg: Uplo
   await record(db, actor, "upload.mapping", { subject: rows[0].name, data: { mapping } });
 }
 
-/** Names of the tenant's objects, lowercased, to recognise a column of subjects. */
 export async function knownSubjects(db: TenantDb, limit = 5000): Promise<Set<string>> {
   const { rows } = await db.query<{ n: string }>(
     `select distinct lower(name) n from objects where tenant_id = $1 and name is not null limit $2`,
@@ -195,7 +180,6 @@ export async function knownSubjects(db: TenantDb, limit = 5000): Promise<Set<str
   return new Set(rows.map((r) => r.n));
 }
 
-/** Upload sources of a tenant with their mapping. */
 export async function uploadSources(db: TenantDb): Promise<Source[]> {
   const { rows } = await db.query<Source>(
     `select id, tenant_id, name, connector, module, config, status from sources
@@ -220,7 +204,6 @@ export interface UploadedDocument {
   events: number;
 }
 
-/** Exact file and rejected-row totals for the dashboard, independent of its recent-file list. */
 export async function countUploads(db: TenantDb, from?: Date): Promise<{ files: number; rejected: number }> {
   const { rows } = await db.query<{ files: number; rejected: number }>(
     `select count(*)::int files,
@@ -233,7 +216,6 @@ export async function countUploads(db: TenantDb, from?: Date): Promise<{ files: 
   return rows[0];
 }
 
-/** Latest uploaded files, newest first. */
 export async function listUploads(db: TenantDb, limit = 20): Promise<UploadedDocument[]> {
   const { rows } = await db.query<{
     id: string; filename: string | null; size: string; source: string | null; created_at: Date; metadata: Record<string, unknown>; events: number;
@@ -261,7 +243,6 @@ export async function listUploads(db: TenantDb, limit = 20): Promise<UploadedDoc
   }));
 }
 
-/** Deletes an uploaded file and everything read from it (its events go by cascade). */
 export async function deleteUpload(db: TenantDb, documentId: string, actor: Actor): Promise<{ filename: string | null; events: number } | null> {
   const { rows } = await db.query<{ filename: string | null; events: number }>(
     `select filename, (select count(*)::int from events e where e.tenant_id = d.tenant_id and e.document_id = d.id) events
@@ -274,7 +255,6 @@ export async function deleteUpload(db: TenantDb, documentId: string, actor: Acto
   return rows[0];
 }
 
-/** Reprocesses an upload atomically: prior rows are removed only if the replacement commits. */
 export async function reprocessUpload(
   db: Db,
   store: ObjectStore,
@@ -308,7 +288,6 @@ export async function reprocessUpload(
 
 export { uploadConfig, decodeText };
 
-/** Documents a source stored in the day before now. */
 export async function documentsToday(db: TenantDb, source: Source, now: Date) {
   const { rows } = await db.query<{ n: number }>(
     `select count(*)::int n from documents where tenant_id = $1 and source_id = $2 and created_at > $3::timestamptz - interval '1 day'`,

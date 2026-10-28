@@ -1,7 +1,3 @@
-/**
- * Health and quota check; mails the admins about problems. Run hourly (GitHub Actions).
- *   npx tsx scripts/health.ts
- */
 import "./env";
 import { crossTenantAccess, crossTenantDb } from "../lib/engine/db";
 import { recordUsage, runHealth } from "../lib/engine/health";

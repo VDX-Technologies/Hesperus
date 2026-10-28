@@ -3,7 +3,6 @@ import { ObjectTypesView } from "@/components/registers/object-types-view";
 import { researchContext } from "../context";
 import { researchPaths } from "../paths";
 
-/** The organization's object types (projects, results and any other), with their schemas. */
 export default async function Types(props: PageProps<"/research/o/[slug]/types">) {
   const { slug } = await props.params;
   const { db, author } = await researchContext(slug);

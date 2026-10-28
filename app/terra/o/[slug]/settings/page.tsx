@@ -19,7 +19,6 @@ function groups(settings: SettingDef[]) {
   return [...out.values()].map((items) => [items[0].group, items] as const);
 }
 
-/** Every sensor's thresholds side by side, editable in place (one save per sensor). */
 export default async function Settings(props: PageProps<"/terra/o/[slug]/settings">) {
   const { slug } = await props.params;
   const { saved, error } = await props.searchParams;
@@ -49,7 +48,6 @@ export default async function Settings(props: PageProps<"/terra/o/[slug]/setting
             <SectionTitle>
               {mod.name} · {t.alarmSettings}
             </SectionTitle>
-            {/* phones: one card per sensor */}
             <div className="grid gap-3 md:hidden">
               {list.map((d) => {
                 const cfg = { ...base, ...d.config };
@@ -73,7 +71,6 @@ export default async function Settings(props: PageProps<"/terra/o/[slug]/setting
                 );
               })}
             </div>
-            {/* desktop: thresholds as rows (grouped), sensors as columns, edited in place */}
             {list.length > 0 && (
               <div className="card hidden overflow-x-auto md:block">
                 {list.map((d) => (

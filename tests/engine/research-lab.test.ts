@@ -1,6 +1,3 @@
-// What the Research console adds around results: a run and the results it produced, the runs
-// that used a dataset, lab notes and threaded comments, a result's outside links, two runs'
-// parameters side by side, and the preview of a CSV attachment.
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { Client } from "pg";
 vi.mock("server-only", () => ({}));
@@ -58,7 +55,6 @@ describe("research lab", () => {
     const used = await listEvents(A, { types: [RESEARCH.run], objectId: dataset, recursive: false });
     expect(used.map((x) => x.id)).toEqual([run]);
     expect(await getEvent(B, run)).toBeNull();
-    // a run is about a project; another object type is refused
     await expect(record(A, RESEARCH.run, [dataset], { commit: "x", outcome: "ok" })).rejects.toMatchObject({ status: 400 });
   });
 

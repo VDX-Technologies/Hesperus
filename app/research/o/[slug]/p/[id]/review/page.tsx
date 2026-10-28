@@ -10,10 +10,6 @@ import { quickReview } from "../../../actions";
 import { researchContext } from "../../../context";
 import { Attachments, OutsideLinks } from "../../../attachments";
 
-/**
- * The review queue: the project's results still to review, one at a time, highest score first
- * (or in the order and with the filters of the results table), reviewed from the keyboard.
- */
 export default async function ReviewQueue(props: PageProps<"/research/o/[slug]/p/[id]/review">) {
   const { slug, id } = await props.params;
   const sp = await props.searchParams;

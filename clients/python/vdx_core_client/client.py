@@ -76,7 +76,7 @@ class Client:
                     time.sleep(float(e.headers.get("Retry-After") or 2 ** attempt))
                     continue
                 if e.code == 422 and isinstance(body, dict) and "rejected" in body:
-                    return body  # every message refused: the reasons are in the body
+                    return body
                 message = body.get("error", str(body)) if isinstance(body, dict) else str(body)
                 raise CoreError(e.code, message, body) from None
         raise CoreError(429, "rate limited")

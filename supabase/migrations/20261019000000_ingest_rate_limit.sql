@@ -1,5 +1,3 @@
--- Per-source rate limit on push: a token bucket per source, refilled at ingest.rate_per_min
--- requests per minute up to ingest.burst. One atomic statement per request, no external service.
 insert into public.engine_settings (key, value, description) values
   ('ingest.rate_per_min',     '120', 'Push requests per minute allowed per source (sustained)'),
   ('ingest.burst',            '60',  'Push requests a source may send at once before being limited'),
@@ -11,13 +9,11 @@ create table public.source_rate (
   tenant_id uuid not null references public.organizations (id) on delete cascade,
   tokens double precision not null,
   updated_at timestamptz not null default now(),
-  limited_hour timestamptz,          -- start of the hour limited_count refers to
+  limited_hour timestamptz,
   limited_count integer not null default 0
 );
-alter table public.source_rate enable row level security;   -- engine only
+alter table public.source_rate enable row level security;
 
--- Takes one token. Returns 0 when the request may go on, else the seconds until one is free.
--- The row lock serialises concurrent pushes of the same source.
 create or replace function public.ingest_take(p_source uuid, p_now timestamptz default now())
 returns double precision language plpgsql as $$
 declare
@@ -38,7 +34,6 @@ begin
     return 0;
   end if;
 
-  -- denied: count it per hour and tell the source why
   update public.source_rate set
     tokens = avail, updated_at = p_now,
     limited_count = case when limited_hour = date_trunc('hour', p_now) then limited_count + 1 else 1 end,

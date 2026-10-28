@@ -1,5 +1,4 @@
 "use client";
-// A checkbox that selects or clears every checkbox named `name` in its form.
 
 export function CheckAll({ name, label }: { name: string; label: string }) {
   return (

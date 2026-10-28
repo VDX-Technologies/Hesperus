@@ -1,8 +1,4 @@
 "use client";
-// The schema editor for a custom type, of events (a register) or of objects (a project, a
-// dataset, a result). Name and fields for both; an event type adds what it is recorded on, an
-// object type its links to other types. Builds the definition the server validates
-// (checkEventType, checkObjectType) and saves; the type is usable at once.
 import { useActionState, useState } from "react";
 import type { EventFormState } from "@/components/event-form";
 import type { EventTypeInput } from "@/lib/engine/registers";
@@ -11,9 +7,7 @@ import type { Schema } from "@/lib/engine/schema";
 
 export interface FieldDraft {
   key: string; label: string; type: string; required: boolean; units: string; options: string; fromSubject: string;
-  /** Object types only: the property holds a field schema, or follows one read through a link. */
   holdsSchema?: boolean; schemaFrom?: string;
-  /** A string field written on several lines. */
   multiline?: boolean;
 }
 export interface LinkDraft { key: string; type: string; required: boolean }
@@ -64,12 +58,10 @@ type Text = Record<
 
 export function TypeEditor({ slug, action: save, locale, kind = "event", initial, subjects, fieldTypes, text }: {
   slug: string;
-  /** The console's server action that saves the definition and opens the type. */
   action: (prev: EventFormState, form: FormData) => Promise<EventFormState>;
   locale: string;
   kind?: "event" | "object";
   initial?: TypeDraft;
-  /** Object types an event can be recorded on, or an object type can link to. */
   subjects: { value: string; label: string }[];
   fieldTypes: string[];
   text: Text;

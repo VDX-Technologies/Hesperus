@@ -1,4 +1,3 @@
-// VDX Core service worker: shows alarm push notifications and opens the page they point to.
 self.addEventListener("push", (event) => {
   const d = event.data ? event.data.json() : {};
   event.waitUntil(

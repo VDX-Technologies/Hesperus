@@ -2,10 +2,6 @@ import type { Locale, PackageDef } from "@/lib/packages/types";
 import type { Dict } from "@/lib/i18n";
 import { PresetPicker } from "@/components/preset-picker";
 
-/**
- * Generic settings form for any package: one card per group, as the package defines them.
- * values = this level's own values; inherited = what applies when a field is left empty.
- */
 export function SettingsForm({
   mod,
   action,

@@ -3,7 +3,6 @@ import { requireUser } from "@/lib/auth";
 import { getT } from "@/lib/i18n";
 import { consoleHome } from "@/lib/consoles";
 
-/** Entry point: VDX staff go to the console, customers to their organization. */
 export default async function Home() {
   const { supabase, user, isAdmin } = await requireUser();
   if (isAdmin) redirect("/admin");

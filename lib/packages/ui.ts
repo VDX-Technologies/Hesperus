@@ -1,4 +1,3 @@
-// Console side of the installed packages, and products on the roadmap.
 import { lora } from "./lora/model";
 import { records } from "./records/model";
 import { agronomy } from "./agronomy/model";
@@ -7,7 +6,6 @@ import type { PackageDef } from "./types";
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export const PACKAGES: Record<string, PackageDef<any>> = { [lora.id]: lora, [records.id]: records, [agronomy.id]: agronomy };
 
-/** Shown in the vendor console, not yet installable. */
 export const UPCOMING = [
   { id: "tag", name: "Tag", tagline: { en: "Windows, irrigation and pumps, verified", it: "Finestre, irrigazione e pompe, verificate" } },
   { id: "kestrel", name: "Kestrel", tagline: { en: "Aerial survey drone", it: "Drone per rilievi aerei" } },

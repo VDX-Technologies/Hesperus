@@ -14,11 +14,6 @@ export interface Bin {
 
 const fmt = (v: number, locale: string) => v.toLocaleString(locale, { maximumSignificantDigits: 4 });
 
-/**
- * How a numeric property spreads over the results the table shows. Dragging across bins (or
- * clicking one) narrows the table to that range: `query` is the page's query string without the
- * two bounds, which go in `minKey` / `maxKey`.
- */
 export function Histogram({
   bins, path, query, minKey, maxKey, locale, labels, height = 180,
 }: {
@@ -85,7 +80,6 @@ export interface Point {
   y: number;
 }
 
-/** Two numeric properties of the results against each other; a point opens its result. */
 export function ResultScatter({
   points, href, xLabel, yLabel, locale, height = 260,
 }: { points: Point[]; href: string; xLabel: string; yLabel: string; locale: string; height?: number }) {

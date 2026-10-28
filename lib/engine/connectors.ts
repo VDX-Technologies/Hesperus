@@ -1,8 +1,3 @@
-// Connectors bring data in. Three shapes share one contract: they yield raw messages for a
-// source, and the engine archives and normalizes them the same way whatever their origin.
-//   push   -> the device/gateway calls us (implemented: lib/engine/ingest.ts + /api/push)
-//   pull   -> we poll a remote API on a schedule (not implemented yet)
-//   upload -> a user uploads a CSV whose rows become messages (lib/engine/upload.ts)
 import { parseCsv } from "./csv";
 import type { Source } from "./sources";
 
@@ -12,7 +7,6 @@ export type RawMessage = Record<string, unknown>;
 
 export interface Connector {
   kind: ConnectorKind;
-  /** Turns whatever the connector received into raw messages. */
   messages(source: Source, input: unknown): Promise<RawMessage[]> | RawMessage[];
 }
 
@@ -25,7 +19,6 @@ export class ConnectorError extends Error {
   }
 }
 
-/** Push: the request body is one message or an array of messages. */
 export const pushConnector: Connector = {
   kind: "push",
   messages(_source, body) {
@@ -37,11 +30,6 @@ export const pushConnector: Connector = {
   },
 };
 
-/**
- * How an upload source reads its files, kept in sources.config: `mapping` names the message
- * field of each CSV column (unmapped columns are dropped) and `fixed` adds the same fields to
- * every row (e.g. which register the file belongs to).
- */
 export interface UploadConfig {
   mapping: Record<string, string>;
   fixed?: Record<string, unknown>;
@@ -52,10 +40,6 @@ export const uploadConfig = (source: Source): UploadConfig => {
   return { mapping: c.mapping && typeof c.mapping === "object" ? c.mapping : {}, fixed: c.fixed ?? {} };
 };
 
-/**
- * Upload: the input is CSV text, or a table already read from a file (see extract.ts); one message
- * per data row, through the source's mapping.
- */
 export const uploadConnector: Connector = {
   kind: "upload",
   messages(source, input) {

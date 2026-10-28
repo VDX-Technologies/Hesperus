@@ -10,7 +10,6 @@ import { Outcome } from "../../runs";
 
 const web = (v: unknown) => typeof v === "string" && /^https?:\/\//i.test(v);
 
-/** A dataset: its properties and the runs that read it, each under its project. */
 export default async function Dataset(props: PageProps<"/research/o/[slug]/d/[id]">) {
   const { slug, id } = await props.params;
   const { db } = await researchContext(slug);

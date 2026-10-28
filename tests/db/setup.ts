@@ -1,6 +1,3 @@
-// Shared DB harness: a throwaway database built from supabase/migrations-pushed + supabase/migrations.
-// TEST_DATABASE_URL points at a server we may create databases on
-// (default: local Supabase). Each test file gets its own fresh database.
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { Client } from "pg";
@@ -23,7 +20,6 @@ export async function freshDb(): Promise<{ db: Client; url: string; drop: () => 
 
   const { rows } = await db.query("select to_regnamespace('auth') is not null as has_auth");
   if (!rows[0].has_auth) await db.query(readFileSync(join(ROOT, "tests/db/supabase-stub.sql"), "utf8"));
-  // applied migrations move to migrations-pushed; both folders together are the schema, in filename order
   const files = ["supabase/migrations-pushed", "supabase/migrations"]
     .map((d) => join(ROOT, d))
     .filter((d) => existsSync(d))
@@ -42,7 +38,6 @@ export async function freshDb(): Promise<{ db: Client; url: string; drop: () => 
   };
 }
 
-// Runs fn as an authenticated user under RLS, inside a rolled-back transaction.
 export async function asUser<T>(db: Client, userId: string, fn: () => Promise<T>): Promise<T> {
   await db.query("begin");
   try {

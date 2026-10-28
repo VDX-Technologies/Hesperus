@@ -9,11 +9,6 @@ import { VisitMarker } from "@/components/research/visit";
 import { researchContext } from "./context";
 import { Outcome } from "./runs";
 
-/**
- * The research home: what waits for a review, what arrived since the last visit and which runs
- * failed in the last day; then the projects, each with how its scores spread, how far its review
- * got and its last run; then the latest runs, lab notes and comments.
- */
 export default async function Projects(props: PageProps<"/research/o/[slug]">) {
   const { slug } = await props.params;
   const { db } = await researchContext(slug);
@@ -28,7 +23,6 @@ export default async function Projects(props: PageProps<"/research/o/[slug]">) {
       </div>
     );
   }
-  // the visit cookie is moved on by <VisitMarker>: a page can't set cookies while it renders
   const now = new Date();
   const visit = lastVisit((await cookies()).get(VISIT_COOKIE)?.value, now.getTime());
   const scored = resultType?.properties[RESEARCH.score];
@@ -57,7 +51,6 @@ export default async function Projects(props: PageProps<"/research/o/[slug]">) {
     { label: t.newSinceVisit, value: visit.since ? sum(fresh) : null, tone: "text-frost", hint: visit.since?.toLocaleString(locale) },
     { label: t.failedRuns24h, value: runType ? failed.length : null, tone: failed.length ? "text-alarm" : "text-frost" },
   ];
-  // where a feed entry leads: a run to its page, a lab note to the notebook, a comment to its result
   const target = (e: (typeof feed)[number]) => {
     const project = e.objectIds.find((id) => ids.has(id));
     if (e.type === RESEARCH.run) return project ? `${base}/p/${project}/run/${e.id}` : null;

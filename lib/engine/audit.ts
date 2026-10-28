@@ -1,5 +1,3 @@
-// Append-only activity history. The engine writes one row per change made through the app;
-// the table refuses updates and deletes (only the retention purge removes old rows).
 import type { Db, TenantDb } from "./db";
 
 export type Actor = { id: string | null; email?: string | null } | null;
@@ -15,7 +13,6 @@ export type AuditEntry = {
   data: Record<string, unknown>;
 };
 
-/** Records one change of a tenant. Never throws: a lost history row must not undo the change. */
 export async function record(
   db: TenantDb,
   actor: Actor,
@@ -33,7 +30,6 @@ export async function record(
   }
 }
 
-/** Records a platform change that belongs to no tenant (engine settings). */
 export async function recordPlatform(db: Db, actor: Actor, action: string, data: Record<string, unknown> = {}): Promise<void> {
   try {
     await db.query(`insert into audit_log (tenant_id, actor, actor_label, action, data) values (null, $1, $2, $3, $4)`, [
@@ -47,7 +43,6 @@ export async function recordPlatform(db: Db, actor: Actor, action: string, data:
   }
 }
 
-/** Newest first; objectId narrows to one object's history, before pages back. */
 export async function listAudit(db: TenantDb, opts: { objectId?: string; limit?: number; before?: number } = {}): Promise<AuditEntry[]> {
   const { rows } = await db.query(
     `select id, at, actor, actor_label, action, object_id, subject, data from audit_log

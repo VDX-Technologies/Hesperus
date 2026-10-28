@@ -1,7 +1,6 @@
 "use client";
 import { useFormStatus } from "react-dom";
 
-/** Submit button that shows a spinner while the server action runs. */
 export function SubmitButton({ children, pending: pendingLabel, className = "" }: { children: React.ReactNode; pending: string; className?: string }) {
   const { pending } = useFormStatus();
   return (

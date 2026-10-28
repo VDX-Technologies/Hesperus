@@ -1,7 +1,3 @@
-/**
- * Replays a source's raw archive from R2 through its module package.
- *   npx tsx scripts/replay.ts <source-id> [--from 2026/10/17] [--events] [--dry-run]
- */
 import "./env";
 import { crossTenantAccess, crossTenantDb } from "../lib/engine/db";
 import { replaySource } from "../lib/engine/replay";

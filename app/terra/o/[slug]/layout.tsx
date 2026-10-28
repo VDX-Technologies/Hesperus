@@ -17,7 +17,6 @@ export const metadata: Metadata = {
 
 export default async function OrgLayout(props: LayoutProps<"/terra/o/[slug]">) {
   const { slug } = await props.params;
-  // VDX turns the console on per organization, from the vendor console
   const { supabase, user, org, isAdmin, modules } = await requireConsole(slug, "terra");
   const { t, locale } = await getT();
   const db = tenantDb(org.id);
@@ -27,7 +26,6 @@ export default async function OrgLayout(props: LayoutProps<"/terra/o/[slug]">) {
     isAdmin ? null : getConsent(supabase, user.id),
   ]);
   const hasUpload = uploads.rowCount! > 0;
-  // VDX staff are not data subjects here; customers sign once, then only Settings changes it
   const mustSign = !isAdmin && !consent;
   return (
     <>

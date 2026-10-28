@@ -49,7 +49,7 @@ describe("ingestPush", () => {
     ], testPkg, NOW);
     expect(r.accepted).toBe(2);
     expect(r.rejected).toEqual([{ index: 1, error: "sensor is required" }]);
-    expect(r.metrics).toBe(3); // NaN and undeclared "other" skipped
+    expect(r.metrics).toBe(3);
     expect(r.events).toBe(1);
     expect(await count(`select count(*)::int n from raw_inbox`)).toBe(3);
 
@@ -69,7 +69,7 @@ describe("ingestPush", () => {
   it("is idempotent on metrics and uses the receive time when ts is missing", async () => {
     const msg = { sensor: "s1", t: "2026-10-17T10:29:00Z", temp: 99 };
     const r = await ingestPush(db, source, [msg, { sensor: "s2", temp: 5 }], testPkg, NOW);
-    expect(r.metrics).toBe(1); // s1 duplicate ignored
+    expect(r.metrics).toBe(1);
     const { rows } = await db.query(
       `select m.ts from metrics m join objects o on o.id = m.object_id where o.external_id = 's2'`,
     );
@@ -98,7 +98,6 @@ describe("ingest ordering and limits on what a message writes", () => {
       { sensor: "o1", model: "old", t: "2026-10-17T10:20:00Z" },
     ], testPkg, NOW);
     expect(await props("o1")).toEqual({ properties: { model: "new" }, last_seen: new Date("2026-10-17T10:29:00Z") });
-    // a late batch with older data does not overwrite newer values or move last_seen back
     await ingestPush(db, source, [{ sensor: "o1", model: "older", t: "2026-10-17T10:10:00Z" }], testPkg, NOW);
     expect(await props("o1")).toEqual({ properties: { model: "new" }, last_seen: new Date("2026-10-17T10:29:00Z") });
   });

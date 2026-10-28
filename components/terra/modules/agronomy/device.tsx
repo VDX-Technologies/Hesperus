@@ -10,7 +10,6 @@ import { fmt, SectionTitle } from "@/components/ui";
 import { TimeChart } from "@/components/terra/chart";
 import { TreatmentRows } from "./rows";
 
-/** Crop page: its details, the treatments on it, and the climate of the area when a LoRa sensor is there. */
 export async function AgronomyDevice({ orgId, device, baseHref, t, locale }: {
   orgId: string; device: ConsoleObject; range: "24h" | "7d"; baseHref: string; t: Dict; locale: Locale;
 }) {
